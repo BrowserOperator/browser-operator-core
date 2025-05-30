@@ -204,6 +204,19 @@
   transform: translateY(-1px);
 }
 
+.prompt-button.customized {
+  position: relative;
+}
+
+.prompt-custom-indicator {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 8px;
+  color: var(--color-accent-blue);
+  font-weight: bold;
+}
+
 
 
 .prompt-buttons-row {
@@ -1454,4 +1467,56 @@ details[open] .tool-details-content {
   height: 100% !important;
   max-width: none !important;
   max-height: none !important;
+}
+
+/* Deep research actions styling */
+.deep-research-actions {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--sys-color-divider);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.view-document-btn {
+  background: var(--gradient-primary);
+  color: var(--text-on-primary);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 8px var(--color-primary-shadow);
+}
+
+.view-document-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--color-primary-shadow);
+  background: var(--gradient-accent);
+}
+
+.view-document-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px var(--color-primary-shadow);
+}
+
+.test-button {
+  background: var(--sys-color-accent-green);
+  color: var(--text-on-primary);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }

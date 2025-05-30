@@ -7,6 +7,9 @@ import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as MarkdownView from '../../../ui/components/markdown_view/markdown_view.js';
 import * as Lit from '../../../ui/lit/lit.js';
 import * as BaseOrchestratorAgent from '../core/BaseOrchestratorAgent.js';
+import * as SDK from '../../../core/sdk/sdk.js';
+import * as Host from '../../../core/host/host.js';
+import * as Platform from '../../../core/platform/platform.js';
 
 import chatViewStyles from './chatView.css.js';
 
@@ -26,6 +29,87 @@ class MarkdownRenderer extends MarkdownView.MarkdownView.MarkdownInsightRenderer
 
     return super.templateForToken(token);
   }
+}
+
+// Enhanced MarkdownRenderer for deep-research responses with table of contents
+class DeepResearchMarkdownRenderer extends MarkdownView.MarkdownView.MarkdownInsightRenderer {
+  private tocItems: Array<{level: number, text: string, id: string}> = [];
+  
+  override templateForToken(token: Marked.Marked.MarkedToken): Lit.TemplateResult|null {
+    if (token.type === 'heading') {
+      // Generate ID for heading
+      const headingText = this.extractTextFromTokens(token.tokens || []);
+      const id = this.generateHeadingId(headingText);
+      
+      // Add to TOC
+      this.tocItems.push({
+        level: (token as any).depth,
+        text: headingText,
+        id: id
+      });
+      
+      // Create heading with ID
+      const headingTag = `h${(token as any).depth}`;
+      return html`<${headingTag} id="${id}" class="deep-research-heading">${this.renderTokens(token.tokens || [])}</${headingTag}>`;
+    }
+
+    if (token.type === 'code') {
+      const lines = (token.text).split('\n');
+      if (lines[0]?.trim() === 'css') {
+        token.lang = 'css';
+        token.text = lines.slice(1).join('\n');
+      }
+    }
+
+    return super.templateForToken(token);
+  }
+  
+  private extractTextFromTokens(tokens: Marked.Marked.MarkedToken[]): string {
+    return tokens.map(token => {
+      if (token.type === 'text') {
+        return token.text;
+      }
+      return token.raw || '';
+    }).join('');
+  }
+  
+  private generateHeadingId(text: string): string {
+    return text.toLowerCase()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .trim();
+  }
+  
+  getTocItems(): Array<{level: number, text: string, id: string}> {
+    return this.tocItems;
+  }
+  
+  clearToc(): void {
+    this.tocItems = [];
+  }
+}
+
+// Function to detect if content should use deep-research rendering
+function isDeepResearchContent(text: string): boolean {
+  // Require minimum content length (at least 500 characters)
+  if (text.length < 500) {
+    return false;
+  }
+  
+  // Check if content contains multiple headings (indicating structured document)
+  // More robust regex that handles various line endings and formatting
+  const headingMatches = text.match(/^#{1,6}\s+.+/gm);
+  const hasMultipleHeadings = headingMatches ? headingMatches.length >= 4 : false;
+  
+  // Debug logging to verify the regex is working
+  console.log('Checking for headings in content:', JSON.stringify({
+    contentLength: text.length,
+    headingMatches: headingMatches,
+    headingCount: headingMatches ? headingMatches.length : 0,
+    hasMultipleHeadings
+  }));
+  
+  return hasMultipleHeadings;
 }
 
 // Function to render text as markdown
@@ -268,8 +352,45 @@ export class ChatView extends HTMLElement {
         this.#selectedPromptType = type;
         void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
       },
-      () => this.#selectedPromptType || null
+      () => this.#selectedPromptType || null,
+      (agentType: string) => this.#handlePromptEdit(agentType)
     );
+  }
+
+  // Handle prompt editing for agent types
+  #handlePromptEdit(agentType: string): void {
+    console.log('Opening prompt editor for agent type:', agentType);
+    this.#showPromptEditDialog(agentType);
+  }
+
+  // Show prompt edit dialog
+  #showPromptEditDialog(agentType: string): void {
+    // Import the dialog dynamically to avoid circular dependencies
+    import('./PromptEditDialog.js').then(({ PromptEditDialog }) => {
+      const agentConfig = BaseOrchestratorAgent.AGENT_CONFIGS[agentType];
+      if (!agentConfig) {
+        console.error('Agent config not found for type:', agentType);
+        return;
+      }
+
+      PromptEditDialog.show({
+        agentType,
+        agentLabel: agentConfig.label,
+        currentPrompt: BaseOrchestratorAgent.getAgentPrompt(agentType),
+        defaultPrompt: BaseOrchestratorAgent.getDefaultPrompt(agentType),
+        hasCustomPrompt: BaseOrchestratorAgent.hasCustomPrompt(agentType),
+        onSave: (prompt: string) => {
+          BaseOrchestratorAgent.setCustomPrompt(agentType, prompt);
+          console.log(`Custom prompt saved for ${agentType}`);
+        },
+        onRestore: () => {
+          BaseOrchestratorAgent.removeCustomPrompt(agentType);
+          console.log(`Custom prompt removed for ${agentType}, restored to default`);
+        }
+      });
+    }).catch(error => {
+      console.error('Failed to load PromptEditDialog:', error);
+    });
   }
 
   // Public getter to expose the centered view state
@@ -394,7 +515,29 @@ export class ChatView extends HTMLElement {
               </div>
             </div>
           `;
-
+        case ChatMessageEntity.TOOL_RESULT:
+          // Should only render if orphaned
+          {
+             const toolResultMessage = message as (ToolResultMessage & { orphaned?: boolean });
+             if (toolResultMessage.orphaned) {
+                 console.warn('Rendering orphaned ToolResultMessage:', toolResultMessage);
+                 return html`
+                   <div class="message tool-result-message orphaned ${toolResultMessage.isError ? 'error' : ''}" >
+                     <div class="message-content">
+                       <div class="tool-status completed">
+                           <div class="tool-name-display">
+                             Orphaned Result from: ${toolResultMessage.toolName} ${toolResultMessage.isError ? '(Error)' : ''}
+                           </div>
+                           <pre class="tool-result-raw">${toolResultMessage.resultText}</pre>
+                           ${toolResultMessage.error ? html`<div class="message-error">${toolResultMessage.error}</div>` : Lit.nothing}
+                       </div>
+                     </div>
+                   </div>
+                 `;
+             }
+             // If not orphaned, it should have been combined, so render nothing.
+             return html``;
+          }
         case ChatMessageEntity.MODEL:
           {
             // Cast to the potentially combined type
@@ -407,15 +550,51 @@ export class ChatView extends HTMLElement {
 
             // --- Render Final Answer ---
             if (isFinal) {
-              return html`
-                <div class="message model-message final">
-                  <div class="message-content">
-                    ${modelMessage.answer ?
-                      html`
-                        <div class="message-text">${renderMarkdown(modelMessage.answer, this.#markdownRenderer)}</div>
-                      ` :
-                      Lit.nothing
-                    }
+              // Check if this is a structured response with REASONING and MARKDOWN_REPORT sections
+              const structuredResponse = this.#parseStructuredResponse(modelMessage.answer || '');
+              
+              if (structuredResponse) {
+                // Structured response - show only reasoning in chat, with button for full report
+                // Automatically navigate to the document viewer
+                this.#openInAIAssistantB(structuredResponse.markdownReport);               
+                return html`
+                  <div class="message model-message final">
+                    <div class="message-content">
+                      <div class="message-text">${renderMarkdown(structuredResponse.reasoning, this.#markdownRenderer)}</div>
+                      <div class="deep-research-actions">
+                        <button 
+                          class="view-document-btn"
+                          @click=${() => this.#openInAIAssistantB(structuredResponse.markdownReport)}
+                          title="Open full report in document viewer">
+                          📄 View Full Report
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              } else {
+                // Regular response - use the old logic
+                const isDeepResearch = isDeepResearchContent(modelMessage.answer || '');
+                
+                return html`
+                  <div class="message model-message final">
+                    <div class="message-content">
+                      ${modelMessage.answer ?
+                        html`
+                          <div class="message-text">${renderMarkdown(modelMessage.answer, this.#markdownRenderer)}</div>
+                          ${isDeepResearch ? html`
+                            <div class="deep-research-actions">
+                              <button 
+                                class="view-document-btn"
+                                @click=${() => this.#openInAIAssistantB(modelMessage.answer || '')}
+                                title="Open in full document viewer with table of contents">
+                                📄 View as Document
+                              </button>
+                            </div>
+                          ` : Lit.nothing}
+                        ` :
+                        Lit.nothing
+                      }
                     ${modelMessage.reasoning?.length ? html`
                       <div class="reasoning-block">
                         <details class="reasoning-details">
@@ -435,6 +614,7 @@ export class ChatView extends HTMLElement {
                   </div>
                 </div>
               `;
+              }
             }
 
             // --- Render Combined Tool Call + Result OR Running Tool Call (with new styling) ---
@@ -548,30 +728,6 @@ export class ChatView extends HTMLElement {
                 </div>
               </details>
             `;
-          }
-
-        case ChatMessageEntity.TOOL_RESULT:
-          // Should only render if orphaned
-          {
-             const toolResultMessage = message as (ToolResultMessage & { orphaned?: boolean });
-             if (toolResultMessage.orphaned) {
-                 console.warn('Rendering orphaned ToolResultMessage:', toolResultMessage);
-                 return html`
-                   <div class="message tool-result-message orphaned ${toolResultMessage.isError ? 'error' : ''}" >
-                     <div class="message-content">
-                       <div class="tool-status completed">
-                           <div class="tool-name-display">
-                             Orphaned Result from: ${toolResultMessage.toolName} ${toolResultMessage.isError ? '(Error)' : ''}
-                           </div>
-                           <pre class="tool-result-raw">${toolResultMessage.resultText}</pre>
-                           ${toolResultMessage.error ? html`<div class="message-error">${toolResultMessage.error}</div>` : Lit.nothing}
-                       </div>
-                     </div>
-                   </div>
-                 `;
-             }
-             // If not orphaned, it should have been combined, so render nothing.
-             return html``;
           }
         default:
           // Should not happen, but render a fallback
@@ -952,6 +1108,147 @@ export class ChatView extends HTMLElement {
         console.error('Failed to copy text: ', err);
       });
   }
+
+  // Method to parse structured response with reasoning and markdown_report XML tags
+  #parseStructuredResponse(text: string): {reasoning: string, markdownReport: string} | null {
+    // Look for the XML format with <reasoning> and <markdown_report> tags
+    const reasoningMatch = text.match(/<reasoning>\s*([\s\S]*?)\s*<\/reasoning>/);
+    const reportMatch = text.match(/<markdown_report>\s*([\s\S]*?)\s*<\/markdown_report>/);
+    
+    if (reasoningMatch && reportMatch) {
+      return {
+        reasoning: reasoningMatch[1].trim(),
+        markdownReport: reportMatch[1].trim()
+      };
+    }
+    
+    return null;
+  }
+
+  // Method to open markdown content in AI Assistant viewer in the same tab
+  async #openInAIAssistantB(markdownContent: string): Promise<void> {
+    // Get the primary page target to navigate the inspected page
+    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
+    if (!target) {
+      console.error('No primary page target found');
+      return;
+    }
+
+    // Get the ResourceTreeModel to navigate the page
+    const resourceTreeModel = target.model(SDK.ResourceTreeModel.ResourceTreeModel);
+    if (!resourceTreeModel) {
+      console.error('No ResourceTreeModel found');
+      return;
+    }
+
+    try {
+      // Navigate to ai-app://assistant
+      const url = 'ai-app://assistant' as Platform.DevToolsPath.UrlString;
+      const navigationResult = await resourceTreeModel.navigate(url);
+      
+      if (navigationResult.errorText) {
+        console.error('Navigation failed:', navigationResult.errorText);
+        return;
+      }
+
+      console.log('Successfully navigated to ai-app://assistant');
+
+      // Wait for the page to load, then inject the markdown content
+      // Use a timeout to give the AI Assistant app time to initialize
+      setTimeout(async () => {
+        const runtimeModel = target.model(SDK.RuntimeModel.RuntimeModel);
+        if (!runtimeModel) {
+          console.error('No RuntimeModel found');
+          return;
+        }
+
+        // Escape the markdown content for JavaScript injection
+        const escapedContent = JSON.stringify(markdownContent);
+        
+        // JavaScript to inject - calls the global function we added to AI Assistant
+        const injectionScript = `
+          (function() {
+            console.log('DevTools injecting markdown content...', 'Content length:', ${JSON.stringify(markdownContent.length)});
+            console.log('Available global functions:', Object.keys(window).filter(k => k.includes('setDevTools') || k.includes('aiAssistant')));
+            
+            if (typeof window.setDevToolsMarkdown === 'function') {
+              try {
+                window.setDevToolsMarkdown(${escapedContent});
+                console.log('Successfully called setDevToolsMarkdown function');
+                return 'SUCCESS: Content injected via setDevToolsMarkdown function';
+              } catch (error) {
+                console.error('Error calling setDevToolsMarkdown:', error);
+                return 'ERROR: Failed to call setDevToolsMarkdown: ' + error.message;
+              }
+            } else {
+              console.warn('setDevToolsMarkdown function not found, using fallback methods');
+              console.log('Available window properties:', Object.keys(window).filter(k => k.includes('DevTools') || k.includes('assistant') || k.includes('ai')));
+              
+              // Store in sessionStorage
+              sessionStorage.setItem('devtools-markdown-content', ${escapedContent});
+              console.log('Stored content in sessionStorage');
+              
+              // Try to trigger app reload
+              if (window.aiAssistantApp && typeof window.aiAssistantApp.loadFromSessionStorage === 'function') {
+                try {
+                  window.aiAssistantApp.loadFromSessionStorage();
+                  console.log('Successfully called aiAssistantApp.loadFromSessionStorage');
+                  return 'SUCCESS: Content stored and app reloaded';
+                } catch (error) {
+                  console.error('Error calling loadFromSessionStorage:', error);
+                  return 'ERROR: Content stored but failed to reload app: ' + error.message;
+                }
+              } else {
+                console.log('aiAssistantApp not available or loadFromSessionStorage not a function');
+                console.log('aiAssistantApp type:', typeof window.aiAssistantApp);
+                if (window.aiAssistantApp) {
+                  console.log('aiAssistantApp methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(window.aiAssistantApp)));
+                }
+                
+                // Try to force a page reload as last resort
+                try {
+                  location.reload();
+                  return 'SUCCESS: Content stored, forcing page reload';
+                } catch (error) {
+                  return 'SUCCESS: Content stored in sessionStorage, but manual refresh may be needed';
+                }
+              }
+            }
+          })();
+        `;
+
+        try {
+          // Get the default execution context and evaluate the script
+          const executionContext = runtimeModel.defaultExecutionContext();
+          if (!executionContext) {
+            console.error('No execution context available');
+            return;
+          }
+
+          const result = await executionContext.evaluate({
+            expression: injectionScript,
+            objectGroup: 'console',
+            includeCommandLineAPI: false,
+            silent: false,
+            returnByValue: true,
+            generatePreview: false
+          }, false, false);
+
+          if (result.object?.value) {
+            console.log('Content injection result:', result.object.value);
+          } else if (result.exceptionDetails) {
+            console.error('Content injection failed:', result.exceptionDetails.text);
+          }
+        } catch (error) {
+          console.error('Failed to inject content:', error);
+        }
+      }, 3000); // Wait 3 seconds for the AI Assistant to fully load
+
+    } catch (error) {
+      console.error('Navigation error:', error);
+    }
+  }
+
 }
 
 declare global {
