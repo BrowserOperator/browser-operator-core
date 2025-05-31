@@ -3,6 +3,13 @@
 // found in the LICENSE file.
 
 import * as Lit from '../../../ui/lit/lit.js';
+const {html} = Lit;
+
+// Constants
+const PROMPT_CONSTANTS = {
+  DOUBLE_CLICK_DELAY: 300,
+  CUSTOM_PROMPTS_STORAGE_KEY: 'ai_chat_custom_prompts',
+} as const;
 
 // Direct imports from Tools.ts
 import { ToolRegistry } from '../agent_framework/ConfigurableAgentTool.js';
@@ -22,8 +29,6 @@ import {
 
 // Initialize configured agents
 initializeConfiguredAgents();
-
-const {html} = Lit;
 
 // Define available agent types
 export enum BaseOrchestratorAgentType {
@@ -399,13 +404,12 @@ export function createAgentTypeSelectionHandler(
         
         clickCount = 0;
         clickTimeout = null;
-      }, 300); // 300ms delay to detect double click
+      }, PROMPT_CONSTANTS.DOUBLE_CLICK_DELAY);
     }
   };
 }
 
 // Prompt management functions
-const CUSTOM_PROMPTS_STORAGE_KEY = 'ai_chat_custom_prompts';
 
 /**
  * Get the current prompt for an agent type (custom or default)
@@ -419,18 +423,28 @@ export function getAgentPrompt(agentType: string): string {
  * Set a custom prompt for an agent type
  */
 export function setCustomPrompt(agentType: string, prompt: string): void {
-  const customPrompts = getCustomPrompts();
-  customPrompts[agentType] = prompt;
-  localStorage.setItem(CUSTOM_PROMPTS_STORAGE_KEY, JSON.stringify(customPrompts));
+  try {
+    const customPrompts = getCustomPrompts();
+    customPrompts[agentType] = prompt;
+    localStorage.setItem(PROMPT_CONSTANTS.CUSTOM_PROMPTS_STORAGE_KEY, JSON.stringify(customPrompts));
+  } catch (error) {
+    console.error('Failed to save custom prompt:', error);
+    throw error;
+  }
 }
 
 /**
  * Remove custom prompt for an agent type (restore to default)
  */
 export function removeCustomPrompt(agentType: string): void {
-  const customPrompts = getCustomPrompts();
-  delete customPrompts[agentType];
-  localStorage.setItem(CUSTOM_PROMPTS_STORAGE_KEY, JSON.stringify(customPrompts));
+  try {
+    const customPrompts = getCustomPrompts();
+    delete customPrompts[agentType];
+    localStorage.setItem(PROMPT_CONSTANTS.CUSTOM_PROMPTS_STORAGE_KEY, JSON.stringify(customPrompts));
+  } catch (error) {
+    console.error('Failed to remove custom prompt:', error);
+    throw error;
+  }
 }
 
 /**
@@ -446,8 +460,24 @@ export function hasCustomPrompt(agentType: string): boolean {
  */
 function getCustomPrompts(): {[key: string]: string} {
   try {
-    const stored = localStorage.getItem(CUSTOM_PROMPTS_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
+    const stored = localStorage.getItem(PROMPT_CONSTANTS.CUSTOM_PROMPTS_STORAGE_KEY);
+    if (!stored) {
+      return {};
+    }
+    const parsed = JSON.parse(stored);
+    // Validate that it's an object with string values
+    if (typeof parsed !== 'object' || parsed === null) {
+      console.warn('Invalid custom prompts format, resetting');
+      return {};
+    }
+    // Ensure all values are strings
+    const validated: {[key: string]: string} = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') {
+        validated[key] = value;
+      }
+    }
+    return validated;
   } catch (error) {
     console.error('Error loading custom prompts:', error);
     return {};
@@ -459,6 +489,13 @@ function getCustomPrompts(): {[key: string]: string} {
  */
 export function getDefaultPrompt(agentType: string): string {
   return SYSTEM_PROMPTS[agentType as keyof typeof SYSTEM_PROMPTS] || '';
+}
+
+/**
+ * Type guard to check if an agent type is valid
+ */
+export function isValidAgentType(agentType: string): agentType is BaseOrchestratorAgentType {
+  return Object.values(BaseOrchestratorAgentType).includes(agentType as BaseOrchestratorAgentType);
 }
 
 declare global {
