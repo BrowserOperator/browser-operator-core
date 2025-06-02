@@ -50,7 +50,7 @@ export const DIALOG_DIMENSIONS = {
 export const DEFAULTS = {
   MAX_TOKENS: 4096,
   TEMPERATURE: 0.7,
-  MODEL: 'gpt-4o',
+  MODEL: 'gpt-4.1',
 } as const;
 
 // Regular expressions

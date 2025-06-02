@@ -1247,63 +1247,62 @@ export class ScrollPageTool implements Tool<{ position?: { x: number, y: number 
   };
 }
 
-// TODO: Add support for OpenAI Client to consume images
 /**
  * Tool for taking screenshots of the page
  */
-// export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, ScreenshotResult|ErrorResult> {
-//   name = 'take_screenshot';
-//   description = 'Takes a screenshot of the current page view or the entire page';
+export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, ScreenshotResult|ErrorResult> {
+  name = 'take_screenshot';
+  description = 'Takes a screenshot of the current page view or the entire page';
 
-//   async execute(args: {fullPage?: boolean}): Promise<ScreenshotResult|ErrorResult> {
-//     const fullPage = args.fullPage || false;
+  async execute(args: {fullPage?: boolean}): Promise<ScreenshotResult|ErrorResult> {
+    const fullPage = args.fullPage || false;
 
-//     // Get the main target
-//     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-//     if (!target) {
-//       return {error: 'No page target available'};
-//     }
+    // Get the main target
+    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
+    if (!target) {
+      return {error: 'No page target available'};
+    }
 
-//     try {
-//       // Use the page agent to capture a screenshot
-//       const pageAgent = target.pageAgent();
-//       if (!pageAgent) {
-//         return {error: 'Page agent not available'};
-//       }
+    try {
+      // Use the page agent to capture a screenshot
+      const pageAgent = target.pageAgent();
+      if (!pageAgent) {
+        return {error: 'Page agent not available'};
+      }
 
-//       // Take the screenshot
-//       const result = await pageAgent.invoke_captureScreenshot({
-//         format: 'png',
-//         captureBeyondViewport: fullPage,
-//       });
+      // Take the screenshot
+      const result = await pageAgent.invoke_captureScreenshot({
+        format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
+        captureBeyondViewport: fullPage,
+      });
 
-//       if (result.getError()) {
-//         return {error: `Screenshot failed: ${result.getError()}`};
-//       }
+      if (result.getError()) {
+        return {error: `Screenshot failed: ${result.getError()}`};
+      }
 
-//       // Get base64 data from result
-//       const data = result.data;
+      // Get base64 data from result
+      const data = result.data;
 
-//       return {
-//         success: true,
-//         dataUrl: `data:image/png;base64,${data}`,
-//         message: `Successfully took ${fullPage ? 'full page' : 'viewport'} screenshot`,
-//       };
-//     } catch (error) {
-//       return {error: `Failed to take screenshot: ${error.message}`};
-//     }
-//   }
+      return {
+        success: true,
+        dataUrl: `data:image/png;base64,${data}`,
+        message: `Successfully took ${fullPage ? 'full page' : 'viewport'} screenshot`,
+      };
+    } catch (error) {
+      return {error: `Failed to take screenshot: ${error.message}`};
+    }
+  }
 
-//   schema = {
-//     type: 'object',
-//     properties: {
-//       fullPage: {
-//         type: 'boolean',
-//         description: 'Whether to capture the entire page or just the viewport (default: false)',
-//       },
-//     },
-//   };
-// }
+  schema = {
+    type: 'object',
+    properties: {
+      fullPage: {
+        type: 'boolean',
+        description: 'Whether to capture the entire page or just the viewport (default: false)',
+      },
+    },
+  };
+}
 
 /**
  * Tool for getting the accessibility tree including reasoning

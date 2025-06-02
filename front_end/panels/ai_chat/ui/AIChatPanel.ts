@@ -11,6 +11,7 @@ import * as Lit from '../../../ui/lit/lit.js';
 import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 import {AgentService, Events as AgentEvents} from '../core/AgentService.js';
 import { LiteLLMClient } from '../core/LiteLLMClient.js';
+import { EvaluationRunner } from '../evaluation/example-runner.js';
 
 import chatViewStyles from './chatView.css.js';
 import {
@@ -23,6 +24,7 @@ import {
 } from './ChatView.js';
 import { HelpDialog } from './HelpDialog.js';
 import { SettingsDialog } from './SettingsDialog.js';
+import { EvaluationDialog } from './EvaluationDialog.js';
 
 const {html} = Lit;
 
@@ -99,6 +101,10 @@ const UIStrings = {
    * @description Placeholder when LiteLLM endpoint is missing
    */
   missingLiteLLMEndpoint: 'Please configure LiteLLM endpoint in Settings',
+  /**
+   * @description Run evaluation tests
+   */
+  runEvaluationTests: 'Run Evaluation Tests',
 } as const;
 
 const str_ = i18n.i18n.registerUIStrings('panels/ai_chat/ui/AIChatPanel.ts', UIStrings);
@@ -110,6 +116,7 @@ interface ToolbarViewInput {
   onDeleteClick: () => void;
   onHelpClick: () => void;
   onSettingsClick: () => void;
+  onEvaluationTestClick: () => void;
   isDeleteHistoryButtonVisible: boolean;
   isCenteredView: boolean;
 }
@@ -149,6 +156,13 @@ function toolbarView(input: ToolbarViewInput): Lit.LitTemplate {
               .variant=${Buttons.Button.Variant.TOOLBAR}
               @click=${input.onDeleteClick}></devtools-button>`
           : Lit.nothing}
+        <devtools-button
+          title=${i18nString(UIStrings.runEvaluationTests)}
+          aria-label=${i18nString(UIStrings.runEvaluationTests)}
+          .iconName=${'experiment'}
+          .jslogContext=${'ai-chat.evaluation-tests'}
+          .variant=${Buttons.Button.Variant.TOOLBAR}
+          @click=${input.onEvaluationTestClick}></devtools-button>
         <devtools-button
           title=${i18nString(UIStrings.settings)}
           aria-label=${i18nString(UIStrings.settings)}
@@ -982,6 +996,7 @@ export class AIChatPanel extends UI.Panel.Panel {
       onDeleteClick: this.#onDeleteClick.bind(this),
       onHelpClick: this.#onHelpClick.bind(this),
       onSettingsClick: this.#onSettingsClick.bind(this),
+      onEvaluationTestClick: this.#onEvaluationTestClick.bind(this),
       isDeleteHistoryButtonVisible: this.#messages.length > 1,
       isCenteredView,
     }), this.#toolbarContainer, { host: this });
@@ -1076,6 +1091,13 @@ export class AIChatPanel extends UI.Panel.Panel {
       AIChatPanel.addCustomModelOption,
       AIChatPanel.removeCustomModelOption
     );
+  }
+  
+  /**
+   * Handles the evaluation test button click event and shows the evaluation dialog
+   */
+  #onEvaluationTestClick(): void {
+    EvaluationDialog.show();
   }
   
   /**

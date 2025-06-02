@@ -15,6 +15,9 @@ import { NodeIDsToURLsTool, type Tool } from './Tools.js';
 interface ExtractionMetadata {
   progress: string;
   completed: boolean;
+  reasoning?: string; // Explanation of what data was found and why fields might be missing
+  pageContext?: string; // Brief description of what type of page/content was analyzed
+  missingFields?: string; // Comma-separated list of fields that couldn't be extracted
 }
 
 // Update the result interface to include metadata
@@ -195,10 +198,21 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
       console.log('[SchemaBasedExtractorTool] Data after URL resolution:',
         JSON.stringify(Array.isArray(finalData) ? finalData.slice(0, 2) : finalData, null, 2).substring(0, 500));
 
+      // 7a. Check if any URL fields still contain numeric node IDs
+      let urlResolutionWarning: string | undefined;
+      const dataString = JSON.stringify(finalData);
+      // Simple heuristic: if we have numbers where URLs are expected in common URL field names
+      if (dataString.match(/"(url|link|href|website|webpage)"\s*:\s*\d+/i)) {
+        urlResolutionWarning = 'Note: Some URL fields may contain unresolved node IDs instead of actual URLs.';
+        console.warn('[SchemaBasedExtractorTool] WARNING: Detected potential unresolved node IDs in URL fields');
+      }
+
       // 8. Metadata Call
       const metadata = await this.callMetadataLLM({
         instruction: instruction || 'Assess extraction completion',
         extractedData: finalData, // Use the final data with URLs for assessment
+        domContent: treeText, // Pass the DOM content for context
+        schema, // Pass the schema to understand what was requested
         apiKey,
       });
 
@@ -216,11 +230,25 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 
       // ---- End Multi-step LLM Process ----
 
-      return {
+      // Prepare the result
+      const result: SchemaExtractionResult = {
         success: true,
         data: finalData,
         metadata: metadata || undefined, // Include metadata if successful, otherwise undefined
       };
+
+      // Add warning message to metadata if URL resolution was incomplete
+      if (urlResolutionWarning && result.metadata) {
+        result.metadata.progress = result.metadata.progress + ' ' + urlResolutionWarning;
+      } else if (urlResolutionWarning) {
+        // If no metadata, create minimal metadata with the warning
+        result.metadata = {
+          progress: urlResolutionWarning,
+          completed: true
+        };
+      }
+
+      return result;
     } catch (error) {
       console.error('[SchemaBasedExtractorTool] Execution Error:', error);
       return {
@@ -365,7 +393,16 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 Your task is to extract data from the provided DOM content (represented as an accessibility tree) based on a given schema.
 Focus on mapping the user's instruction to the elements in the accessibility tree.
 IMPORTANT: When a URL is expected, you MUST provide the numeric Accessibility Node ID as a NUMBER type, not as a string.
-Use the numeric Accessibility Node IDs provided in the schema description when a URL is expected.
+CRITICAL RULES:
+1. NEVER hallucinate or make up any data - only extract what actually exists in the accessibility tree
+2. For URL fields, provide ONLY the numeric accessibility node ID (e.g., 12345, not "http://example.com")
+3. If you cannot find requested data:
+   - For required fields: Use null or an empty string/array as appropriate
+   - For optional fields: Omit them entirely
+   - NEVER make up fake data to fill fields
+4. If the requested data doesn't exist, extract what IS available in that section of the DOM
+5. Only extract text, numbers, and node IDs that are explicitly present in the accessibility tree
+6. The actual URLs will be resolved in a later step using the node IDs
 Return ONLY valid JSON that conforms exactly to the provided schema definition. 
 Do not add any conversational text or explanations or thinking tags.`;
 
@@ -384,8 +421,17 @@ ${JSON.stringify(schema, null, 2)}
 
 TASK: Extract structured data from the ACCESSIBILITY TREE CONTENT according to the INSTRUCTION and the SCHEMA TO EXTRACT.
 Return a valid JSON object that conforms exactly to the schema structure. 
-CRITICAL: Ensure fields described as expecting an 'Accessibility Node ID' receive the correct numeric ID as a NUMBER type (not a string) from the tree content for elements that represent URLs.
-Only output the JSON object.`;
+CRITICAL: 
+- For URL fields, extract ONLY the numeric accessibility node ID from the tree (e.g., 12345)
+- DO NOT create or hallucinate any data - only extract what exists in the tree
+- If requested data is not found:
+  * Return null/empty values for required fields
+  * Omit optional fields entirely
+  * Extract whatever IS present in that area of the DOM instead
+- NEVER make up fake names, titles, descriptions, or any other data
+- If you see "No data", "N/A", or similar in the DOM, extract it as-is
+- These numeric IDs will be converted to actual URLs in a subsequent processing step
+Only output the JSON object with real data from the accessibility tree.`;
 
     try {
       const modelName = AIChatPanel.getMiniModel();
@@ -414,8 +460,14 @@ Only output the JSON object.`;
     const systemPrompt = `You are a data refinement agent in multi-agent system.
 Your task is to refine previously extracted JSON data based on the original instruction and schema.
 Ensure the refined output still strictly conforms to the provided schema.
-CRITICAL: When a URL is expected, you MUST provide the numeric Accessibility Node ID as a NUMBER type, not as a string.
-Focus on improving accuracy, completeness, and adherence to the original instruction based on the initial data.
+CRITICAL RULES:
+1. When a URL is expected, you MUST provide the numeric Accessibility Node ID as a NUMBER type, not as a string
+2. NEVER create or hallucinate any data - work only with what was already extracted
+3. DO NOT replace numeric node IDs with made-up URLs like "http://..." 
+4. DO NOT add fake data to empty fields - if a field is null/empty, leave it that way
+5. Only refine the structure and improve organization - do not invent new content
+6. If the initial extraction has null/empty values, that means the data wasn't found - respect that
+Focus on improving structure and organization while preserving the truthfulness of the extracted data.
 Return ONLY the refined, valid JSON object.`;
 
     const refinePrompt = `
@@ -432,7 +484,11 @@ ${JSON.stringify(initialData, null, 2)}
 \`\`\`
 
 TASK: Review the INITIAL EXTRACTED DATA. Refine it to better match the ORIGINAL INSTRUCTION and ensure it strictly conforms to the SCHEMA.
-IMPORTANT: Ensure all URL fields contain numeric Accessibility Node IDs as NUMBER types (not strings).
+IMPORTANT: 
+- Keep all numeric node IDs in URL fields exactly as they are (do not change them to URLs)
+- These numeric IDs will be converted to actual URLs in a later processing step
+- NEVER hallucinate or create URLs - if you see a number in a URL field, leave it as a number
+- Focus on refining non-URL data and ensuring proper structure
 Return only the refined JSON object. 
 Do not add any conversational text or explanations or thinking tags.`;
 
@@ -455,9 +511,11 @@ Do not add any conversational text or explanations or thinking tags.`;
   private async callMetadataLLM(options: {
     instruction: string,
     extractedData: any,
+    domContent: string,
+    schema: SchemaDefinition,
     apiKey: string,
   }): Promise<ExtractionMetadata | null> {
-    const { instruction, extractedData, apiKey } = options;
+    const { instruction, extractedData, domContent, schema, apiKey } = options;
     console.log('[SchemaBasedExtractorTool] Calling Metadata LLM...');
     const metadataSchema = {
       type: 'object',
@@ -469,6 +527,18 @@ Do not add any conversational text or explanations or thinking tags.`;
         completed: {
           type: 'boolean',
           description: 'Set to true ONLY if the original instruction has been fully and accurately addressed by the extracted data. Be conservative.',
+        },
+        reasoning: {
+          type: 'string',
+          description: 'Brief explanation of extraction results, including why any fields might be missing or contain null values.',
+        },
+        pageContext: {
+          type: 'string',
+          description: 'Brief description (10-20 words) of what type of page/content was analyzed (e.g., "GitHub repository page", "News article", "Product listing").',
+        },
+        missingFields: {
+          type: 'string',
+          description: 'Comma-separated list of field names that could not be extracted due to missing data on the page. Leave empty if all fields were successfully extracted.',
         },
       },
       required: ['progress', 'completed'],
@@ -485,13 +555,28 @@ Do not add any conversational text or explanations or thinking tags.`;
     const metadataPrompt = `
 ORIGINAL INSTRUCTION: ${instruction}
 
+REQUESTED SCHEMA:
+\`\`\`json
+${JSON.stringify(schema, null, 2)}
+\`\`\`
+
+PAGE CONTENT (Accessibility Tree):
+\`\`\`
+${domContent.substring(0, 3000)}${domContent.length > 3000 ? '... [truncated]' : ''}
+\`\`\`
+
 EXTRACTED DATA:
 \`\`\`json
 ${JSON.stringify(extractedData, null, 2)}
 \`\`\`
 
-TASK: Assess the EXTRACTED DATA based on the ORIGINAL INSTRUCTION.
-Determine the extraction progress and whether the instruction is fully completed.
+TASK: Analyze the extraction results by comparing:
+1. What was requested (INSTRUCTION and SCHEMA)
+2. What was available on the page (PAGE CONTENT)
+3. What was actually extracted (EXTRACTED DATA)
+
+Identify any fields that are null/empty and explain why (e.g., "price field is null because this is a repository page, not a product page").
+Describe the type of page/content that was analyzed.
 Return ONLY a valid JSON object conforming to the required metadata schema.`;
 
     try {
