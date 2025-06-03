@@ -38,9 +38,8 @@ export class ChatPromptFormatter {
         case ChatMessageEntity.MODEL:
           // Format model message based on its action
           if (message.action === 'tool') {
-            // Represent tool call concisely for the prompt
-            const argsString = message.toolArgs ? JSON.stringify(message.toolArgs) : '';
-            formattedParts.push(`assistant: {"action":"tool", "toolName":"${message.toolName || 'unknown'}", "toolArgs":${argsString}}`);
+            // Represent tool call in natural language instead of JSON to avoid LLM confusion
+            formattedParts.push(`assistant: Used tool "${message.toolName || 'unknown'}" to ${message.reasoning || 'perform an action'}.`);
           } else if (message.answer) {
             // Represent final answer - now just using plain markdown text
             formattedParts.push(`assistant: ${message.answer}`);

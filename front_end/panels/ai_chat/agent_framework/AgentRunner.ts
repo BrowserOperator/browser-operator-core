@@ -192,9 +192,11 @@ export class AgentRunner {
     const toolMap = new Map(tools.map(tool => [tool.name, tool]));
     const toolSchemas = tools.map(tool => ({
       type: 'function',
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.schema
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.schema
+      }
     }));
 
     // Add handoff tools based on the executing agent's config
@@ -209,9 +211,11 @@ export class AgentRunner {
                     const handoffToolName = `handoff_to_${targetAgentName}`;
                     toolSchemas.push({
                       type: 'function',
-                      name: handoffToolName,
-                      description: `Handoff the current task to the specialized agent: ${targetAgentName}. Use this agent when the task requires ${targetAgentName}'s capabilities. Agent Description: ${targetTool.description}`,
-                      parameters: targetTool.schema // Use target agent's input schema
+                      function: {
+                        name: handoffToolName,
+                        description: `Handoff the current task to the specialized agent: ${targetAgentName}. Use this agent when the task requires ${targetAgentName}'s capabilities. Agent Description: ${targetTool.description}`,
+                        parameters: targetTool.schema // Use target agent's input schema
+                      }
                     });
                      // Add a mapping for the handoff tool 'name' to the actual target tool instance
                      // This allows us to find the target agent later when this tool is called.

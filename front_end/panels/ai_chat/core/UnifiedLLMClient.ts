@@ -328,10 +328,28 @@ export class UnifiedLLMClient {
     }
 
     if (response.text) {
-      return {
-        type: 'final_answer',
-        answer: response.text,
-      };
+      const rawContent = response.text;
+      // Attempt to parse text as JSON tool call (fallback for some models)
+      if (rawContent.trim().startsWith('{') && rawContent.includes('"action":"tool"')) {
+        try {
+          const contentJson = JSON.parse(rawContent);
+          if (contentJson.action === 'tool' && contentJson.toolName) {
+            return {
+              type: 'tool_call',
+              name: contentJson.toolName,
+              args: contentJson.toolArgs || {},
+            };
+          }
+          // Fallback to treating it as text if JSON structure is not a valid tool call
+          return { type: 'final_answer', answer: rawContent };
+        } catch (e) {
+          // If JSON parsing fails, treat it as plain text
+          return { type: 'final_answer', answer: rawContent };
+        }
+      } else {
+        // Treat as plain text final answer
+        return { type: 'final_answer', answer: rawContent };
+      }
     }
 
     return {

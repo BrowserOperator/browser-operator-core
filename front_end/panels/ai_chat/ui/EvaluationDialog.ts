@@ -5,7 +5,6 @@
 import * as i18n from '../../../core/i18n/i18n.js';
 import * as UI from '../../../ui/legacy/legacy.js';
 import { EvaluationRunner } from '../evaluation/example-runner.js';
-import { AgentEvaluationRunner } from '../evaluation/AgentEvaluationRunner.js';
 import { VisionAgentEvaluationRunner } from '../evaluation/VisionAgentEvaluationRunner.js';
 import { MarkdownReportGenerator } from '../evaluation/framework/MarkdownReportGenerator.js';
 import { MarkdownViewerUtil } from '../common/MarkdownViewerUtil.js';
@@ -95,6 +94,10 @@ const UIStrings = {
    * @description Vision verification tooltip
    */
   visionVerificationTooltip: 'Uses GPT-4 Vision to analyze screenshots for visual confirmation of actions',
+  /**
+   * @description Test logs header
+   */
+  testLogs: 'Test Logs',
 } as const;
 
 const str_ = i18n.i18n.registerUIStrings('panels/ai_chat/ui/EvaluationDialog.ts', UIStrings);
@@ -110,6 +113,9 @@ interface EvaluationDialogState {
   activeTab: 'schema-extractor' | 'agents';
   agentType?: 'research' | 'action';
   visionEnabled?: boolean;
+  selectedTests: Set<string>;
+  bottomPanelView: 'summary' | 'logs';
+  testLogs: string[];
 }
 
 export class EvaluationDialog {
@@ -121,11 +127,13 @@ export class EvaluationDialog {
     activeTab: 'schema-extractor',
     agentType: 'research',
     visionEnabled: false,
+    selectedTests: new Set(),
+    bottomPanelView: 'summary',
+    testLogs: [],
   };
   
   #evaluationRunner?: EvaluationRunner;
-  #agentEvaluationRunner?: AgentEvaluationRunner;
-  #visionAgentEvaluationRunner?: VisionAgentEvaluationRunner;
+  #agentEvaluationRunner?: VisionAgentEvaluationRunner;
   #dialog: UI.Dialog.Dialog;
 
   static show(): void {
@@ -151,8 +159,7 @@ export class EvaluationDialog {
     }
     
     try {
-      this.#agentEvaluationRunner = new AgentEvaluationRunner();
-      this.#visionAgentEvaluationRunner = new VisionAgentEvaluationRunner();
+      this.#agentEvaluationRunner = new VisionAgentEvaluationRunner(this.#state.visionEnabled);
     } catch (error) {
       console.error('Failed to initialize agent evaluation runner:', error);
     }
@@ -198,28 +205,93 @@ export class EvaluationDialog {
       .eval-content {
         flex: 1;
         display: flex;
-        gap: 20px;
+        flex-direction: column;
+        gap: 16px;
         padding: 20px;
         overflow: hidden;
         min-height: 0;
       }
       
       .eval-tests-panel {
-        flex: 2;
+        flex: 0 0 60%;
         display: flex;
         flex-direction: column;
         min-height: 0;
         overflow: hidden;
       }
       
-      .eval-results-panel {
-        flex: 1;
+      .eval-bottom-panel {
+        flex: 0 0 40%;
         display: flex;
         flex-direction: column;
         background: var(--sys-color-surface);
         border-radius: 8px;
-        padding: 16px;
         border: 1px solid var(--sys-color-divider);
+        overflow: hidden;
+      }
+      
+      .eval-bottom-tabs {
+        display: flex;
+        background: var(--sys-color-surface-variant);
+        border-bottom: 1px solid var(--sys-color-divider);
+      }
+      
+      .eval-bottom-tab {
+        padding: 8px 16px;
+        background: transparent;
+        border: none;
+        color: var(--sys-color-on-surface-variant);
+        cursor: pointer;
+        font-size: 13px;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s ease;
+      }
+      
+      .eval-bottom-tab:hover {
+        background: var(--sys-color-state-hover-on-subtle);
+      }
+      
+      .eval-bottom-tab.active {
+        color: var(--sys-color-primary);
+        border-bottom-color: var(--sys-color-primary);
+        font-weight: 500;
+      }
+      
+      .eval-bottom-content {
+        flex: 1;
+        padding: 16px;
+        overflow-y: auto;
+        min-height: 0;
+      }
+      
+      .eval-logs-container {
+        font-family: var(--monospace-font-family);
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--sys-color-on-surface-variant);
+      }
+      
+      .eval-log-entry {
+        margin-bottom: 4px;
+        padding: 2px 0;
+      }
+      
+      .eval-log-entry.info {
+        color: var(--sys-color-on-surface);
+      }
+      
+      .eval-log-entry.success {
+        color: var(--sys-color-green);
+      }
+      
+      .eval-log-entry.warning {
+        color: var(--sys-color-yellow);
+      }
+      
+      .eval-log-entry.error {
+        color: var(--sys-color-error);
       }
       
       .eval-progress-bar {
@@ -278,6 +350,17 @@ export class EvaluationDialog {
       
       .eval-test-item:hover {
         background: var(--sys-color-state-hover-on-subtle);
+        cursor: pointer;
+      }
+      
+      .eval-test-item.selected {
+        background: var(--sys-color-tonal-container);
+        border-left: 3px solid var(--sys-color-primary);
+        padding-left: 13px;
+      }
+      
+      .eval-test-item.selected:hover {
+        background: var(--sys-color-state-hover-on-prominent);
       }
       
       .eval-test-item.running {
@@ -295,6 +378,21 @@ export class EvaluationDialog {
       
       .eval-test-item.error {
         background: var(--sys-color-surface-error);
+      }
+      
+      .eval-test-item.selected.passed {
+        background: var(--sys-color-surface-green);
+        border-left-color: var(--sys-color-primary);
+      }
+      
+      .eval-test-item.selected.failed {
+        background: var(--sys-color-surface-yellow);
+        border-left-color: var(--sys-color-primary);
+      }
+      
+      .eval-test-item.selected.error {
+        background: var(--sys-color-surface-error);
+        border-left-color: var(--sys-color-primary);
       }
       
       @keyframes pulse {
@@ -600,14 +698,18 @@ export class EvaluationDialog {
       testsPanel.appendChild(agentSelector);
     }
 
+    // Add selection controls
+    const selectionControls = this.#renderSelectionControls();
+    testsPanel.appendChild(selectionControls);
+
     const testList = this.#renderTestList();
     testsPanel.appendChild(testList);
 
-    // Results panel
-    const resultsPanel = this.#renderResultsPanel();
+    // Bottom panel (40% height) - contains tabs for summary/logs
+    const bottomPanel = this.#renderBottomPanel();
 
     content.appendChild(testsPanel);
-    content.appendChild(resultsPanel);
+    content.appendChild(bottomPanel);
     return content;
   }
 
@@ -625,6 +727,7 @@ export class EvaluationDialog {
     schemaTab.addEventListener('click', () => {
       this.#state.activeTab = 'schema-extractor';
       this.#state.testResults.clear(); // Clear results when switching tabs
+      this.#state.selectedTests.clear(); // Clear selections when switching tabs
       this.#render();
     });
 
@@ -638,6 +741,7 @@ export class EvaluationDialog {
     agentTab.addEventListener('click', () => {
       this.#state.activeTab = 'agents';
       this.#state.testResults.clear(); // Clear results when switching tabs
+      this.#state.selectedTests.clear(); // Clear selections when switching tabs
       this.#render();
     });
 
@@ -684,6 +788,7 @@ export class EvaluationDialog {
     select.addEventListener('change', () => {
       this.#state.agentType = select.value as 'research' | 'action';
       this.#state.testResults.clear(); // Clear results when switching agent types
+      this.#state.selectedTests.clear(); // Clear selections when switching agent types
       this.#render();
     });
 
@@ -710,6 +815,10 @@ export class EvaluationDialog {
       visionCheckbox.addEventListener('change', () => {
         this.#state.visionEnabled = visionCheckbox.checked;
         console.log(`Vision verification ${this.#state.visionEnabled ? 'enabled' : 'disabled'}`);
+        // Update the runner's vision mode
+        if (this.#agentEvaluationRunner) {
+          this.#agentEvaluationRunner.setVisionEnabled(this.#state.visionEnabled);
+        }
       });
       
       visionContainer.appendChild(visionCheckbox);
@@ -718,6 +827,59 @@ export class EvaluationDialog {
     }
 
     return selectorContainer;
+  }
+
+  #renderSelectionControls(): HTMLElement {
+    const controlsContainer = document.createElement('div');
+    controlsContainer.style.cssText = 'padding: 8px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;';
+
+    // Left side - selection info
+    const leftSide = document.createElement('div');
+    leftSide.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+
+    const selectionInfo = document.createElement('span');
+    selectionInfo.style.cssText = 'font-size: 13px; color: var(--sys-color-on-surface-variant);';
+    const selectedCount = this.#state.selectedTests.size;
+    
+    if (selectedCount > 0) {
+      selectionInfo.textContent = `${selectedCount} tests selected`;
+    } else {
+      selectionInfo.textContent = 'Click tests to select them';
+    }
+
+    leftSide.appendChild(selectionInfo);
+
+    // Right side - action buttons
+    const rightSide = document.createElement('div');
+    rightSide.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+    if (selectedCount > 0) {
+      // Clear selection button
+      const clearButton = document.createElement('button');
+      clearButton.className = 'eval-button';
+      clearButton.textContent = 'Clear Selection';
+      clearButton.style.cssText = 'padding: 4px 12px; font-size: 12px;';
+      clearButton.disabled = this.#state.isRunning;
+      clearButton.addEventListener('click', () => {
+        this.#state.selectedTests.clear();
+        this.#render();
+      });
+      rightSide.appendChild(clearButton);
+
+      // Run selected button
+      const runSelectedButton = document.createElement('button');
+      runSelectedButton.className = 'eval-button primary';
+      runSelectedButton.textContent = `Run Selected (${selectedCount})`;
+      runSelectedButton.style.cssText = 'padding: 4px 12px; font-size: 12px;';
+      runSelectedButton.disabled = this.#state.isRunning;
+      runSelectedButton.addEventListener('click', () => this.#runSelectedTests());
+      rightSide.appendChild(runSelectedButton);
+    }
+
+    controlsContainer.appendChild(leftSide);
+    controlsContainer.appendChild(rightSide);
+
+    return controlsContainer;
   }
 
   #renderTestList(): HTMLElement {
@@ -756,16 +918,39 @@ export class EvaluationDialog {
   #renderTestItem(testCase: any): HTMLElement {
     const result = this.#state.testResults.get(testCase.id);
     const isRunning = this.#state.currentRunningTest === testCase.id;
+    const isSelected = this.#state.selectedTests.has(testCase.id);
     
     const item = document.createElement('div');
     item.className = 'eval-test-item';
-    item.title = `${testCase.description}\nTags: ${testCase.metadata.tags.join(', ')}`;
+    item.title = `${testCase.description}\nTags: ${testCase.metadata.tags.join(', ')}\n\nClick to select/deselect`;
+    
+    if (isSelected) {
+      item.classList.add('selected');
+    }
     
     if (isRunning) {
       item.classList.add('running');
     } else if (result) {
       item.classList.add(result.status);
     }
+    
+    // Handle click for selection
+    item.addEventListener('click', () => {
+      // Don't select if test is currently running
+      if (isRunning || this.#state.isRunning) {
+        return;
+      }
+      
+      // Toggle selection
+      if (this.#state.selectedTests.has(testCase.id)) {
+        this.#state.selectedTests.delete(testCase.id);
+      } else {
+        this.#state.selectedTests.add(testCase.id);
+      }
+      
+      // Re-render to update UI
+      this.#render();
+    });
 
     // Test info
     const info = document.createElement('div');
@@ -920,22 +1105,63 @@ export class EvaluationDialog {
     return item;
   }
 
-  #renderResultsPanel(): HTMLElement {
+  #renderBottomPanel(): HTMLElement {
     const panel = document.createElement('div');
-    panel.className = 'eval-results-panel';
+    panel.className = 'eval-bottom-panel';
 
-    const title = document.createElement('h3');
-    title.textContent = i18nString(UIStrings.summary);
-    title.style.cssText = 'margin: 0 0 16px 0; font-size: 14px; font-weight: 500;';
+    // Tabs for switching between summary and logs
+    const tabs = document.createElement('div');
+    tabs.className = 'eval-bottom-tabs';
 
-    panel.appendChild(title);
+    const summaryTab = document.createElement('button');
+    summaryTab.className = 'eval-bottom-tab';
+    if (this.#state.bottomPanelView === 'summary') {
+      summaryTab.classList.add('active');
+    }
+    summaryTab.textContent = i18nString(UIStrings.summary);
+    summaryTab.addEventListener('click', () => {
+      this.#state.bottomPanelView = 'summary';
+      this.#render();
+    });
+
+    const logsTab = document.createElement('button');
+    logsTab.className = 'eval-bottom-tab';
+    if (this.#state.bottomPanelView === 'logs') {
+      logsTab.classList.add('active');
+    }
+    logsTab.textContent = i18nString(UIStrings.testLogs);
+    logsTab.addEventListener('click', () => {
+      this.#state.bottomPanelView = 'logs';
+      this.#render();
+    });
+
+    tabs.appendChild(summaryTab);
+    tabs.appendChild(logsTab);
+    panel.appendChild(tabs);
+
+    // Content area
+    const content = document.createElement('div');
+    content.className = 'eval-bottom-content';
+
+    if (this.#state.bottomPanelView === 'summary') {
+      content.appendChild(this.#renderSummaryContent());
+    } else {
+      content.appendChild(this.#renderLogsContent());
+    }
+
+    panel.appendChild(content);
+    return panel;
+  }
+
+  #renderSummaryContent(): HTMLElement {
+    const container = document.createElement('div');
 
     if (this.#state.testResults.size === 0) {
       const emptyState = document.createElement('div');
       emptyState.textContent = i18nString(UIStrings.noTestResults);
       emptyState.style.cssText = 'color: var(--sys-color-on-surface-variant); font-style: italic; text-align: center; padding: 20px;';
-      panel.appendChild(emptyState);
-      return panel;
+      container.appendChild(emptyState);
+      return container;
     }
 
     // Summary statistics
@@ -976,10 +1202,46 @@ export class EvaluationDialog {
 
       item.appendChild(labelEl);
       item.appendChild(valueEl);
-      panel.appendChild(item);
+      container.appendChild(item);
     });
 
-    return panel;
+    return container;
+  }
+
+  #renderLogsContent(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'eval-logs-container';
+
+    if (this.#state.testLogs.length === 0) {
+      const emptyState = document.createElement('div');
+      emptyState.textContent = 'No logs yet. Run tests to see logs.';
+      emptyState.style.cssText = 'color: var(--sys-color-on-surface-variant); font-style: italic; text-align: center; padding: 20px;';
+      container.appendChild(emptyState);
+      return container;
+    }
+
+    // Display logs in reverse order (newest first)
+    const reversedLogs = [...this.#state.testLogs].reverse();
+    reversedLogs.forEach(log => {
+      const logEntry = document.createElement('div');
+      logEntry.className = 'eval-log-entry';
+      
+      // Determine log type based on content
+      if (log.includes('\u2705') || log.includes('PASSED')) {
+        logEntry.classList.add('success');
+      } else if (log.includes('\u26a0') || log.includes('WARNING') || log.includes('FAILED')) {
+        logEntry.classList.add('warning');
+      } else if (log.includes('\u274c') || log.includes('ERROR')) {
+        logEntry.classList.add('error');
+      } else if (log.includes('\ud83e\uddea') || log.includes('\ud83e\udd16') || log.includes('\ud83d\udcf8')) {
+        logEntry.classList.add('info');
+      }
+      
+      logEntry.textContent = log;
+      container.appendChild(logEntry);
+    });
+
+    return container;
   }
 
   #renderButtons(): HTMLElement {
@@ -1050,7 +1312,21 @@ export class EvaluationDialog {
     this.#state.testResults.clear();
     this.#state.completedTests = 0;
     this.#state.totalTests = 0;
+    this.#state.testLogs = [];
     this.#render();
+  }
+
+  #addLog(message: string): void {
+    const timestamp = new Date().toLocaleTimeString();
+    this.#state.testLogs.push(`[${timestamp}] ${message}`);
+    // Keep only last 1000 logs to prevent memory issues
+    if (this.#state.testLogs.length > 1000) {
+      this.#state.testLogs = this.#state.testLogs.slice(-1000);
+    }
+    // Re-render if logs panel is visible
+    if (this.#state.bottomPanelView === 'logs') {
+      this.#render();
+    }
   }
 
   async #runSingleTest(): Promise<void> {
@@ -1067,15 +1343,21 @@ export class EvaluationDialog {
     this.#render();
 
     try {
-      console.log('🧪 Running single evaluation test:', testId);
+      const logMessage = `🧪 Running single evaluation test: ${testId}`;
+      console.log(logMessage);
+      this.#addLog(logMessage);
       const result = await this.#evaluationRunner.runSingleTest(testId);
       
       this.#state.testResults.set(testId, result);
       this.#state.completedTests = 1;
+      const successLog = `✅ Test completed: ${testId} - ${result.status.toUpperCase()}`;
       console.log('✅ Test completed:', result);
+      this.#addLog(successLog);
       
     } catch (error) {
+      const errorLog = `❌ Test failed: ${testId} - ${error instanceof Error ? error.message : String(error)}`;
       console.error('❌ Test failed:', error);
+      this.#addLog(errorLog);
       this.#state.testResults.set(testId, {
         testId,
         status: 'error',
@@ -1104,7 +1386,9 @@ export class EvaluationDialog {
     this.#render();
 
     try {
-      console.log('🧪 Running all evaluation tests...');
+      const logMessage = `🧪 Running all evaluation tests (${schemaExtractorTests.length} tests)...`;
+      console.log(logMessage);
+      this.#addLog(logMessage);
       
       // Run tests sequentially with UI updates
       for (const testCase of schemaExtractorTests) {
@@ -1112,9 +1396,12 @@ export class EvaluationDialog {
         this.#render();
         
         try {
+          this.#addLog(`Running test: ${testCase.name}`);
           const result = await this.#evaluationRunner.runSingleTest(testCase.id);
           this.#state.testResults.set(testCase.id, result);
+          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
         } catch (error) {
+          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
           this.#state.testResults.set(testCase.id, {
             testId: testCase.id,
             status: 'error',
@@ -1131,7 +1418,9 @@ export class EvaluationDialog {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-      console.log('✅ All tests completed');
+      const completionLog = '✅ All tests completed';
+      console.log(completionLog);
+      this.#addLog(completionLog);
       
     } catch (error) {
       console.error('❌ Test batch failed:', error);
@@ -1158,7 +1447,9 @@ export class EvaluationDialog {
     this.#render();
 
     try {
-      console.log('🤖 Running basic agent tests...');
+      const logMessage = `🤖 Running basic ${this.#state.agentType} agent tests (${basicTests.length} tests)...`;
+      console.log(logMessage);
+      this.#addLog(logMessage);
       
       // Run tests sequentially with UI updates
       for (const testCase of basicTests) {
@@ -1166,9 +1457,12 @@ export class EvaluationDialog {
         this.#render();
         
         try {
+          this.#addLog(`Running ${agentName} test: ${testCase.name}`);
           const result = await this.#runAgentTest(testCase as any, agentName);
           this.#state.testResults.set(testCase.id, result);
+          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
         } catch (error) {
+          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
           this.#state.testResults.set(testCase.id, {
             testId: testCase.id,
             status: 'error',
@@ -1185,7 +1479,9 @@ export class EvaluationDialog {
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
-      console.log('✅ Basic agent tests completed');
+      const completionLog = '✅ Basic agent tests completed';
+      console.log(completionLog);
+      this.#addLog(completionLog);
       
     } catch (error) {
       console.error('❌ Agent test batch failed:', error);
@@ -1212,7 +1508,9 @@ export class EvaluationDialog {
     this.#render();
 
     try {
-      console.log('🤖 Running all agent tests...');
+      const logMessage = `🤖 Running all ${this.#state.agentType} agent tests (${allTests.length} tests)...`;
+      console.log(logMessage);
+      this.#addLog(logMessage);
       
       // Run tests sequentially with UI updates
       for (const testCase of allTests) {
@@ -1220,9 +1518,12 @@ export class EvaluationDialog {
         this.#render();
         
         try {
+          this.#addLog(`Running ${agentName} test: ${testCase.name}`);
           const result = await this.#runAgentTest(testCase as any, agentName);
           this.#state.testResults.set(testCase.id, result);
+          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
         } catch (error) {
+          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
           this.#state.testResults.set(testCase.id, {
             testId: testCase.id,
             status: 'error',
@@ -1239,7 +1540,9 @@ export class EvaluationDialog {
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
       
-      console.log('✅ All agent tests completed');
+      const completionLog = '✅ All agent tests completed';
+      console.log(completionLog);
+      this.#addLog(completionLog);
       
     } catch (error) {
       console.error('❌ Agent test batch failed:', error);
@@ -1285,18 +1588,92 @@ export class EvaluationDialog {
   }
 
   /**
-   * Run a single agent test with optional vision verification
+   * Run a single agent test using the unified runner
    */
-  async #runAgentTest(testCase: any, agentName: string): Promise<TestResult> {
-    // Use vision runner if enabled and test supports it
-    if (this.#state.visionEnabled && 
-        this.#visionAgentEvaluationRunner &&
-        VisionAgentEvaluationRunner.isVisionEnabled(testCase)) {
-      console.log(`🔍 Running test with vision verification: ${testCase.id}`);
-      return await this.#visionAgentEvaluationRunner.runSingleTestWithVision(testCase, agentName);
+  async #runSelectedTests(): Promise<void> {
+    if (this.#state.isRunning || this.#state.selectedTests.size === 0) {
+      return;
     }
+
+    // Get the appropriate test cases and filter by selection
+    let allTests;
+    let selectedTests;
+    let agentName = '';
     
-    // Otherwise use standard runner
+    if (this.#state.activeTab === 'schema-extractor') {
+      allTests = schemaExtractorTests;
+      selectedTests = allTests.filter(test => this.#state.selectedTests.has(test.id));
+    } else {
+      allTests = this.#state.agentType === 'action' ? actionAgentTests : researchAgentTests;
+      selectedTests = allTests.filter(test => this.#state.selectedTests.has(test.id));
+      agentName = this.#state.agentType === 'action' ? 'action_agent' : 'research_agent';
+    }
+
+    this.#state.isRunning = true;
+    this.#state.totalTests = selectedTests.length;
+    this.#state.completedTests = 0;
+    this.#state.startTime = Date.now();
+    this.#render();
+
+    try {
+      const logMessage = `🎯 Running ${selectedTests.length} selected tests...`;
+      console.log(logMessage);
+      this.#addLog(logMessage);
+      
+      // Run selected tests sequentially
+      for (const testCase of selectedTests) {
+        this.#state.currentRunningTest = testCase.id;
+        this.#render();
+        
+        try {
+          this.#addLog(`Running test: ${testCase.name}`);
+          let result;
+          if (this.#state.activeTab === 'schema-extractor' && this.#evaluationRunner) {
+            result = await this.#evaluationRunner.runSingleTest(testCase.id);
+          } else if (this.#agentEvaluationRunner) {
+            result = await this.#runAgentTest(testCase as any, agentName);
+          } else {
+            throw new Error('No runner available');
+          }
+          
+          this.#state.testResults.set(testCase.id, result);
+          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
+        } catch (error) {
+          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
+          this.#state.testResults.set(testCase.id, {
+            testId: testCase.id,
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+            duration: 0,
+            timestamp: Date.now(),
+          });
+        }
+        
+        this.#state.completedTests++;
+        this.#render();
+        
+        // Delay between tests (longer for agent tests)
+        const delay = this.#state.activeTab === 'agents' ? 3000 : 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      
+      const completionLog = '✅ Selected tests completed';
+      console.log(completionLog);
+      this.#addLog(completionLog);
+      
+      // Clear selection after running
+      this.#state.selectedTests.clear();
+      
+    } catch (error) {
+      console.error('❌ Selected test batch failed:', error);
+    } finally {
+      this.#state.isRunning = false;
+      this.#state.currentRunningTest = undefined;
+      this.#render();
+    }
+  }
+
+  async #runAgentTest(testCase: any, agentName: string): Promise<TestResult> {
     if (!this.#agentEvaluationRunner) {
       throw new Error('Agent evaluation runner not initialized');
     }
