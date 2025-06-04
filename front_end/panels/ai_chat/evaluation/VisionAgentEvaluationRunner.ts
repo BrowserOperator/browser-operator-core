@@ -9,6 +9,9 @@ import { AgentService } from '../core/AgentService.js';
 import { ToolRegistry } from '../agent_framework/ConfigurableAgentTool.js';
 import { TakeScreenshotTool } from '../tools/Tools.js';
 import type { EvaluationConfig, TestResult, TestCase, ValidationConfig } from './framework/types.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('VisionAgentEvaluationRunner');
 
 /**
  * Enhanced test case interface for vision-enabled tests
@@ -77,9 +80,9 @@ export class VisionAgentEvaluationRunner {
     // Determine if we should use vision for this test
     const shouldUseVision = this.shouldUseVision(testCase);
     
-    console.log(`[VisionAgentEvaluationRunner] Running test: ${testCase.name}`);
-    console.log(`[VisionAgentEvaluationRunner] Agent: ${toolName}`);
-    console.log(`[VisionAgentEvaluationRunner] Vision mode: ${shouldUseVision ? 'ENABLED' : 'DISABLED'}`);
+    logger.info('Running test: ${testCase.name}');
+    logger.info('Agent: ${toolName}');
+    logger.info(`Vision mode: ${shouldUseVision ? 'ENABLED' : 'DISABLED'}`);
 
     // Get the agent from ToolRegistry
     const agent = ToolRegistry.getRegisteredTool(toolName);
@@ -97,16 +100,16 @@ export class VisionAgentEvaluationRunner {
         const visualConfig = testCase.validation.llmJudge?.visualVerification;
         
         if (visualConfig?.captureBeforeAction) {
-          console.log('📸 Capturing before screenshot...');
+          logger.info('📸 Capturing before screenshot...');
           const beforeResult = await this.screenshotTool.execute({ fullPage: false });
           if ('dataUrl' in beforeResult) {
             beforeScreenshot = {
               dataUrl: beforeResult.dataUrl || '',
               timestamp: Date.now()
             };
-            console.log('✅ Before screenshot captured');
+            logger.info('✅ Before screenshot captured');
           } else if ('error' in beforeResult) {
-            console.warn('⚠️ Failed to capture before screenshot:', beforeResult.error);
+            logger.warn('⚠️ Failed to capture before screenshot:', beforeResult.error);
           }
         }
       }
@@ -120,21 +123,21 @@ export class VisionAgentEvaluationRunner {
         
         // Wait for dynamic content to settle
         const delay = visualConfig?.screenshotDelay || 2000;
-        console.log(`⏱️ Waiting ${delay}ms for content to settle...`);
+        logger.info(`⏱️ Waiting ${delay}ms for content to settle...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         
         // Capture after screenshot
         if (visualConfig?.captureAfterAction) {
-          console.log('📸 Capturing after screenshot...');
+          logger.info('📸 Capturing after screenshot...');
           const afterResult = await this.screenshotTool.execute({ fullPage: false });
           if ('dataUrl' in afterResult) {
             afterScreenshot = {
               dataUrl: afterResult.dataUrl || '',
               timestamp: Date.now()
             };
-            console.log('✅ After screenshot captured');
+            logger.info('✅ After screenshot captured');
           } else if ('error' in afterResult) {
-            console.warn('⚠️ Failed to capture after screenshot:', afterResult.error);
+            logger.warn('⚠️ Failed to capture after screenshot:', afterResult.error);
           }
         }
       }
@@ -144,7 +147,7 @@ export class VisionAgentEvaluationRunner {
         let llmJudgment;
         
         if (shouldUseVision && (beforeScreenshot || afterScreenshot)) {
-          console.log('🤖 Running vision-enabled evaluation...');
+          logger.info('🤖 Running vision-enabled evaluation...');
           // Use vision evaluation
           llmJudgment = await VisionLLMEvaluator.evaluateWithScreenshots(
             agentResult.output,
@@ -152,7 +155,7 @@ export class VisionAgentEvaluationRunner {
             { before: beforeScreenshot, after: afterScreenshot }
           );
         } else {
-          console.log('📝 Running standard LLM evaluation...');
+          logger.info('📝 Running standard LLM evaluation...');
           // Use standard LLM evaluation
           llmJudgment = await this.evaluateAgentResult(
             agentResult.output,
@@ -180,7 +183,7 @@ export class VisionAgentEvaluationRunner {
       return agentResult;
 
     } catch (error) {
-      console.error(`❌ Test failed with error:`, error);
+      logger.error(`❌ Test failed with error:`, error);
       return {
         testId: testCase.id,
         status: 'error',
@@ -361,6 +364,6 @@ export class VisionAgentEvaluationRunner {
    */
   setVisionEnabled(enabled: boolean): void {
     this.globalVisionEnabled = enabled;
-    console.log(`Global vision mode: ${enabled ? 'ENABLED' : 'DISABLED'}`);
+    logger.info(`Global vision mode: ${enabled ? 'ENABLED' : 'DISABLED'}`);
   }
 }

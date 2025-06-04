@@ -12,6 +12,9 @@ import { schemaExtractorTests } from '../evaluation/test-cases/schema-extractor-
 import { researchAgentTests, getBasicResearchTests } from '../evaluation/test-cases/research-agent-tests.js';
 import { actionAgentTests, getBasicActionTests } from '../evaluation/test-cases/action-agent-tests.js';
 import type { TestResult } from '../evaluation/framework/types.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('EvaluationDialog');
 
 const UIStrings = {
   /**
@@ -155,13 +158,13 @@ export class EvaluationDialog {
     try {
       this.#evaluationRunner = new EvaluationRunner();
     } catch (error) {
-      console.error('Failed to initialize evaluation runner:', error);
+      logger.error('Failed to initialize evaluation runner:', error);
     }
     
     try {
       this.#agentEvaluationRunner = new VisionAgentEvaluationRunner(this.#state.visionEnabled);
     } catch (error) {
-      console.error('Failed to initialize agent evaluation runner:', error);
+      logger.error('Failed to initialize agent evaluation runner:', error);
     }
 
     this.#addStyles();
@@ -814,7 +817,7 @@ export class EvaluationDialog {
       
       visionCheckbox.addEventListener('change', () => {
         this.#state.visionEnabled = visionCheckbox.checked;
-        console.log(`Vision verification ${this.#state.visionEnabled ? 'enabled' : 'disabled'}`);
+        logger.info(`Vision verification ${this.#state.visionEnabled ? 'enabled' : 'disabled'}`);
         // Update the runner's vision mode
         if (this.#agentEvaluationRunner) {
           this.#agentEvaluationRunner.setVisionEnabled(this.#state.visionEnabled);
@@ -1344,19 +1347,19 @@ export class EvaluationDialog {
 
     try {
       const logMessage = `🧪 Running single evaluation test: ${testId}`;
-      console.log(logMessage);
+      logger.info(logMessage);
       this.#addLog(logMessage);
       const result = await this.#evaluationRunner.runSingleTest(testId);
       
       this.#state.testResults.set(testId, result);
       this.#state.completedTests = 1;
       const successLog = `✅ Test completed: ${testId} - ${result.status.toUpperCase()}`;
-      console.log('✅ Test completed:', result);
+      logger.info('✅ Test completed:', result);
       this.#addLog(successLog);
       
     } catch (error) {
       const errorLog = `❌ Test failed: ${testId} - ${error instanceof Error ? error.message : String(error)}`;
-      console.error('❌ Test failed:', error);
+      logger.error('❌ Test failed:', error);
       this.#addLog(errorLog);
       this.#state.testResults.set(testId, {
         testId,
@@ -1387,7 +1390,7 @@ export class EvaluationDialog {
 
     try {
       const logMessage = `🧪 Running all evaluation tests (${schemaExtractorTests.length} tests)...`;
-      console.log(logMessage);
+      logger.info(logMessage);
       this.#addLog(logMessage);
       
       // Run tests sequentially with UI updates
@@ -1419,11 +1422,11 @@ export class EvaluationDialog {
       }
       
       const completionLog = '✅ All tests completed';
-      console.log(completionLog);
+      logger.info(completionLog);
       this.#addLog(completionLog);
       
     } catch (error) {
-      console.error('❌ Test batch failed:', error);
+      logger.error('❌ Test batch failed:', error);
     } finally {
       this.#state.isRunning = false;
       this.#state.currentRunningTest = undefined;
@@ -1448,7 +1451,7 @@ export class EvaluationDialog {
 
     try {
       const logMessage = `🤖 Running basic ${this.#state.agentType} agent tests (${basicTests.length} tests)...`;
-      console.log(logMessage);
+      logger.info(logMessage);
       this.#addLog(logMessage);
       
       // Run tests sequentially with UI updates
@@ -1480,11 +1483,11 @@ export class EvaluationDialog {
       }
       
       const completionLog = '✅ Basic agent tests completed';
-      console.log(completionLog);
+      logger.info(completionLog);
       this.#addLog(completionLog);
       
     } catch (error) {
-      console.error('❌ Agent test batch failed:', error);
+      logger.error('❌ Agent test batch failed:', error);
     } finally {
       this.#state.isRunning = false;
       this.#state.currentRunningTest = undefined;
@@ -1509,7 +1512,7 @@ export class EvaluationDialog {
 
     try {
       const logMessage = `🤖 Running all ${this.#state.agentType} agent tests (${allTests.length} tests)...`;
-      console.log(logMessage);
+      logger.info(logMessage);
       this.#addLog(logMessage);
       
       // Run tests sequentially with UI updates
@@ -1541,11 +1544,11 @@ export class EvaluationDialog {
       }
       
       const completionLog = '✅ All agent tests completed';
-      console.log(completionLog);
+      logger.info(completionLog);
       this.#addLog(completionLog);
       
     } catch (error) {
-      console.error('❌ Agent test batch failed:', error);
+      logger.error('❌ Agent test batch failed:', error);
     } finally {
       this.#state.isRunning = false;
       this.#state.currentRunningTest = undefined;
@@ -1617,7 +1620,7 @@ export class EvaluationDialog {
 
     try {
       const logMessage = `🎯 Running ${selectedTests.length} selected tests...`;
-      console.log(logMessage);
+      logger.info(logMessage);
       this.#addLog(logMessage);
       
       // Run selected tests sequentially
@@ -1658,14 +1661,14 @@ export class EvaluationDialog {
       }
       
       const completionLog = '✅ Selected tests completed';
-      console.log(completionLog);
+      logger.info(completionLog);
       this.#addLog(completionLog);
       
       // Clear selection after running
       this.#state.selectedTests.clear();
       
     } catch (error) {
-      console.error('❌ Selected test batch failed:', error);
+      logger.error('❌ Selected test batch failed:', error);
     } finally {
       this.#state.isRunning = false;
       this.#state.currentRunningTest = undefined;

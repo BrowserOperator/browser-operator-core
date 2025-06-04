@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 import type { TestCase, LLMJudgeResult } from './types.js';
+import { createLogger } from '../../core/Logger.js';
+
+const logger = createLogger('VisionLLMEvaluator');
 
 /**
  * Content types for multimodal messages
@@ -92,7 +95,7 @@ export class VisionLLMEvaluator {
     const hasScreenshots = Boolean(screenshots && (screenshots.before || screenshots.after));
     const canUseVision = this.isVisionModel(modelName) && hasScreenshots;
 
-    console.log(`VisionLLMEvaluator: Using model ${modelName}, Vision capable: ${canUseVision}`);
+    logger.info(`VisionLLMEvaluator: Using model ${modelName}, Vision capable: ${canUseVision}`);
 
     // Build the evaluation prompt
     const basePrompt = this.buildEvaluationPrompt(output, testCase);
@@ -124,7 +127,7 @@ export class VisionLLMEvaluator {
       return this.parseEvaluationResponse(response, canUseVision);
       
     } catch (error) {
-      console.error('Vision LLM evaluation failed:', error);
+      logger.error('Vision LLM evaluation failed:', error);
       throw error;
     }
   }
@@ -246,7 +249,7 @@ Respond in this JSON format:
       response_format: { type: 'json_object' }
     };
 
-    console.log('Calling OpenAI Vision API with payload:', {
+    logger.info('Calling OpenAI Vision API with payload:', {
       model: payload.model,
       messageCount: messages.length,
       hasImages: messages.some(m => 
@@ -272,7 +275,7 @@ Respond in this JSON format:
     const data = await response.json();
     
     if (data.usage) {
-      console.log('Token usage:', data.usage);
+      logger.info('Token usage:', data.usage);
     }
 
     return data;
@@ -306,7 +309,7 @@ Respond in this JSON format:
       };
       
     } catch (error) {
-      console.error('Failed to parse evaluation response:', error);
+      logger.error('Failed to parse evaluation response:', error);
       return {
         passed: false,
         score: 0,

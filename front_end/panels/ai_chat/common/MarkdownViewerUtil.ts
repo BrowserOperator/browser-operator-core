@@ -5,6 +5,9 @@
 import * as SDK from '../../../core/sdk/sdk.js';
 import * as Platform from '../../../core/platform/platform.js';
 import * as UI from '../../../ui/legacy/legacy.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('MarkdownViewerUtil');
 
 /**
  * Utility for opening markdown content in the AI Assistant viewer
@@ -40,7 +43,7 @@ export class MarkdownViewerUtil {
       const injectContent = async () => {
         const runtimeModel = target.model(SDK.RuntimeModel.RuntimeModel);
         if (!runtimeModel) {
-          console.error('No RuntimeModel found');
+          logger.error('No RuntimeModel found');
           return;
         }
 
@@ -122,7 +125,7 @@ export class MarkdownViewerUtil {
           }
 
           if (result.object && result.object.value) {
-            console.log('Markdown injection result:', result.object.value);
+            logger.debug('Markdown injection result:', result.object.value);
           } else if (result.exceptionDetails) {
             console.error('Exception during markdown injection:', result.exceptionDetails.text);
           }
@@ -136,7 +139,7 @@ export class MarkdownViewerUtil {
       setTimeout(injectContent, 1500);
 
     } catch (error) {
-      console.error('Failed to open markdown in AI Assistant:', error);
+      logger.error('Failed to open markdown in AI Assistant:', error);
       this.showErrorFallback(error.message);
     }
   }

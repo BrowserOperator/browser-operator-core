@@ -12,6 +12,9 @@ import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 import {AgentService, Events as AgentEvents} from '../core/AgentService.js';
 import { LiteLLMClient } from '../core/LiteLLMClient.js';
 import { EvaluationRunner } from '../evaluation/example-runner.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('AIChatPanel');
 
 import chatViewStyles from './chatView.css.js';
 import {
@@ -290,7 +293,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     // Save MODEL_OPTIONS to localStorage for backwards compatibility
     localStorage.setItem('ai_chat_model_options', JSON.stringify(MODEL_OPTIONS));
     
-    console.log('Updated model options:', {
+    logger.info('Updated model options:', {
       provider: selectedProvider,
       openaiModels: DEFAULT_OPENAI_MODELS.length,
       customModels: customModels.length,
@@ -314,7 +317,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     
     // Check if the model already exists
     if (savedCustomModels.includes(modelName)) {
-      console.log(`Custom model ${modelName} already exists, not adding again`);
+      logger.info(`Custom model ${modelName} already exists, not adding again`);
       return AIChatPanel.getModelOptions();
     }
     
@@ -358,7 +361,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     
     // Check if the model exists
     if (!savedCustomModels.includes(modelName)) {
-      console.log(`Custom model ${modelName} not found, nothing to remove`);
+      logger.info(`Custom model ${modelName} not found, nothing to remove`);
       return AIChatPanel.getModelOptions();
     }
     
@@ -502,7 +505,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     const storedModel = localStorage.getItem(MODEL_SELECTION_KEY);
     
     if (MODEL_OPTIONS.length === 0) {
-      console.warn('No model options available when loading model selections');
+      logger.warn('No model options available when loading model selections');
       return;
     }
     
@@ -532,7 +535,7 @@ export class AIChatPanel extends UI.Panel.Panel {
       localStorage.removeItem(NANO_MODEL_STORAGE_KEY);
     }
     
-    console.log('Loaded model selections:', {
+    logger.info('Loaded model selections:', {
       selectedModel: this.#selectedModel,
       miniModel: this.#miniModel,
       nanoModel: this.#nanoModel
@@ -566,7 +569,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     const endpoint = localStorage.getItem(LITELLM_ENDPOINT_KEY);
 
     if (!endpoint) {
-      console.log('No LiteLLM endpoint configured, skipping refresh');
+      logger.info('No LiteLLM endpoint configured, skipping refresh');
       // Update with empty LiteLLM models but keep any custom models
       AIChatPanel.updateModelOptions([], false);
       this.performUpdate();
@@ -579,7 +582,7 @@ export class AIChatPanel extends UI.Panel.Panel {
       AIChatPanel.updateModelOptions(litellmModels, hadWildcard);
       this.performUpdate();
     } catch (error) {
-      console.error('Failed to refresh LiteLLM models:', error);
+      logger.error('Failed to refresh LiteLLM models:', error);
       // Clear LiteLLM models on error
       AIChatPanel.updateModelOptions([], false);
       this.performUpdate();
@@ -596,7 +599,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     try {
       // Only attempt to fetch if an endpoint is provided
       if (!endpoint) {
-        console.log('No LiteLLM endpoint provided, skipping model fetch');
+        logger.info('No LiteLLM endpoint provided, skipping model fetch');
         return { models: [], hadWildcard: false };
       }
 
@@ -616,10 +619,10 @@ export class AIChatPanel extends UI.Panel.Panel {
         type: 'litellm' as const
       }));
 
-      console.log(`Fetched ${litellmModels.length} LiteLLM models, hadWildcard: ${hadWildcard}`);
+      logger.info(`Fetched ${litellmModels.length} LiteLLM models, hadWildcard: ${hadWildcard}`);
       return { models: litellmModels, hadWildcard };
     } catch (error) {
-      console.error('Failed to fetch LiteLLM models:', error);
+      logger.error('Failed to fetch LiteLLM models:', error);
       // Return empty array on error - no default models
       return { models: [], hadWildcard: false };
     }
@@ -642,7 +645,7 @@ export class AIChatPanel extends UI.Panel.Panel {
    */
   #getModelStatus(modelValue: string): { isLiteLLM: boolean, isPlaceholder: boolean } {
     if (!modelValue) {
-      console.warn('getModelStatus called with empty model value');
+      logger.warn('getModelStatus called with empty model value');
       return {
         isLiteLLM: false,
         isPlaceholder: false
@@ -652,7 +655,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     const modelOption = MODEL_OPTIONS.find(opt => opt.value === modelValue);
     
     if (!modelOption) {
-      console.warn(`Model ${modelValue} not found in MODEL_OPTIONS`);
+      logger.warn(`Model ${modelValue} not found in MODEL_OPTIONS`);
     }
     
     return {
@@ -665,7 +668,7 @@ export class AIChatPanel extends UI.Panel.Panel {
    * Initialize the agent service based on the current provider and configuration
    */
   #initializeAgentService(): void {
-    console.log("Initializing agent service...");
+    logger.info("Initializing agent service...");
     
     // Get the selected provider and check model status
     const selectedProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
@@ -698,7 +701,7 @@ export class AIChatPanel extends UI.Panel.Panel {
         this.#setCanSendMessagesState(true, "Agent service initialized successfully");
       })
       .catch(error => {
-        console.error('Failed to initialize AgentService:', error);
+        logger.error('Failed to initialize AgentService:', error);
         this.#setCanSendMessagesState(false, `Failed to initialize agent service: ${error instanceof Error ? error.message : String(error)}`);
       });
   }
@@ -707,7 +710,7 @@ export class AIChatPanel extends UI.Panel.Panel {
    * Helper to set the canSendMessages state and update UI accordingly
    */
   #setCanSendMessagesState(canSend: boolean, reason: string): void {
-    console.log(`Setting canSendMessages to ${canSend}: ${reason}`);
+    logger.info(`Setting canSendMessages to ${canSend}: ${reason}`);
     this.#canSendMessages = canSend;
     this.#updateChatViewInputState();
     this.performUpdate();
@@ -733,11 +736,11 @@ export class AIChatPanel extends UI.Panel.Panel {
       apiKey = localStorage.getItem(LITELLM_API_KEY_STORAGE_KEY) || localStorage.getItem('ai_chat_api_key') || null;
       
       if (!canProceed) {
-        console.log("LiteLLM selected but no endpoint configured. Messages disabled.");
+        logger.info("LiteLLM selected but no endpoint configured. Messages disabled.");
       } else if (!apiKey) {
-        console.log("LiteLLM endpoint configured but no API key provided. Some models may still work.");
+        logger.info("LiteLLM endpoint configured but no API key provided. Some models may still work.");
       } else {
-        console.log(`LiteLLM configured with endpoint ${liteLLMEndpoint} and API key is ${apiKey ? 'provided' : 'missing'}`);
+        logger.info(`LiteLLM configured with endpoint ${liteLLMEndpoint} and API key is ${apiKey ? 'provided' : 'missing'}`);
       }
     } else {
       // For OpenAI: API key is required
@@ -745,9 +748,9 @@ export class AIChatPanel extends UI.Panel.Panel {
       canProceed = Boolean(apiKey);
       
       if (!canProceed) {
-        console.log("OpenAI selected but no API key configured. Messages disabled.");
+        logger.info("OpenAI selected but no API key configured. Messages disabled.");
       } else {
-        console.log("OpenAI configured with API key.");
+        logger.info("OpenAI configured with API key.");
       }
     }
     
@@ -948,7 +951,7 @@ export class AIChatPanel extends UI.Panel.Panel {
    * Handles errors from sending messages
    */
   #handleSendMessageError(error: unknown): void {
-    console.error('Failed to send message:', error);
+    logger.error('Failed to send message:', error);
     this.#setProcessingState(false);
     
     const errorMessage: ModelChatMessage = {
@@ -1028,7 +1031,7 @@ export class AIChatPanel extends UI.Panel.Panel {
         inputPlaceholder: this.#getInputPlaceholderText(),
       };
     } catch (error) {
-      console.error('Error updating ChatView state:', error);
+      logger.error('Error updating ChatView state:', error);
     }
   }
 
@@ -1037,7 +1040,7 @@ export class AIChatPanel extends UI.Panel.Panel {
    * @param promptType The selected prompt type (null means deselected)
    */
   #handlePromptSelected(promptType: string | null): void {
-    console.log('Prompt selected in AIChatPanel:', promptType);
+    logger.info('Prompt selected in AIChatPanel:', promptType);
     this.#selectedAgentType = promptType;
     // Save selection for future sessions
     if (promptType) {
@@ -1062,7 +1065,7 @@ export class AIChatPanel extends UI.Panel.Panel {
    */
   #onHistoryClick(_event: MouseEvent): void {
     // Not yet implemented
-    console.log('History feature not yet implemented');
+    logger.info('History feature not yet implemented');
   }
 
   #onDeleteClick(): void {
@@ -1108,7 +1111,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     const prevProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
     const newProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
     
-    console.log(`Provider changing from ${prevProvider} to ${newProvider}`);
+    logger.info(`Provider changing from ${prevProvider} to ${newProvider}`);
     
     // Load saved settings
     this.#apiKey = localStorage.getItem('ai_chat_api_key');
@@ -1154,7 +1157,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     
     // Check if the current selected model is valid for the new provider
     if (!MODEL_OPTIONS.some(opt => opt.value === this.#selectedModel) && MODEL_OPTIONS.length > 0) {
-      console.log(`Selected model ${this.#selectedModel} is no longer valid with selected provider`);
+      logger.info(`Selected model ${this.#selectedModel} is no longer valid with selected provider`);
       this.#selectedModel = MODEL_OPTIONS[0].value;
       localStorage.setItem(MODEL_SELECTION_KEY, this.#selectedModel);
     }

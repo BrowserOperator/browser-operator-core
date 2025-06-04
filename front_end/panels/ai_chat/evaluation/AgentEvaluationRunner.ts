@@ -7,6 +7,9 @@ import { LLMEvaluator } from './framework/LLMEvaluator.js';
 import { AgentService } from '../core/AgentService.js';
 import { ToolRegistry } from '../agent_framework/ConfigurableAgentTool.js';
 import type { EvaluationConfig, TestResult, TestCase, ValidationConfig } from './framework/types.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('AgentEvaluationRunner');
 
 /**
  * Enhanced conversation info for agent tools
@@ -61,9 +64,9 @@ export class AgentEvaluationRunner {
   async runSingleTest<T = any>(testCase: TestCase<T>, agentName?: string): Promise<TestResult> {
     const toolName = agentName || testCase.tool;
     
-    console.log(`[AgentEvaluationRunner] Running test: ${testCase.name}`);
-    console.log(`[AgentEvaluationRunner] Agent: ${toolName}`);
-    console.log(`[AgentEvaluationRunner] Expected timeout: ${testCase.metadata.timeout || this.config.timeoutMs}ms`);
+    logger.info('Running test: ${testCase.name}');
+    logger.info('Agent: ${toolName}');
+    logger.info('Expected timeout: ${testCase.metadata.timeout || this.config.timeoutMs}ms');
 
     // Get the agent from ToolRegistry
     const agent = ToolRegistry.getRegisteredTool(toolName);
@@ -75,7 +78,7 @@ export class AgentEvaluationRunner {
     
     // Add specialized LLM evaluation for agent results
     if (result.status === 'passed' && result.output && testCase.validation.type !== 'snapshot') {
-      console.log(`[AgentEvaluationRunner] Adding specialized agent evaluation...`);
+      logger.info('Adding specialized agent evaluation...');
       
       try {
         const llmJudgment = await this.evaluateAgentResult(
@@ -90,7 +93,7 @@ export class AgentEvaluationRunner {
           result.validation.summary += ` | Agent Score: ${llmJudgment.score}/100`;
         }
       } catch (error) {
-        console.warn('[AgentEvaluationRunner] Agent evaluation failed:', error);
+        logger.warn('[AgentEvaluationRunner] Agent evaluation failed:', error);
       }
     }
 
@@ -104,7 +107,7 @@ export class AgentEvaluationRunner {
   async runTestBatch<T = any>(testCases: TestCase<T>[], agentName?: string): Promise<TestResult[]> {
     const results: TestResult[] = [];
     
-    console.log(`[AgentEvaluationRunner] Running ${testCases.length} agent tests...`);
+    logger.info('Running ${testCases.length} agent tests...');
     
     // Get the agent once if specified
     let agent = null;
@@ -120,12 +123,12 @@ export class AgentEvaluationRunner {
       const testCase = testCases[i];
       const toolName = agentName || testCase.tool;
       
-      console.log(`[AgentEvaluationRunner] Running test ${i + 1}/${testCases.length}: ${testCase.name}`);
+      logger.info('Running test ${i + 1}/${testCases.length}: ${testCase.name}');
       
       // Get agent for this specific test if not using a fixed agent
       const testAgent = agent || ToolRegistry.getRegisteredTool(toolName);
       if (!testAgent) {
-        console.error(`[AgentEvaluationRunner] Agent "${toolName}" not found, skipping test`);
+        logger.error(`Agent "${toolName}" not found, skipping test`);
         results.push({
           testId: testCase.id,
           status: 'error',
@@ -152,7 +155,7 @@ export class AgentEvaluationRunner {
             result.validation.passed = result.validation.passed && llmJudgment.passed;
           }
         } catch (error) {
-          console.warn(`[AgentEvaluationRunner] Agent evaluation failed for ${testCase.id}:`, error);
+          logger.warn(`Agent evaluation failed for ${testCase.id}:`, error);
         }
       }
 
@@ -160,7 +163,7 @@ export class AgentEvaluationRunner {
       
       // Longer delay between agent tests to allow cleanup
       if (i < testCases.length - 1) {
-        console.log('[AgentEvaluationRunner] Waiting between tests...');
+        logger.info('Waiting between tests...');
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
@@ -314,26 +317,26 @@ export class AgentEvaluationRunner {
    * Print detailed agent test result
    */
   private printAgentTestResult(result: TestResult): void {
-    console.log('\n' + '='.repeat(80));
-    console.log(`Agent Test: ${result.testId}`);
-    console.log(`Status: ${result.status.toUpperCase()}`);
-    console.log(`Duration: ${result.duration}ms`);
+    logger.info('\n' + '='.repeat(80));
+    logger.info(`Agent Test: ${result.testId}`);
+    logger.info(`Status: ${result.status.toUpperCase()}`);
+    logger.info(`Duration: ${result.duration}ms`);
     
     if (result.error) {
-      console.log(`Error: ${result.error}`);
+      logger.info(`Error: ${result.error}`);
     }
     
     if (result.validation) {
-      console.log(`Validation: ${result.validation.passed ? 'PASSED' : 'FAILED'}`);
-      console.log(`Summary: ${result.validation.summary}`);
+      logger.info(`Validation: ${result.validation.passed ? 'PASSED' : 'FAILED'}`);
+      logger.info(`Summary: ${result.validation.summary}`);
       
       if (result.validation.llmJudge) {
         const judge = result.validation.llmJudge;
-        console.log(`Agent Quality Score: ${judge.score}/100`);
-        console.log(`Explanation: ${judge.explanation}`);
+        logger.info(`Agent Quality Score: ${judge.score}/100`);
+        logger.info(`Explanation: ${judge.explanation}`);
         
         if (judge.issues && judge.issues.length > 0) {
-          console.log(`Issues: ${judge.issues.join(', ')}`);
+          logger.info(`Issues: ${judge.issues.join(', ')}`);
         }
       }
     }
@@ -341,27 +344,27 @@ export class AgentEvaluationRunner {
     // Show agent-specific information
     if (result.output && result.status === 'passed') {
       const conversationInfo = this.extractConversationInfo(result.output);
-      console.log('\nAgent Analysis:');
-      console.log(`  Conversation steps: ${conversationInfo.stepCount}`);
-      console.log(`  Agent iterations: ${conversationInfo.iterations}`);
-      console.log(`  Tools used: ${conversationInfo.toolsUsed.join(', ') || 'None detected'}`);
-      console.log(`  Handoff occurred: ${conversationInfo.handoffOccurred ? 'Yes' : 'No'}`);
+      logger.info('\nAgent Analysis:');
+      logger.info(`  Conversation steps: ${conversationInfo.stepCount}`);
+      logger.info(`  Agent iterations: ${conversationInfo.iterations}`);
+      logger.info(`  Tools used: ${conversationInfo.toolsUsed.join(', ') || 'None detected'}`);
+      logger.info(`  Handoff occurred: ${conversationInfo.handoffOccurred ? 'Yes' : 'No'}`);
       if (conversationInfo.handoffTarget) {
-        console.log(`  Handoff target: ${conversationInfo.handoffTarget}`);
+        logger.info(`  Handoff target: ${conversationInfo.handoffTarget}`);
       }
-      console.log(`  Error count: ${conversationInfo.errorCount}`);
-      console.log(`  Final status: ${conversationInfo.finalStatus}`);
+      logger.info(`  Error count: ${conversationInfo.errorCount}`);
+      logger.info(`  Final status: ${conversationInfo.finalStatus}`);
       if (conversationInfo.researchSources && conversationInfo.researchSources.length > 0) {
-        console.log(`  Sources found: ${conversationInfo.researchSources.length}`);
+        logger.info(`  Sources found: ${conversationInfo.researchSources.length}`);
       }
       
       // Show brief output preview
-      console.log('\nOutput Preview:');
+      logger.info('\nOutput Preview:');
       const preview = JSON.stringify(result.output, null, 2);
-      console.log(preview.length > 1000 ? preview.substring(0, 1000) + '...' : preview);
+      logger.info(preview.length > 1000 ? preview.substring(0, 1000) + '...' : preview);
     }
     
-    console.log('='.repeat(80));
+    logger.info('='.repeat(80));
   }
 
   /**
@@ -390,23 +393,23 @@ export class AgentEvaluationRunner {
     const handoffRate = conversationStats.length > 0 ?
       (conversationStats.filter(info => info.handoffOccurred).length / conversationStats.length) * 100 : 0;
 
-    console.log('\n' + '='.repeat(80));
-    console.log('AGENT EVALUATION SUMMARY');
-    console.log('='.repeat(80));
-    console.log(`Total Tests: ${results.length}`);
-    console.log(`Passed: ${passed}`);
-    console.log(`Failed: ${failed}`);
-    console.log(`Errors: ${errors}`);
-    console.log(`Success Rate: ${Math.round((passed / results.length) * 100)}%`);
-    console.log(`Average Duration: ${Math.round(avgDuration)}ms`);
+    logger.info('\n' + '='.repeat(80));
+    logger.info('AGENT EVALUATION SUMMARY');
+    logger.info('='.repeat(80));
+    logger.info(`Total Tests: ${results.length}`);
+    logger.info(`Passed: ${passed}`);
+    logger.info(`Failed: ${failed}`);
+    logger.info(`Errors: ${errors}`);
+    logger.info(`Success Rate: ${Math.round((passed / results.length) * 100)}%`);
+    logger.info(`Average Duration: ${Math.round(avgDuration)}ms`);
     
     if (withValidation.length > 0) {
-      console.log(`Average Quality Score: ${Math.round(avgScore)}/100`);
+      logger.info(`Average Quality Score: ${Math.round(avgScore)}/100`);
     }
     
-    console.log('\nAgent Behavior Analysis:');
-    console.log(`Average Iterations: ${Math.round(avgIterations * 10) / 10}`);
-    console.log(`Handoff Rate: ${Math.round(handoffRate)}%`);
+    logger.info('\nAgent Behavior Analysis:');
+    logger.info(`Average Iterations: ${Math.round(avgIterations * 10) / 10}`);
+    logger.info(`Handoff Rate: ${Math.round(handoffRate)}%`);
     
     // Show most used tools
     const allToolsUsed = conversationStats.flatMap(info => info.toolsUsed);
@@ -416,14 +419,14 @@ export class AgentEvaluationRunner {
     });
     
     if (toolCounts.size > 0) {
-      console.log('\nMost Used Tools:');
+      logger.info('\nMost Used Tools:');
       const sortedTools = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]);
       sortedTools.slice(0, 5).forEach(([tool, count]) => {
-        console.log(`  ${tool}: ${count} times`);
+        logger.info(`  ${tool}: ${count} times`);
       });
     }
     
-    console.log('='.repeat(80));
+    logger.info('='.repeat(80));
   }
 
   /**
@@ -434,7 +437,7 @@ export class AgentEvaluationRunner {
       const runner = new AgentEvaluationRunner();
       await runner.runSingleTest(testCase, agentName);
     } catch (error) {
-      console.error('[AgentEvaluationRunner] Quick test failed:', error);
+      logger.error('[AgentEvaluationRunner] Quick test failed:', error);
     }
   }
 }

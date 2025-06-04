@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {LiteLLMClient, type LiteLLMResponse} from './LiteLLMClient.js';
+import {LiteLLMClient, type LiteLLMResponse, type OpenAIMessage} from './LiteLLMClient.js';
 import {OpenAIClient, type OpenAIResponse} from './OpenAIClient.js';
+import { createLogger } from './Logger.js';
+import { ChatMessageEntity, type ChatMessage } from '../ui/ChatView.js';
+
+const logger = createLogger('UnifiedLLMClient');
 
 /**
  * Unified options for LLM calls that work across different providers
@@ -70,31 +74,47 @@ export class UnifiedLLMClient {
     userPrompt: string,
     options?: UnifiedLLMOptions
   ): Promise<string> {
-    const response = await this.callLLMWithResponse(apiKey, modelName, userPrompt, options);
+    // Convert simple prompt to message format
+    const messages = [{
+      entity: ChatMessageEntity.USER as const,
+      text: userPrompt
+    }];
+    
+    const systemPrompt = options?.systemPrompt || 'You are a helpful AI assistant.';
+    const response = await this.callLLMWithMessages(apiKey, modelName, messages, { ...options, systemPrompt });
     return response.text || '';
   }
 
   /**
-   * Call LLM and get full response including function calls
+   * Call LLM and get full response including function calls using message array format
    */
-  static async callLLMWithResponse(
+  static async callLLMWithMessages(
     apiKey: string,
     modelName: string,
-    userPrompt: string,
-    options?: UnifiedLLMOptions
+    messages: ChatMessage[],
+    options?: UnifiedLLMOptions & { systemPrompt: string }
   ): Promise<UnifiedLLMResponse> {
+    if (!options?.systemPrompt) {
+      throw new Error('systemPrompt is required when calling LLM with messages');
+    }
+
     const modelType = this.getModelType(modelName);
 
-    console.log('[UnifiedLLMClient] Calling LLM:', {
+    logger.debug('Calling LLM with messages:', {
       modelName,
       modelType,
-      promptLength: userPrompt.length,
+      messageCount: messages.length,
       hasOptions: Boolean(options),
     });
 
+    // Convert to OpenAI format with system prompt
+    const openaiMessages = this.convertToOpenAIMessages(messages, options.systemPrompt);
+    
+    logger.debug('Converted to OpenAI messages:', JSON.stringify(openaiMessages, null, 2));
+
     try {
       if (modelType === 'litellm') {
-        const response = await this.callLiteLLM(apiKey, modelName, userPrompt, options);
+        const response = await this.callLiteLLMWithMessages(apiKey, modelName, openaiMessages, options);
         return {
           text: response.text,
           functionCall: response.functionCall,
@@ -102,7 +122,7 @@ export class UnifiedLLMClient {
           reasoning: (response as any).reasoning, // LiteLLM may not have reasoning
         };
       }
-        const response = await this.callOpenAI(apiKey, modelName, userPrompt, options);
+        const response = await this.callOpenAIWithMessages(apiKey, modelName, openaiMessages, options);
         return {
           text: response.text,
           functionCall: response.functionCall,
@@ -111,13 +131,76 @@ export class UnifiedLLMClient {
         };
 
     } catch (error) {
-      console.error('[UnifiedLLMClient] Error calling LLM:', {
+      logger.error('Error calling LLM with messages:', {
         modelName,
         modelType,
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
+  }
+
+
+  /**
+   * Converts internal ChatMessage array to OpenAI-compatible messages array
+   */
+  private static convertToOpenAIMessages(
+    messages: ChatMessage[], 
+    systemPrompt: string
+  ): OpenAIMessage[] {
+    const result: OpenAIMessage[] = [];
+    
+    // Always add system prompt first
+    result.push({
+      role: 'system',
+      content: systemPrompt
+    });
+    
+    for (const msg of messages) {
+      switch (msg.entity) {
+        case ChatMessageEntity.USER:
+          result.push({ 
+            role: 'user', 
+            content: msg.text 
+          });
+          break;
+          
+        case ChatMessageEntity.MODEL:
+          if (msg.action === 'tool' && msg.toolName) {
+            result.push({
+              role: 'assistant',
+              content: msg.reasoning ? msg.reasoning.join('\n') : null,
+              tool_calls: [{
+                id: msg.toolCallId || crypto.randomUUID(),
+                type: 'function',
+                function: {
+                  name: msg.toolName,
+                  arguments: JSON.stringify(msg.toolArgs || {})
+                }
+              }]
+            });
+          } else if (msg.action === 'final' && msg.answer) {
+            result.push({ 
+              role: 'assistant', 
+              content: msg.answer 
+            });
+          }
+          break;
+          
+        case ChatMessageEntity.TOOL_RESULT:
+          if (msg.toolCallId) {
+            result.push({
+              role: 'tool',
+              content: msg.resultText,
+              tool_call_id: msg.toolCallId,
+              name: msg.toolName
+            });
+          }
+          break;
+      }
+    }
+    
+    return result;
   }
 
   /**
@@ -129,28 +212,28 @@ export class UnifiedLLMClient {
       const modelOption = modelOptions.find(opt => opt.value === modelName);
       return modelOption?.type || 'openai';
     } catch (e) {
-      console.error('Error parsing model options:', e);
+      logger.error('Error parsing model options:', e);
       return 'openai';
     }
   }
 
   /**
-   * Call OpenAI models
+   * Call OpenAI models with message array format
    */
-  private static async callOpenAI(
+  private static async callOpenAIWithMessages(
     apiKey: string,
     modelName: string,
-    userPrompt: string,
+    openaiMessages: OpenAIMessage[],
     options?: UnifiedLLMOptions
   ) {
     try {
-      // Convert UnifiedLLMOptions to OpenAI-specific options
+      // Convert UnifiedLLMOptions to OpenAI-specific options (excluding tools and systemPrompt)
       const openAIOptions = this.convertToOpenAIOptions(options);
-
-      return await OpenAIClient.callOpenAI(
+      
+      return await OpenAIClient.callOpenAIWithMessages(
         apiKey,
         modelName,
-        userPrompt,
+        openaiMessages,
         openAIOptions
       );
     } catch (error) {
@@ -160,24 +243,24 @@ export class UnifiedLLMClient {
   }
 
   /**
-   * Call LiteLLM models
+   * Call LiteLLM models with message array format
    */
-  private static async callLiteLLM(
+  private static async callLiteLLMWithMessages(
     apiKey: string,
     modelName: string,
-    userPrompt: string,
+    openaiMessages: OpenAIMessage[],
     options?: UnifiedLLMOptions
   ) {
     try {
       const { endpoint, apiKey: liteLLMApiKey } = this.getLiteLLMConfig();
 
-      // Convert UnifiedLLMOptions to LiteLLM-specific options
+      // Convert UnifiedLLMOptions to LiteLLM-specific options (excluding tools and systemPrompt)
       const liteLLMOptions = this.convertToLiteLLMOptions(options, endpoint);
 
-      return await LiteLLMClient.callLiteLLM(
+      return await LiteLLMClient.callLiteLLMWithMessages(
         liteLLMApiKey || apiKey,
         modelName,
-        userPrompt,
+        openaiMessages,
         liteLLMOptions
       );
     } catch (error) {
@@ -193,7 +276,7 @@ export class UnifiedLLMClient {
     const endpoint = localStorage.getItem(this.LITELLM_ENDPOINT_KEY) || '';
     const apiKey = localStorage.getItem(this.LITELLM_API_KEY_KEY) || '';
 
-    console.log('[UnifiedLLMClient] LiteLLM config:', {
+    logger.debug('LiteLLM config:', {
       hasEndpoint: Boolean(endpoint),
       hasApiKey: Boolean(apiKey),
       endpointLength: endpoint.length,
@@ -309,7 +392,7 @@ export class UnifiedLLMClient {
     try {
       return JSON.parse(localStorage.getItem(this.MODEL_OPTIONS_KEY) || '[]') as ModelOption[];
     } catch (e) {
-      console.error('Error parsing model options:', e);
+      logger.error('Error parsing model options:', e);
       return [];
     }
   }

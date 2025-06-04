@@ -8,6 +8,9 @@ import { AgentService } from '../core/AgentService.js';
 import { SchemaBasedExtractorTool } from '../tools/SchemaBasedExtractorTool.js';
 import { schemaExtractorTests, simpleTest } from './test-cases/schema-extractor-tests.js';
 import type { EvaluationConfig, TestResult } from './framework/types.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('EvaluationRunner');
 
 /**
  * Example runner for the evaluation framework
@@ -50,8 +53,8 @@ export class EvaluationRunner {
       schemaExtractorTests.find(t => t.id === testId) || simpleTest :
       simpleTest;
 
-    console.log(`[EvaluationRunner] Running test: ${testCase.name}`);
-    console.log(`[EvaluationRunner] URL: ${testCase.url}`);
+    logger.debug(`[EvaluationRunner] Running test: ${testCase.name}`);
+    logger.debug(`[EvaluationRunner] URL: ${testCase.url}`);
 
     // Create the tool instance
     const tool = new SchemaBasedExtractorTool();
@@ -59,7 +62,7 @@ export class EvaluationRunner {
     
     // Add LLM evaluation if test passed
     if (result.status === 'passed' && result.output && testCase.validation.type !== 'snapshot') {
-      console.log(`[EvaluationRunner] Adding LLM evaluation...`);
+      logger.debug(`[EvaluationRunner] Adding LLM evaluation...`);
       
       try {
         const llmJudgment = await this.llmEvaluator.evaluate(
@@ -86,7 +89,7 @@ export class EvaluationRunner {
    * Run all tests
    */
   async runAllTests(): Promise<TestResult[]> {
-    console.log(`[EvaluationRunner] Running ${schemaExtractorTests.length} tests...`);
+    logger.debug(`[EvaluationRunner] Running ${schemaExtractorTests.length} tests...`);
     
     // Create tool instances map
     const toolInstances = new Map();
@@ -125,37 +128,37 @@ export class EvaluationRunner {
    * Print test result
    */
   private printTestResult(result: TestResult): void {
-    console.log('\n' + '='.repeat(60));
-    console.log(`Test: ${result.testId}`);
-    console.log(`Status: ${result.status.toUpperCase()}`);
-    console.log(`Duration: ${result.duration}ms`);
+    logger.debug('\n' + '='.repeat(60));
+    logger.debug(`Test: ${result.testId}`);
+    logger.debug(`Status: ${result.status.toUpperCase()}`);
+    logger.debug(`Duration: ${result.duration}ms`);
     
     if (result.error) {
-      console.log(`Error: ${result.error}`);
+      logger.debug(`Error: ${result.error}`);
     }
     
     if (result.validation) {
-      console.log(`Validation: ${result.validation.passed ? 'PASSED' : 'FAILED'}`);
-      console.log(`Summary: ${result.validation.summary}`);
+      logger.debug(`Validation: ${result.validation.passed ? 'PASSED' : 'FAILED'}`);
+      logger.debug(`Summary: ${result.validation.summary}`);
       
       if (result.validation.llmJudge) {
         const judge = result.validation.llmJudge;
-        console.log(`LLM Score: ${judge.score}/100`);
-        console.log(`Explanation: ${judge.explanation}`);
+        logger.debug(`LLM Score: ${judge.score}/100`);
+        logger.debug(`Explanation: ${judge.explanation}`);
         
         if (judge.issues && judge.issues.length > 0) {
-          console.log(`Issues: ${judge.issues.join(', ')}`);
+          logger.debug(`Issues: ${judge.issues.join(', ')}`);
         }
       }
     }
     
     if (result.output && result.status === 'passed') {
-      console.log('\nOutput Preview:');
+      logger.debug('\nOutput Preview:');
       const preview = JSON.stringify(result.output, null, 2);
-      console.log(preview.length > 500 ? preview.substring(0, 500) + '...' : preview);
+      logger.debug(preview.length > 500 ? preview.substring(0, 500) + '...' : preview);
     }
     
-    console.log('='.repeat(60));
+    logger.debug('='.repeat(60));
   }
 
   /**
@@ -168,15 +171,15 @@ export class EvaluationRunner {
     
     const avgDuration = results.reduce((sum, r) => sum + r.duration, 0) / results.length;
     
-    console.log('\n' + '='.repeat(60));
-    console.log('EVALUATION SUMMARY');
-    console.log('='.repeat(60));
-    console.log(`Total Tests: ${results.length}`);
-    console.log(`Passed: ${passed}`);
-    console.log(`Failed: ${failed}`);
-    console.log(`Errors: ${errors}`);
-    console.log(`Average Duration: ${Math.round(avgDuration)}ms`);
-    console.log(`Success Rate: ${Math.round((passed / results.length) * 100)}%`);
+    logger.debug('\n' + '='.repeat(60));
+    logger.debug('EVALUATION SUMMARY');
+    logger.debug('='.repeat(60));
+    logger.debug(`Total Tests: ${results.length}`);
+    logger.debug(`Passed: ${passed}`);
+    logger.debug(`Failed: ${failed}`);
+    logger.debug(`Errors: ${errors}`);
+    logger.debug(`Average Duration: ${Math.round(avgDuration)}ms`);
+    logger.debug(`Success Rate: ${Math.round((passed / results.length) * 100)}%`);
     
     // LLM Judge statistics
     const withLLMJudge = results.filter(r => r.validation?.llmJudge);
@@ -185,10 +188,10 @@ export class EvaluationRunner {
         (sum, r) => sum + (r.validation?.llmJudge?.score || 0), 
         0
       ) / withLLMJudge.length;
-      console.log(`Average LLM Score: ${Math.round(avgScore)}/100`);
+      logger.debug(`Average LLM Score: ${Math.round(avgScore)}/100`);
     }
     
-    console.log('='.repeat(60));
+    logger.debug('='.repeat(60));
   }
 
   /**
@@ -199,7 +202,7 @@ export class EvaluationRunner {
       const runner = new EvaluationRunner();
       await runner.runSingleTest('github-repo-001');
     } catch (error) {
-      console.error('[EvaluationRunner] Quick test failed:', error);
+      logger.error('[EvaluationRunner] Quick test failed:', error);
     }
   }
 }

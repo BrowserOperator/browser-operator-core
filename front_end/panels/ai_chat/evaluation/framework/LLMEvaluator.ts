@@ -4,6 +4,9 @@
 
 import { UnifiedLLMClient } from '../../core/UnifiedLLMClient.js';
 import type { TestCase, LLMJudgeResult, ValidationConfig } from './types.js';
+import { createLogger } from '../../core/Logger.js';
+
+const logger = createLogger('LLMEvaluator');
 
 /**
  * LLM-based evaluator for judging tool output quality
@@ -45,7 +48,7 @@ export class LLMEvaluator {
 
       return this.parseJudgment(response);
     } catch (error) {
-      console.error('[LLMEvaluator] Evaluation error:', error);
+      logger.error('[LLMEvaluator] Evaluation error:', error);
       return {
         passed: false,
         score: 0,
@@ -152,7 +155,7 @@ Required JSON format:
     try{
       parsed = JSON.parse(response); // Validate if response is already JSON
     } catch (error) {
-      console.error('[LLMEvaluator] Failed to parse judgment response:', error);
+      logger.error('[LLMEvaluator] Failed to parse judgment response:', error);
     }
 
     try {
@@ -198,7 +201,7 @@ Required JSON format:
         confidence: parsed.confidence,
       };
     } catch (error) {
-      console.error('[LLMEvaluator] Failed to parse judgment:', error);
+      logger.error('[LLMEvaluator] Failed to parse judgment:', error);
       
       // Try to extract some meaning from the response
       const passed = response.toLowerCase().includes('passed') || 
@@ -223,7 +226,7 @@ Required JSON format:
     const evaluations: LLMJudgeResult[] = [];
 
     for (const { output, testCase } of results) {
-      console.log(`[LLMEvaluator] Evaluating ${testCase.id}...`);
+      logger.info('Evaluating ${testCase.id}...');
       const judgment = await this.evaluate(output, testCase, config);
       evaluations.push(judgment);
       

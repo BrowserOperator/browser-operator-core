@@ -9,6 +9,9 @@
 
 import type * as SDK from '../../../core/sdk/sdk.js';
 import * as Protocol from '../../../generated/protocol.js';
+import { createLogger } from '../core/Logger.js';
+
+const logger = createLogger('utils');
 
 import type { AccessibilityNode, IFrameAccessibilityNode, TreeResult } from './context.js';
 import type { LogLine } from './log.js';
@@ -85,7 +88,7 @@ export function getFormattedSubtreeByNodeId(targetNodeId: string, allNodes: Acce
 
   // 2. Check if the target node exists
   if (!nodeMap.has(targetNodeId)) {
-    console.warn(`Node with ID ${targetNodeId} not found in the provided list.`);
+    logger.warn(`Node with ID ${targetNodeId} not found in the provided list.`);
     return null;
   }
 
@@ -112,7 +115,6 @@ export function getFormattedSubtreeByNodeId(targetNodeId: string, allNodes: Acce
 async function cleanStructuralNodes(
   node: AccessibilityNode,
   target?: SDK.Target.Target,
-  logger?: (logLine: LogLine) => void,
 ): Promise<AccessibilityNode | null> {
   // 1) Filter out nodes with negative IDs
   if (node.nodeId && parseInt(node.nodeId, 10) < 0) {
@@ -127,7 +129,7 @@ async function cleanStructuralNodes(
 
   // 3) Recursively clean children
   const cleanedChildrenPromises = node.children.map(child =>
-    cleanStructuralNodes(child, target, logger),
+    cleanStructuralNodes(child, target),
   );
   const resolvedChildren = await Promise.all(cleanedChildrenPromises);
   const cleanedChildren = resolvedChildren.filter(
@@ -276,7 +278,6 @@ async function cleanStructuralNodes(
 export async function buildHierarchicalTree(
   nodes: AccessibilityNode[],
   target?: SDK.Target.Target,
-  logger?: (logLine: LogLine) => void,
   // Add parameter to receive scrollable IDs
   scrollableBackendIds?: Set<number>,
 ): Promise<TreeResult> {
@@ -369,7 +370,7 @@ export async function buildHierarchicalTree(
     .filter(Boolean) as AccessibilityNode[];
 
   const cleanedTreePromises = rootNodes.map(node =>
-    cleanStructuralNodes(node, target, logger),
+    cleanStructuralNodes(node, target),
   );
   const finalTree = (await Promise.all(cleanedTreePromises)).filter(
     Boolean,
@@ -392,7 +393,6 @@ export async function buildHierarchicalTree(
  */
 export async function getAccessibilityTree(
   target: SDK.Target.Target,
-  logger: (logLine: LogLine) => void,
 ): Promise<TreeResult> {
   try {
     // Identify which elements are scrollable and get their backendNodeIds
@@ -465,32 +465,13 @@ export async function getAccessibilityTree(
     const hierarchicalTree = await buildHierarchicalTree(
       accessibilityNodes,
       target,
-      logger,
       scrollableBackendIds, // Pass the set of scrollable IDs
     );
 
-    logger({
-      category: 'observation',
-      message: `got accessibility tree in ${Date.now() - startTime}ms`,
-      level: 1,
-    });
+    logger.info(`got accessibility tree in ${Date.now() - startTime}ms`);
     return hierarchicalTree;
   } catch (error) {
-    logger({
-      category: 'observation',
-      message: 'Error getting accessibility tree',
-      level: 1,
-      auxiliary: {
-        error: {
-          value: error instanceof Error ? error.message : String(error),
-          type: 'string',
-        },
-        trace: {
-          value: error instanceof Error && error.stack ? error.stack : '',
-          type: 'string',
-        },
-      },
-    });
+    logger.error('Error getting accessibility tree', error);
     throw error;
   }
 }
@@ -500,7 +481,7 @@ export async function getAccessibilityTree(
 const functionString = `
 function getNodePath(el) {
   if (!el || (el.nodeType !== Node.ELEMENT_NODE && el.nodeType !== Node.TEXT_NODE)) {
-    console.log("el is not a valid node type");
+    logger.info("el is not a valid node type");
     return "";
   }
 
@@ -590,7 +571,7 @@ export async function getXPathByBackendNodeId(
     // Then get the XPath using the resolved object
     return await getXPathByResolvedObjectId(target, objectId);
   } catch (error) {
-    console.error('Error resolving BackendNodeId to XPath:', error);
+    logger.error('Error resolving BackendNodeId to XPath:', error);
     return '';
   }
 }
@@ -753,7 +734,7 @@ export async function findScrollableElementIds(
       }
     }
   } catch (error) {
-    console.error('Error finding scrollable element IDs:', error);
+    logger.error('Error finding scrollable element IDs:', error);
   }
 
   return scrollableBackendIds;
@@ -851,7 +832,7 @@ export async function performAction(
         });
       } catch (e) {
         // If direct click fails, fall back to previous implementation
-        console.warn(`Direct click failed, falling back to mouse events: ${e}`);
+        logger.warn(`Direct click failed, falling back to mouse events: ${e}`);
 
         // Get element coordinates
         const nodeResponse = await domAgent.invoke_describeNode({ objectId });
@@ -1004,12 +985,10 @@ export async function performAction(
  */
 export async function getVisibleAccessibilityTree(
   target: SDK.Target.Target,
-  // Keep logger parameter for non-debug logs, but use console.log for debug
-  logger: (logLine: LogLine) => void,
 ): Promise<TreeResult> {
   const startTime = Date.now();
   // Use console.log for debug message
-  console.log('[DEBUG] Starting getVisibleAccessibilityTree...');
+  logger.info('Starting getVisibleAccessibilityTree...');
   try {
     // 1. Get the full accessibility tree data first
     const accessibilityAgent = target.accessibilityAgent();
@@ -1038,27 +1017,21 @@ export async function getVisibleAccessibilityTree(
       );
       const fullTreeResult = await buildHierarchicalTree(fullAccessibilityNodes); // Use existing builder
       // Use console.log for debug message
-      console.log('[DEBUG] Full Accessibility Tree (Simplified):\n', fullTreeResult.simplified);
+      logger.info('Full Accessibility Tree (Simplified):\n', fullTreeResult.simplified);
     } catch (fullTreeError) {
-        // Keep using logger for actual errors/warnings
-        logger({
-            category: 'observation', // Change category? maybe 'warning' or keep 'observation'
-            message: 'Error generating full tree debug log',
-            level: 2,
-            auxiliary: { error: { value: fullTreeError instanceof Error ? fullTreeError.message : String(fullTreeError), type: 'string'}}
-        });
+        logger.warn('Error generating full tree debug log', fullTreeError);
     }
     // --- END DEBUG LOG ---
 
     // 2. Identify which elements are in the viewport
     const visibleBackendIds = await findElementsInViewport(target);
     // Use console.log for debug message
-    console.log(`[DEBUG] Found ${visibleBackendIds.size} visible backendNodeIds:`, Array.from(visibleBackendIds));
+    logger.info('Found ${visibleBackendIds.size} visible backendNodeIds:', Array.from(visibleBackendIds));
 
     // If we couldn't find any visible elements, return empty
     if (visibleBackendIds.size === 0) {
-      // Keep using logger for observation message
-      logger({ category: 'observation', message: 'Could not identify any elements in the viewport.', level: 1});
+      // Use module logger for observation message
+      logger.info('Could not identify any elements in the viewport.');
       return { tree: [], simplified: '', iframes: [], scrollableContainerNodes: [] };
     }
 
@@ -1092,7 +1065,7 @@ export async function getVisibleAccessibilityTree(
       }
     }
     // Use console.log for debug message
-    console.log(`[DEBUG] Found ${relevantNodeIds.size} relevant nodeIds (visible + ancestors):`, Array.from(relevantNodeIds));
+    logger.info('Found ${relevantNodeIds.size} relevant nodeIds (visible + ancestors):', Array.from(relevantNodeIds));
 
     // 5. Filter the original CDP nodes and convert to AccessibilityNode format
     const relevantAccessibilityNodes = allCdpNodes
@@ -1144,7 +1117,7 @@ export async function getVisibleAccessibilityTree(
 
     // Check if we found any relevant nodes
     if (relevantAccessibilityNodes.length === 0) {
-       logger({ category: 'observation', message: 'No relevant nodes (visible or ancestors) found.', level: 1});
+       logger.info('No relevant nodes (visible or ancestors) found.');
        return { tree: [], simplified: '', iframes: [], scrollableContainerNodes: [] };
     }
 
@@ -1192,7 +1165,7 @@ export async function getVisibleAccessibilityTree(
 
     // 8. Clean the tree starting from the relevant roots
     const cleanedRootPromises = rootNodes.map(node =>
-       cleanStructuralNodes(node, target, logger) // Keep logger for cleanStructuralNodes internal logs
+       cleanStructuralNodes(node, target)
     );
     const finalTree = (await Promise.all(cleanedRootPromises)).filter(Boolean) as AccessibilityNode[];
 
@@ -1200,7 +1173,7 @@ export async function getVisibleAccessibilityTree(
     // Explicitly use formatSimplifiedTree to create the string representation
     const simplified = finalTree.map(node => formatSimplifiedTree(node)).join('\n');
     // Use console.log for debug message
-    console.log('[DEBUG] Final Visible Tree (Simplified):\n', simplified);
+    logger.info('Final Visible Tree (Simplified):\n', simplified);
 
     // Find iframe nodes *among relevant nodes*
     const iframeNodes = relevantAccessibilityNodes.filter(node => node.role === 'Iframe');
@@ -1271,11 +1244,7 @@ export async function getVisibleAccessibilityTree(
             contentSimplified: iframeTree.simplified
           } as IFrameAccessibilityNode;
         } catch (error) {
-          logger({
-            category: 'observation',
-            message: `Error processing iframe content: ${String(error)}`,
-            level: 2,
-          });
+          logger.warn(`Error processing iframe content: ${String(error)}`);
           return node;
         }
       })
@@ -1295,11 +1264,7 @@ export async function getVisibleAccessibilityTree(
         })
         .filter(Boolean) as Array<{nodeId: string, role: string, backendDOMNodeId?: number, name?: string}>;
 
-    logger({
-      category: 'observation',
-      message: `Got viewport accessibility tree. Initial nodes: ${allCdpNodes.length}, Visible backendIds: ${visibleBackendIds.size}, Relevant nodes (visible + ancestors): ${relevantNodeIds.size}, Final tree roots: ${finalTree.length}, Time: ${Date.now() - startTime}ms`,
-      level: 1,
-    });
+    logger.info(`Got viewport accessibility tree. Initial nodes: ${allCdpNodes.length}, Visible backendIds: ${visibleBackendIds.size}, Relevant nodes (visible + ancestors): ${relevantNodeIds.size}, Final tree roots: ${finalTree.length}, Time: ${Date.now() - startTime}ms`);
 
     // Return the tree result with the simplified property explicitly set
     return {
@@ -1309,22 +1274,8 @@ export async function getVisibleAccessibilityTree(
       scrollableContainerNodes: relevantScrollableNodes
     };
   } catch (error) {
-    logger({
-      category: 'observation',
-      message: 'Error getting viewport accessibility tree',
-      level: 1,
-      auxiliary: {
-        error: {
-          value: error instanceof Error ? error.message : String(error),
-          type: 'string',
-        },
-        trace: {
-          value: error instanceof Error && error.stack ? error.stack : '',
-          type: 'string',
-        },
-      },
-    });
-    logger({ category: 'debug', message: `getVisibleAccessibilityTree failed after ${Date.now() - startTime}ms`, level: 2 }); // Set level explicitly
+    logger.error('Error getting viewport accessibility tree', error);
+    logger.debug(`getVisibleAccessibilityTree failed after ${Date.now() - startTime}ms`);
     throw error;
   }
 }
@@ -1439,7 +1390,7 @@ async function findElementsInViewport(
       }
     }
   } catch (error) {
-    console.error('Error finding visible elements:', error);
+    logger.error('Error finding visible elements:', error);
   }
 
   return visibleNodeIds;

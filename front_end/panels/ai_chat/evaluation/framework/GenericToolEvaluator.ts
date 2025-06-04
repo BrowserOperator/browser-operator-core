@@ -5,6 +5,9 @@
 import type { Tool } from '../../tools/Tools.js';
 import { NavigateURLTool } from '../../tools/Tools.js';
 import type { TestCase, TestResult, EvaluationConfig } from './types.js';
+import { createLogger } from '../../core/Logger.js';
+
+const logger = createLogger('GenericToolEvaluator');
 
 /**
  * Generic evaluator that can test any tool without needing specific adapters
@@ -25,8 +28,8 @@ export class GenericToolEvaluator {
     const startTime = Date.now();
 
     try {
-      console.log(`[GenericToolEvaluator] Starting test: ${testCase.name}`);
-      console.log(`[GenericToolEvaluator] Tool: ${testCase.tool}, URL: ${testCase.url}`);
+      logger.info(`Starting test: ${testCase.name}`);
+      logger.info(`Tool: ${testCase.tool}, URL: ${testCase.url}`);
 
       // 1. Navigate to the URL if provided
       if (testCase.url) {
@@ -62,7 +65,7 @@ export class GenericToolEvaluator {
       };
 
     } catch (error) {
-      console.error(`[GenericToolEvaluator] Test error:`, error);
+      logger.error(`Test error:`, error);
       return {
         testId: testCase.id,
         status: 'error',
@@ -80,7 +83,7 @@ export class GenericToolEvaluator {
     const results: TestResult[] = [];
 
     for (const testCase of testCases) {
-      console.log(`[GenericToolEvaluator] Running test ${results.length + 1}/${testCases.length}`);
+      logger.info(`Running test ${results.length + 1}/${testCases.length}`);
       
       const tool = toolInstances.get(testCase.tool);
       if (!tool) {
@@ -108,7 +111,7 @@ export class GenericToolEvaluator {
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        console.log(`[GenericToolEvaluator] Retry ${attempt}/${maxRetries} for ${testCase.id}`);
+        logger.info(`Retry ${attempt}/${maxRetries} for ${testCase.id}`);
         await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
       }
 

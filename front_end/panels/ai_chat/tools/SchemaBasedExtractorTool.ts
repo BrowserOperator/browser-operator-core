@@ -6,10 +6,13 @@ import * as SDK from '../../../core/sdk/sdk.js';
 import * as Protocol from '../../../generated/protocol.js';
 import * as Utils from '../common/utils.js';
 import { AgentService } from '../core/AgentService.js';
+import { createLogger } from '../core/Logger.js';
 import { UnifiedLLMClient } from '../core/UnifiedLLMClient.js';
 import { AIChatPanel } from '../ui/AIChatPanel.js';
 
 import { NodeIDsToURLsTool, type Tool } from './Tools.js';
+
+const logger = createLogger('Tool:SchemaBasedExtractor');
 
 // Define the structure for the metadata LLM call's expected response
 interface ExtractionMetadata {
@@ -64,7 +67,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
    * Execute the schema-based extraction
    */
   async execute(args: SchemaExtractionArgs): Promise<SchemaExtractionResult> {
-    console.log('[SchemaBasedExtractorTool] Executing with args:', args);
+    logger.debug('Executing with args', args);
     const { schema, instruction, reasoning } = args;
     const agentService = AgentService.getInstance();
     const apiKey = agentService.getApiKey();
@@ -98,11 +101,11 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 
       // const READINESS_TIMEOUT_MS = 15000; // 15 seconds timeout for page readiness
       // try {
-      //   console.log(`[SchemaBasedExtractorTool] Checking page readiness (Timeout: ${READINESS_TIMEOUT_MS}ms)...`);
+      //   logger.info('Checking page readiness (Timeout: ${READINESS_TIMEOUT_MS}ms)...');
       //   await waitForPageLoad(target, READINESS_TIMEOUT_MS);
-      //   console.log('[SchemaBasedExtractorTool] Page is ready or timeout reached.');
+      //   logger.info('Page is ready or timeout reached.');
       // } catch (readinessError: any) {
-      //    console.error(`[SchemaBasedExtractorTool] Page readiness check failed: ${readinessError.message}`);
+      //    logger.error(`Page readiness check failed: ${readinessError.message}`);
       //    return {
       //       success: false,
       //       data: null,
@@ -115,8 +118,8 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 
       // 2. Transform schema to replace URL fields with numeric AX Node IDs (strings)
       const [transformedSchema, urlPaths] = this.transformUrlFieldsToIds(schema);
-      console.log('[SchemaBasedExtractorTool] Transformed Schema:', JSON.stringify(transformedSchema, null, 2));
-      console.log('[SchemaBasedExtractorTool] URL Paths:', urlPaths);
+      logger.info('Transformed Schema:', JSON.stringify(transformedSchema, null, 2));
+      logger.info('URL Paths:', urlPaths);
 
       // 3. Get raw accessibility tree nodes for the target scope to build URL mapping
       const accessibilityAgent = target.accessibilityAgent();
@@ -140,21 +143,21 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
       }
       // Keep the URL mapping for logging purposes
       const idToUrlMapping = this.buildUrlMapping(rawAxTree.nodes);
-      console.log(`[SchemaBasedExtractorTool] Built URL mapping with ${Object.keys(idToUrlMapping).length} entries.`);
+      logger.info(`Built URL mapping with ${Object.keys(idToUrlMapping).length} entries.`);
 
       // 4. Get the processed accessibility tree text using Utils
       // NOTE: Utils.getAccessibilityTree currently gets the *full* tree.
       // If scoping is critical, this might need adjustment or filtering based on the selector.
       // For now, we use the full tree text for the LLM context.
-      const processedTreeResult = await Utils.getAccessibilityTree(target, console.log);
+      const processedTreeResult = await Utils.getAccessibilityTree(target);
       const treeText = processedTreeResult.simplified;
-      console.log('[SchemaBasedExtractorTool] Processed Accessibility Tree Text (length):', treeText.length);
-      // console.debug('[SchemaBasedExtractorTool] Tree Text:', treeText); // Uncomment for full tree text
+      logger.info('Processed Accessibility Tree Text (length):', treeText.length);
+      // logger.debug('[SchemaBasedExtractorTool] Tree Text:', treeText); // Uncomment for full tree text
 
       // ---- Start Multi-step LLM Process ----
 
       // 5. Initial Extract Call
-      console.log('[SchemaBasedExtractorTool] Starting initial LLM extraction...');
+      logger.info('Starting initial LLM extraction...');
       const initialExtraction = await this.callExtractionLLM({
         instruction: instruction || 'Extract data according to schema',
         domContent: treeText,
@@ -162,7 +165,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
         apiKey,
       });
 
-      console.log('[SchemaBasedExtractorTool] Initial extraction result:', initialExtraction);
+      logger.info('Initial extraction result:', initialExtraction);
       if (!initialExtraction) { // Check if initial extraction failed
         return {
           success: false,
@@ -179,7 +182,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
         apiKey,
       });
 
-      console.log('[SchemaBasedExtractorTool] Refinement result:', refinedData);
+      logger.info('Refinement result:', refinedData);
       if (!refinedData) { // Check if refinement failed
         return {
           success: false,
@@ -195,7 +198,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
         schema, // Original schema to understand what fields are URLs
       });
 
-      console.log('[SchemaBasedExtractorTool] Data after URL resolution:',
+      logger.info('Data after URL resolution:',
         JSON.stringify(Array.isArray(finalData) ? finalData.slice(0, 2) : finalData, null, 2).substring(0, 500));
 
       // 7a. Check if any URL fields still contain numeric node IDs
@@ -204,7 +207,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
       // Simple heuristic: if we have numbers where URLs are expected in common URL field names
       if (dataString.match(/"(url|link|href|website|webpage)"\s*:\s*\d+/i)) {
         urlResolutionWarning = 'Note: Some URL fields may contain unresolved node IDs instead of actual URLs.';
-        console.warn('[SchemaBasedExtractorTool] WARNING: Detected potential unresolved node IDs in URL fields');
+        logger.warn('Detected potential unresolved node IDs in URL fields');
       }
 
       // 8. Metadata Call
@@ -216,10 +219,10 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
         apiKey,
       });
 
-      console.log('[SchemaBasedExtractorTool] Metadata result:', metadata);
+      logger.info('Metadata result:', metadata);
       if (!metadata) { // Check if metadata call failed
         // Decide if this should be a hard failure or just return without metadata
-        console.warn('Metadata extraction step failed, proceeding without metadata.');
+        logger.warn('Metadata extraction step failed, proceeding without metadata.');
         // If metadata is critical, return failure:
         // return {
         //   success: false,
@@ -250,7 +253,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 
       return result;
     } catch (error) {
-      console.error('[SchemaBasedExtractorTool] Execution Error:', error);
+      logger.error('Execution Error:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -274,7 +277,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 
     // Process items if this is an array schema
     if (schema.type === 'array' && schema.items) {
-      console.log('[SchemaBasedExtractorTool] Processing array items schema');
+      logger.info('Processing array items schema');
 
       // If items is an object with properties, process those
       if (schema.items.type === 'object' && schema.items.properties) {
@@ -295,7 +298,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
       }
     }
 
-    console.log('[SchemaBasedExtractorTool] Transformation complete, found URL paths:', urlPaths);
+    logger.info('Transformation complete, found URL paths:', urlPaths);
     return [transformedSchema, urlPaths];
   }
 
@@ -350,7 +353,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
    * Builds a mapping from Accessibility Node ID (string) to URL from raw AX nodes.
    */
   private buildUrlMapping(nodes: Protocol.Accessibility.AXNode[]): Record<string, string> {
-    console.log('[SchemaBasedExtractorTool] Building URL mapping from', nodes.length, 'nodes');
+    logger.info(`Building URL mapping from ${nodes.length} nodes`);
     const idToUrlMapping: Record<string, string> = {};
     for (const node of nodes) {
       const urlProperty = node.properties?.find(p =>
@@ -359,20 +362,20 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
 
       // Use the string node.nodeId as the key
       if (urlProperty?.value?.type === 'string' && urlProperty.value.value && node.nodeId) {
-        console.log(`[SchemaBasedExtractorTool] Found URL mapping: nodeId=${node.nodeId}, url=${urlProperty.value.value}`);
+        logger.info(`Found URL mapping: nodeId=${node.nodeId}, url=${urlProperty.value.value}`);
         idToUrlMapping[node.nodeId] = String(urlProperty.value.value);
       }
     }
 
     // Log whether we found any mappings
     const mappingSize = Object.keys(idToUrlMapping).length;
-    console.log(`[SchemaBasedExtractorTool] URL Mapping complete: found ${mappingSize} URL mappings`);
+    logger.info(`URL Mapping complete: found ${mappingSize} URL mappings`);
     if (mappingSize === 0) {
-      console.warn('[SchemaBasedExtractorTool] WARNING: No URL mappings found! URLs will not be injected correctly.');
+      logger.warn('No URL mappings found! URLs will not be injected correctly.');
     } else {
       // Log the first few mappings as a sample
       const sampleEntries = Object.entries(idToUrlMapping).slice(0, 5);
-      console.log('[SchemaBasedExtractorTool] Sample URL mappings:', sampleEntries);
+      logger.info('Sample URL mappings:', sampleEntries);
     }
 
     return idToUrlMapping;
@@ -388,7 +391,7 @@ export class SchemaBasedExtractorTool implements Tool<SchemaExtractionArgs, Sche
     apiKey: string,
   }): Promise<any> {
     const { instruction, domContent, schema, apiKey } = options;
-    console.log('[SchemaBasedExtractorTool] Calling Extraction LLM...');
+    logger.info('Calling Extraction LLM...');
     const systemPrompt = `You are a structured data extraction agent in multi-agent system.
 Your task is to extract data from the provided DOM content (represented as an accessibility tree) based on a given schema.
 Focus on mapping the user's instruction to the elements in the accessibility tree.
@@ -441,7 +444,7 @@ Only output the JSON object with real data from the accessibility tree.`;
       if (!response) { throw new Error('No text response from extraction LLM'); }
       return this.parseJsonResponse(response);
     } catch (error) {
-      console.error('Error in callExtractionLLM:', error);
+      logger.error('Error in callExtractionLLM:', error);
       return null; // Indicate failure
     }
   }
@@ -456,7 +459,7 @@ Only output the JSON object with real data from the accessibility tree.`;
     apiKey: string,
   }): Promise<any> {
     const { instruction, schema, initialData, apiKey } = options;
-    console.log('[SchemaBasedExtractorTool] Calling Refinement LLM...');
+    logger.info('Calling Refinement LLM...');
     const systemPrompt = `You are a data refinement agent in multi-agent system.
 Your task is to refine previously extracted JSON data based on the original instruction and schema.
 Ensure the refined output still strictly conforms to the provided schema.
@@ -500,7 +503,7 @@ Do not add any conversational text or explanations or thinking tags.`;
       if (!response) { throw new Error('No text response from refinement LLM'); }
       return this.parseJsonResponse(response);
     } catch (error) {
-      console.error('Error in callRefinementLLM:', error);
+      logger.error('Error in callRefinementLLM:', error);
       return null; // Indicate failure
     }
   }
@@ -516,7 +519,7 @@ Do not add any conversational text or explanations or thinking tags.`;
     apiKey: string,
   }): Promise<ExtractionMetadata | null> {
     const { instruction, extractedData, domContent, schema, apiKey } = options;
-    console.log('[SchemaBasedExtractorTool] Calling Metadata LLM...');
+    logger.info('Calling Metadata LLM...');
     const metadataSchema = {
       type: 'object',
       properties: {
@@ -590,12 +593,12 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
       if (typeof parsedMetadata?.progress === 'string' && typeof parsedMetadata?.completed === 'boolean') {
         return parsedMetadata as ExtractionMetadata;
       }
-      console.error('Metadata LLM response did not match expected schema:', parsedMetadata);
+      logger.error('Metadata LLM response did not match expected schema:', parsedMetadata);
       // Return null if metadata doesn't match schema, but don't throw, allow main function to decide
       return null;
 
     } catch (error) {
-      console.error('Error in callMetadataLLM:', error);
+      logger.error('Error in callMetadataLLM:', error);
       return null; // Indicate failure
     }
   }
@@ -609,7 +612,7 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
       return JSON.parse(responseText);
     } catch (e) {
       // If direct parsing fails, remove all think tags and their content
-      console.log('[SchemaBasedExtractorTool] Removing think tags before parsing JSON');
+      logger.info('Removing think tags before parsing JSON');
 
       // Remove <think>...</think> tags and everything inside them (handles multiple think tags)
       let cleanedText = responseText.replace(/<think>[\s\S]*?<\/think>/g, '');
@@ -619,7 +622,7 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
 
       // If after removing think tags, the text is empty or whitespace, give up
       if (!cleanedText.trim()) {
-        console.error('[SchemaBasedExtractorTool] No content left after removing think tags');
+        logger.error('No content left after removing think tags');
         return null;
       }
 
@@ -629,7 +632,7 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
         try {
           return JSON.parse(codeBlockMatch[1]);
         } catch (codeBlockError) {
-          console.log('[SchemaBasedExtractorTool] Failed to parse JSON from code block:', codeBlockError);
+          logger.info('Failed to parse JSON from code block:', codeBlockError);
         }
       }
 
@@ -659,7 +662,7 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
         try {
           return JSON.parse(jsonObjectMatch[0]);
         } catch (objectError) {
-          console.log('[SchemaBasedExtractorTool] Failed to parse JSON object:', objectError);
+          logger.info('Failed to parse JSON object:', objectError);
         }
       }
 
@@ -668,11 +671,11 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
         try {
           return JSON.parse(jsonArrayMatch[0]);
         } catch (arrayError) {
-          console.log('[SchemaBasedExtractorTool] Failed to parse JSON array:', arrayError);
+          logger.info('Failed to parse JSON array:', arrayError);
         }
       }
 
-      console.error('[SchemaBasedExtractorTool] Failed to parse and no valid JSON found in response after removing think tags');
+      logger.error('Failed to parse and no valid JSON found in response after removing think tags');
       return null;
     }
   }
@@ -686,7 +689,7 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
     schema: SchemaDefinition,
   }): Promise<any> {
     const { data, apiKey, schema } = options;
-    console.log('[SchemaBasedExtractorTool] Starting URL resolution with LLM...');
+    logger.info('Starting URL resolution with LLM...');
 
     // 1. First LLM call to identify nodeIDs
     const nodeIdExtractionPrompt = `
@@ -716,23 +719,23 @@ Do not add any conversational text or explanations or thinking tags.
         { systemPrompt: 'You are a JSON processor that extracts numeric node IDs.', temperature: 0 }
       );
 
-      console.log('[SchemaBasedExtractorTool] Node ID extraction response:', response);
+      logger.info('Node ID extraction response:', response);
 
       // Parse the array of nodeIds
       const nodeIds = this.parseJsonResponse(response);
       if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
-        console.log('[SchemaBasedExtractorTool] No nodeIDs found for URL conversion');
+        logger.info('No nodeIDs found for URL conversion');
         return data; // Return original data if no nodeIds found
       }
 
-      console.log(`[SchemaBasedExtractorTool] Found ${nodeIds.length} nodeIDs to convert:`, nodeIds);
+      logger.info(`Found ${nodeIds.length} nodeIDs to convert:`, nodeIds);
 
       // 2. Execute the NodeIDsToURLsTool with the found nodeIds
       const urlTool = new NodeIDsToURLsTool();
       const urlResult = await urlTool.execute({ nodeIds });
 
       if ('error' in urlResult) {
-        console.error('[SchemaBasedExtractorTool] Error from NodeIDsToURLsTool:', urlResult.error);
+        logger.error('Error from NodeIDsToURLsTool:', urlResult.error);
         return data; // Return original data if tool execution fails
       }
 
@@ -744,7 +747,7 @@ Do not add any conversational text or explanations or thinking tags.
         }
       }
 
-      console.log('[SchemaBasedExtractorTool] Created nodeId to URL mapping with', Object.keys(nodeIdToUrlMap).length, 'entries');
+      logger.info(`Created nodeId to URL mapping with ${Object.keys(nodeIdToUrlMap).length} entries`);
 
       // 4. Second LLM call to replace nodeIDs with URLs
       const urlReplacementPrompt = `
@@ -773,21 +776,21 @@ Do not add any conversational text or explanations or thinking tags.
       );
 
       if (!urlReplacementResponse) {
-        console.error('[SchemaBasedExtractorTool] No response from URL replacement LLM');
+        logger.error('No response from URL replacement LLM');
         return data; // Return original data if we can't get a response
       }
 
       // Parse the response
       const updatedData = this.parseJsonResponse(urlReplacementResponse);
       if (!updatedData) {
-        console.error('[SchemaBasedExtractorTool] Failed to parse updated data from LLM response');
+        logger.error('[SchemaBasedExtractorTool] Failed to parse updated data from LLM response');
         return data; // Return original data if parsing fails
       }
 
-      console.log('[SchemaBasedExtractorTool] Successfully replaced nodeIDs with URLs');
+      logger.info('Successfully replaced nodeIDs with URLs');
       return updatedData;
     } catch (error) {
-      console.error('[SchemaBasedExtractorTool] Error in URL resolution with LLM:', error);
+      logger.error('[SchemaBasedExtractorTool] Error in URL resolution with LLM:', error);
       return data; // Return original data on error
     }
   }

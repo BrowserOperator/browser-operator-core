@@ -40,6 +40,7 @@ devtools_module("ai_chat") {
     "core/ChatLiteLLM.ts",
     "core/GraphHelpers.ts",
     "core/StateGraph.ts",
+    "core/Logger.ts",
     "tools/Tools.ts",
     "tools/CritiqueTool.ts",
     "tools/FetcherTool.ts",
