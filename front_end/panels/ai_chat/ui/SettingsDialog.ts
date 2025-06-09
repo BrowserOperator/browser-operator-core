@@ -185,20 +185,20 @@ export class SettingsDialog {
     addCustomModelOption: (modelName: string, modelType?: 'openai' | 'litellm') => ModelOption[],
     removeCustomModelOption: (modelName: string) => ModelOption[],
   ): Promise<void> {
-    logger.info('SettingsDialog.show - Initial parameters:');
-    logger.info('selectedModel:', selectedModel);
-    logger.info('miniModel:', miniModel);
-    logger.info('nanoModel:', nanoModel);
-    logger.info('Current provider:', localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai');
+    logger.debug('SettingsDialog.show - Initial parameters:');
+    logger.debug('selectedModel:', selectedModel);
+    logger.debug('miniModel:', miniModel);
+    logger.debug('nanoModel:', nanoModel);
+    logger.debug('Current provider:', localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai');
     
     // Get all model options using the provided getModelOptions function
     const modelOptions = getModelOptions();
-    logger.info('Model options from getModelOptions:', modelOptions);
+    logger.debug('Model options from getModelOptions:', modelOptions);
     
     // Count models by provider
     const openaiModels = modelOptions.filter(m => m.type === 'openai');
     const litellmModels = modelOptions.filter(m => m.type === 'litellm');
-    logger.info(`Model counts - OpenAI: ${openaiModels.length}, LiteLLM: ${litellmModels.length}`);
+    logger.debug(`Model counts - OpenAI: ${openaiModels.length}, LiteLLM: ${litellmModels.length}`);
     
     // Reset selector references
     SettingsDialog.#openaiMiniModelSelect = null;
@@ -289,7 +289,7 @@ export class SettingsDialog {
       openaiContent.style.display = selectedProvider === 'openai' ? 'block' : 'none';
       litellmContent.style.display = selectedProvider === 'litellm' ? 'block' : 'none';
       
-      logger.info(`Provider changed to: ${selectedProvider}`);
+      logger.debug(`Provider changed to: ${selectedProvider}`);
 
       // If switching to LiteLLM, fetch the latest models if endpoint is configured
       if (selectedProvider === 'litellm') {
@@ -298,10 +298,10 @@ export class SettingsDialog {
         
         if (endpoint) {
           try {
-            logger.info('Fetching LiteLLM models after provider change...');
+            logger.debug('Fetching LiteLLM models after provider change...');
             const { models: litellmModels, hadWildcard } = await fetchLiteLLMModels(liteLLMApiKey, endpoint);
             updateModelOptions(litellmModels, hadWildcard);
-            logger.info('Successfully refreshed LiteLLM models after provider change');
+            logger.debug('Successfully refreshed LiteLLM models after provider change');
           } catch (error) {
             logger.error('Failed to fetch LiteLLM models after provider change:', error);
           }
@@ -310,8 +310,8 @@ export class SettingsDialog {
 
       // Get model options filtered by the selected provider
       const availableModels = getModelOptions(selectedProvider as 'openai' | 'litellm');
-      logger.info(`Available models for ${selectedProvider}:`, availableModels);
-      logger.info(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
+      logger.debug(`Available models for ${selectedProvider}:`, availableModels);
+      logger.debug(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
 
       // Refresh model selectors based on new provider
       if (selectedProvider === 'openai') {
@@ -353,11 +353,11 @@ export class SettingsDialog {
     
     // Function to update OpenAI model selectors
     function updateOpenAIModelSelectors() {
-      logger.info('Updating OpenAI model selectors');
+      logger.debug('Updating OpenAI model selectors');
       
       // Get the latest model options filtered for OpenAI provider
       const openaiModels = getModelOptions('openai');
-      logger.info('OpenAI models from getModelOptions:', openaiModels);
+      logger.debug('OpenAI models from getModelOptions:', openaiModels);
 
       // Clear any existing model selectors
       const existingSelectors = openaiContent.querySelectorAll('.model-selection-section');
@@ -373,7 +373,7 @@ export class SettingsDialog {
       openaiModelSectionTitle.textContent = 'Model Size Selection';
       openaiModelSection.appendChild(openaiModelSectionTitle);
       
-      logger.info(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
+      logger.debug(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
       
       // No focus handler needed for OpenAI selectors as we don't need to fetch models on focus
       
@@ -389,7 +389,7 @@ export class SettingsDialog {
         undefined // No focus handler for OpenAI
       );
       
-      logger.info('Created OpenAI Mini Model Select:', SettingsDialog.#openaiMiniModelSelect);
+      logger.debug('Created OpenAI Mini Model Select:', SettingsDialog.#openaiMiniModelSelect);
       
       // Create OpenAI Nano Model selection and store reference
       SettingsDialog.#openaiNanoModelSelect = createModelSelector(
@@ -403,7 +403,7 @@ export class SettingsDialog {
         undefined // No focus handler for OpenAI
       );
       
-      logger.info('Created OpenAI Nano Model Select:', SettingsDialog.#openaiNanoModelSelect);
+      logger.debug('Created OpenAI Nano Model Select:', SettingsDialog.#openaiNanoModelSelect);
     }
     
     // Initialize OpenAI model selectors
@@ -588,11 +588,11 @@ export class SettingsDialog {
     
     // Function to update custom model selectors in LiteLLM section
     function updateLiteLLMModelSelectors() {
-      logger.info('Updating LiteLLM model selectors');
+      logger.debug('Updating LiteLLM model selectors');
       
       // Get the latest model options filtered for LiteLLM provider
       const litellmModels = getModelOptions('litellm');
-      logger.info('LiteLLM models from getModelOptions:', litellmModels);
+      logger.debug('LiteLLM models from getModelOptions:', litellmModels);
 
       // Clear any existing model selectors
       const existingSelectors = litellmContent.querySelectorAll('.model-selection-section');
@@ -608,7 +608,7 @@ export class SettingsDialog {
       litellmModelSectionTitle.textContent = 'Model Size Selection';
       litellmModelSection.appendChild(litellmModelSectionTitle);
       
-      logger.info(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
+      logger.debug(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
       
       // Create a focus handler for LiteLLM selectors
       const onLiteLLMSelectorFocus = async () => {
@@ -619,11 +619,11 @@ export class SettingsDialog {
           
           if (endpoint) {
             try {
-              logger.info('Refreshing LiteLLM models on selector focus...');
+              logger.debug('Refreshing LiteLLM models on selector focus...');
               const { models: litellmModels, hadWildcard } = await fetchLiteLLMModels(liteLLMApiKey, endpoint);
               updateModelOptions(litellmModels, hadWildcard);
               // No need to update UI since refreshing would lose focus
-              logger.info('Successfully refreshed LiteLLM models on selector focus');
+              logger.debug('Successfully refreshed LiteLLM models on selector focus');
             } catch (error) {
               logger.error('Failed to refresh LiteLLM models on selector focus:', error);
             }
@@ -643,7 +643,7 @@ export class SettingsDialog {
         onLiteLLMSelectorFocus
       );
       
-      logger.info('Created LiteLLM Mini Model Select:', SettingsDialog.#litellmMiniModelSelect);
+      logger.debug('Created LiteLLM Mini Model Select:', SettingsDialog.#litellmMiniModelSelect);
       
       // Create LiteLLM Nano Model selection and store reference
       SettingsDialog.#litellmNanoModelSelect = createModelSelector(
@@ -657,7 +657,7 @@ export class SettingsDialog {
         onLiteLLMSelectorFocus
       );
       
-      logger.info('Created LiteLLM Nano Model Select:', SettingsDialog.#litellmNanoModelSelect);
+      logger.debug('Created LiteLLM Nano Model Select:', SettingsDialog.#litellmNanoModelSelect);
     }
 
     const updateCustomModelsList = () => {
@@ -1067,7 +1067,7 @@ export class SettingsDialog {
       }
       
       // Save mini model if selected
-      logger.info('Mini model value to save:', miniModelValue);
+      logger.debug('Mini model value to save:', miniModelValue);
       if (miniModelValue) {
         localStorage.setItem(MINI_MODEL_STORAGE_KEY, miniModelValue);
       } else {
@@ -1075,17 +1075,17 @@ export class SettingsDialog {
       }
       
       // Save nano model if selected 
-      logger.info('Nano model value to save:', nanoModelValue);
+      logger.debug('Nano model value to save:', nanoModelValue);
       if (nanoModelValue) {
         localStorage.setItem(NANO_MODEL_STORAGE_KEY, nanoModelValue);
       } else {
         localStorage.removeItem(NANO_MODEL_STORAGE_KEY);
       }
       
-      logger.info('Settings saved successfully');
-      logger.info('Mini Model:', localStorage.getItem(MINI_MODEL_STORAGE_KEY));
-      logger.info('Nano Model:', localStorage.getItem(NANO_MODEL_STORAGE_KEY));
-      logger.info('Provider:', selectedProvider);
+      logger.debug('Settings saved successfully');
+      logger.debug('Mini Model:', localStorage.getItem(MINI_MODEL_STORAGE_KEY));
+      logger.debug('Nano Model:', localStorage.getItem(NANO_MODEL_STORAGE_KEY));
+      logger.debug('Provider:', selectedProvider);
       
       // Set success message and notify parent
       saveStatusMessage.textContent = 'Settings saved successfully';
