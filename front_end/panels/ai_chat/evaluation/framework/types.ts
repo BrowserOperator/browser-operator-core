@@ -44,7 +44,6 @@ export interface ValidationConfig {
       enabled: boolean;
       captureBeforeAction?: boolean;
       captureAfterAction?: boolean;
-      screenshotDelay?: number;
       verificationPrompts?: string[];
     };
   };
@@ -73,6 +72,7 @@ export interface TestResult {
   duration: number;
   timestamp: number;
   retryCount?: number;
+  rawResponse?: any;  // Raw tool/agent response for debugging
 }
 
 /**

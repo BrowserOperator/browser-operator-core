@@ -213,6 +213,18 @@ export interface AccessibilityTreeResult {
    * Raw accessibility nodes from the tree for direct node manipulation
    */
   nodes?: Protocol.Accessibility.AXNode[];
+  /**
+   * Mapping of nodeId to URL for nodes that have URLs
+   */
+  idToUrl?: Record<string, string>;
+  /**
+   * Mapping of backendNodeId to xpath
+   */
+  xpathMap?: Record<number, string>;
+  /**
+   * Mapping of backendNodeId to tagName
+   */
+  tagNameMap?: Record<number, string>;
 }
 
 /**
@@ -1331,6 +1343,9 @@ export class GetAccessibilityTreeTool implements Tool<{ reasoning: string }, Acc
       return {
         simplified: treeResult.simplified,
         iframes: treeResult.iframes,
+        idToUrl: treeResult.idToUrl,
+        xpathMap: treeResult.xpathMap,
+        tagNameMap: treeResult.tagNameMap,
       };
     } catch (error) {
       return { error: `Failed to get accessibility tree: ${String(error)}` };
@@ -1408,11 +1423,11 @@ export class GetVisibleAccessibilityTreeTool implements Tool<{ reasoning: string
 /**
  * Tool for performing actions on DOM elements
  */
-export class PerformActionTool implements Tool<{ method: string, nodeId: number, reasoning: string, args?: Record<string, unknown> | unknown[] }, PerformActionResult | ErrorResult> {
+export class PerformActionTool implements Tool<{ method: string, nodeId: number | string, reasoning: string, args?: Record<string, unknown> | unknown[] }, PerformActionResult | ErrorResult> {
   name = 'perform_action';
   description = 'Performs an action on a DOM element identified by NodeID';
 
-  async execute(args: { method: string, nodeId: number, reasoning: string, args?: Record<string, unknown> | unknown[] }): Promise<PerformActionResult | ErrorResult> {
+  async execute(args: { method: string, nodeId: number | string, reasoning: string, args?: Record<string, unknown> | unknown[] }): Promise<PerformActionResult | ErrorResult> {
     logger.info('Executing with args:', JSON.stringify(args));
     const method = args.method;
     const nodeId = args.nodeId;
@@ -1424,9 +1439,9 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
       return { error: 'Method must be a string' };
     }
 
-    if (typeof nodeId !== 'number') {
-      logger.info('Error: NodeID must be a number');
-      return { error: 'NodeID must be a number' };
+    if (typeof nodeId !== 'number' && typeof nodeId !== 'string') {
+      logger.info('Error: NodeID must be a number or string');
+      return { error: 'NodeID must be a number or string' };
     }
 
     // Get the main target
@@ -1439,7 +1454,7 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
     // Declare variables needed across different branches
     let initialUrl: string | undefined;
     let isLikelyNavigationElement = false;
-    let xpath: string | undefined;
+    let xpath: string = '';
     let isContentEditableElement = false;
 
     // Process arguments
@@ -1452,15 +1467,48 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
       logger.info('Processed action args:', JSON.stringify(actionArgsArray));
     }
 
+    let iframeNodeId: string | undefined;
+    let elementNodeId: string | undefined;
+    let treeResult: any = null; // Cache the tree result to avoid multiple calls
+    
     try {
-      // Get the XPath
-      logger.info('Getting XPath for nodeId:', nodeId);
-      xpath = await Utils.getXPathByBackendNodeId(target, nodeId as Protocol.DOM.BackendNodeId);
-      if (!xpath || xpath === '') {
-        logger.info('Error: Could not determine XPath for NodeID:', nodeId);
-        return { error: `Could not determine XPath for NodeID: ${nodeId}` };
+      // Check if nodeId is from an iframe (has prefix)
+      const isIframeNodeId = typeof nodeId === 'string' && nodeId.startsWith('iframe_');
+      
+      if (isIframeNodeId) {
+        // Handle iframe nodeId - extract iframe nodeId and element nodeId
+        const match = (nodeId as string).match(/^iframe_(\d+)_(.+)$/);
+        if (!match) {
+          logger.info('Error: Invalid iframe nodeId format:', nodeId);
+          return { error: `Invalid iframe nodeId format: ${nodeId}` };
+        }
+        
+        iframeNodeId = match[1];
+        elementNodeId = match[2];
+        logger.info(`Iframe action detected - iframeNodeId: ${iframeNodeId}, elementNodeId: ${elementNodeId}`);
+        
+        // For iframe elements, we don't need xpath - we'll use the nodeId directly
+        // The performAction function will handle finding the element within the iframe
+        xpath = elementNodeId; // Pass the element nodeId as xpath placeholder
+      } else {
+        // Handle regular nodeId
+        logger.info('Getting XPath for nodeId:', nodeId);
+        
+        // Get the accessibility tree once for potential reuse
+        treeResult = await Utils.getAccessibilityTree(target);
+        if (treeResult.xpathMap && treeResult.xpathMap[nodeId as number]) {
+          xpath = treeResult.xpathMap[nodeId as number];
+          logger.info('Found XPath from xpathMap:', xpath);
+        } else {
+          // Fallback to CDP call
+          xpath = await Utils.getXPathByBackendNodeId(target, nodeId as Protocol.DOM.BackendNodeId);
+          if (!xpath || xpath === '') {
+            logger.info('Error: Could not determine XPath for NodeID:', nodeId);
+            return { error: `Could not determine XPath for NodeID: ${nodeId}` };
+          }
+          logger.info('Found XPath via CDP fallback:', xpath);
+        }
       }
-      logger.info('Found XPath:', xpath);
 
       // Pre-action checks
       if (method === 'fill' || method === 'type') {
@@ -1472,6 +1520,16 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
         const textValue = (args.args as { text: string }).text;
         actionArgsArray = [textValue]; // Prepare array for utility function
         logger.info('Text value for fill/type:', textValue);
+
+        // Get tree result again for the tagNameMap (only if not iframe)
+        let elementTagName: string | undefined;
+        if (!iframeNodeId) {
+          const treeResult = await Utils.getAccessibilityTree(target);
+          if (treeResult.tagNameMap && treeResult.tagNameMap[nodeId as number]) {
+            elementTagName = treeResult.tagNameMap[nodeId as number];
+            logger.info('Found element tagName from tagNameMap:', elementTagName);
+          }
+        }
 
         const suitabilityResult = await target.runtimeAgent().invoke_evaluate({
           expression: `(() => {
@@ -1524,6 +1582,24 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
         // Assign based on suitability check result
         isContentEditableElement = suitabilityResult.result?.value?.reason === 'Content-editable element is suitable';
 
+      } else if (method === 'selectOption') {
+        logger.info('Performing selectOption pre-action checks');
+        if (typeof args.args !== 'object' || args.args === null || Array.isArray(args.args) || typeof (args.args as Record<string, unknown>).text !== 'string') {
+          logger.info('Error: Missing or invalid args for selectOption action');
+          return { error: `Missing or invalid args for action '${method}' on NodeID ${nodeId}. Expected an object with a string property 'text'. Example: { "text": "option_value" }` };
+        }
+        const optionValue = (args.args as { text: string }).text;
+        actionArgsArray = [optionValue]; // Prepare array for utility function
+        logger.info('Option value for selectOption:', optionValue);
+      } else if (method === 'setChecked') {
+        logger.info('Performing setChecked pre-action checks');
+        if (typeof args.args !== 'object' || args.args === null || Array.isArray(args.args) || typeof (args.args as Record<string, unknown>).checked !== 'boolean') {
+          logger.info('Error: Missing or invalid args for setChecked action');
+          return { error: `Missing or invalid args for action '${method}' on NodeID ${nodeId}. Expected an object with a boolean property 'checked'. Example: { "checked": true }` };
+        }
+        const checkedValue = (args.args as { checked: boolean }).checked;
+        actionArgsArray = [checkedValue]; // Prepare array for utility function
+        logger.info('Checked value for setChecked:', checkedValue);
       } else if (method === 'click') {
         logger.info('Performing click pre-action checks');
         const detailsResult = await target.runtimeAgent().invoke_evaluate({
@@ -1568,8 +1644,8 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
       }
 
       // --- Perform Action (Do this BEFORE verification) ---
-      logger.info(`Executing Utils.performAction('${method}', args: ${JSON.stringify(actionArgsArray)}, xpath: '${xpath}')`);
-      await Utils.performAction(target, method, actionArgsArray, xpath);
+      logger.info(`Executing Utils.performAction('${method}', args: ${JSON.stringify(actionArgsArray)}, xpath: '${xpath}', iframeNodeId: '${iframeNodeId || 'none'}')`);
+      await Utils.performAction(target, method, actionArgsArray, xpath, iframeNodeId);
 
       // --- Post-action verification ONLY for fill/type ---
       let verificationMessage = '';
@@ -1679,22 +1755,29 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number,
     properties: {
       method: {
         type: 'string',
-        description: 'Action to perform (click, hover, fill, type, press, scrollIntoView)',
-        enum: ['click', 'hover', 'fill', 'type', 'press', 'scrollIntoView']
+        description: 'Action to perform (click, hover, fill, type, press, scrollIntoView, selectOption, check, uncheck, setChecked)',
+        enum: ['click', 'hover', 'fill', 'type', 'press', 'scrollIntoView', 'selectOption', 'check', 'uncheck', 'setChecked']
       },
       nodeId: {
-        type: 'number',
-        description: 'NodeID of the element to perform the action on'
+        oneOf: [
+          { type: 'number' },
+          { type: 'string' }
+        ],
+        description: 'NodeID of the element to perform the action on (number for main document, string with iframe_ prefix for iframe elements)'
       },
       args: {
         oneOf: [
           {
             type: 'object',
-            description: 'Arguments for the action. For "fill"/"type", requires an object like { "text": "value" }. For "press", requires an array like ["key"]. Other methods typically do not use args.',
+            description: 'Arguments for the action. For "fill"/"type", requires an object like { "text": "value" }. For "selectOption", requires an object like { "text": "option_value" }. For "setChecked", requires an object like { "checked": true/false }. For "press", requires an array like ["key"]. Other methods (click, hover, check, uncheck, scrollIntoView) typically do not use args.',
             properties: {
               text: {
                 type: 'string',
-                description: 'The text value to fill or type into the element.'
+                description: 'The text value to fill, type, or select option value.'
+              },
+              checked: {
+                type: 'boolean',
+                description: 'For setChecked method - whether the checkbox should be checked (true) or unchecked (false).'
               }
             },
           },

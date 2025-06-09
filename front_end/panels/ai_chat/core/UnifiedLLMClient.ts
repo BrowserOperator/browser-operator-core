@@ -10,6 +10,62 @@ import { ChatMessageEntity, type ChatMessage } from '../ui/ChatView.js';
 const logger = createLogger('UnifiedLLMClient');
 
 /**
+ * Error types that can occur during LLM calls
+ */
+export enum LLMErrorType {
+  JSON_PARSE_ERROR = 'JSON_PARSE_ERROR',
+  RATE_LIMIT_ERROR = 'RATE_LIMIT_ERROR',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  SERVER_ERROR = 'SERVER_ERROR',
+  AUTH_ERROR = 'AUTH_ERROR',
+  QUOTA_ERROR = 'QUOTA_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
+/**
+ * Retry configuration for a specific error type
+ */
+export interface RetryConfig {
+  maxRetries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  backoffMultiplier?: number;
+  jitterMs?: number;
+}
+
+/**
+ * Default retry configuration
+ */
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 2,
+  baseDelayMs: 1000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2,
+  jitterMs: 500,
+};
+
+/**
+ * Error-specific retry configurations (only for specific error types)
+ */
+const ERROR_SPECIFIC_RETRY_CONFIGS: Partial<Record<LLMErrorType, RetryConfig>> = {
+  [LLMErrorType.RATE_LIMIT_ERROR]: {
+    maxRetries: 3,
+    baseDelayMs: 60000, // 60 seconds for rate limits
+    maxDelayMs: 300000, // Max 5 minutes
+    backoffMultiplier: 1, // No exponential backoff for rate limits
+    jitterMs: 5000, // Small jitter to avoid thundering herd
+  },
+  
+  [LLMErrorType.NETWORK_ERROR]: {
+    maxRetries: 3,
+    baseDelayMs: 2000,
+    maxDelayMs: 30000,
+    backoffMultiplier: 2,
+    jitterMs: 1000,
+  },
+};
+
+/**
  * Unified options for LLM calls that work across different providers
  */
 export interface UnifiedLLMOptions {
@@ -25,9 +81,11 @@ export interface UnifiedLLMOptions {
   stream?: boolean;
   maxRetries?: number;
   signal?: AbortSignal;
-  systemPrompt?: string;
+  systemPrompt: string; // Made required
   tools?: any[];
   tool_choice?: any;
+  strictJsonMode?: boolean; // New flag for strict JSON parsing
+  customRetryConfig?: RetryConfig; // Override default retry configuration
 }
 
 /**
@@ -44,6 +102,7 @@ export interface UnifiedLLMResponse {
     summary?: string[] | null,
     effort?: string,
   };
+  parsedJson?: any; // Parsed JSON when strictJsonMode is enabled
 }
 
 /**
@@ -66,22 +125,54 @@ export class UnifiedLLMClient {
 
   /**
    * Main unified method to call any LLM based on model configuration
-   * Returns string for backward compatibility
+   * Returns string for backward compatibility, or parsed JSON if strictJsonMode is enabled
    */
   static async callLLM(
     apiKey: string,
     modelName: string,
     userPrompt: string,
-    options?: UnifiedLLMOptions
-  ): Promise<string> {
+    options: UnifiedLLMOptions
+  ): Promise<string | any> {
     // Convert simple prompt to message format
     const messages = [{
       entity: ChatMessageEntity.USER as const,
       text: userPrompt
     }];
     
-    const systemPrompt = options?.systemPrompt || 'You are a helpful AI assistant.';
-    const response = await this.callLLMWithMessages(apiKey, modelName, messages, { ...options, systemPrompt });
+    let systemPrompt = options.systemPrompt;
+    let enhancedOptions = options;
+
+    // If strict JSON mode is enabled, enhance the system prompt and options
+    if (options.strictJsonMode) {
+      systemPrompt = `${systemPrompt}\n\nIMPORTANT: You must respond with valid JSON only. Do not include any text before or after the JSON object.`;
+      enhancedOptions = {
+        ...options,
+        responseFormat: { type: 'json_object' }, // Enable JSON mode for compatible models
+        systemPrompt
+      };
+    }
+
+    const response = await this.callLLMWithMessages(apiKey, modelName, messages, enhancedOptions);
+    
+    // If strict JSON mode is enabled, return parsed JSON or throw error
+    if (options.strictJsonMode) {
+      if (response.parsedJson) {
+        return response.parsedJson;
+      }
+      
+      // Fallback: try to parse the text response
+      if (response.text) {
+        try {
+          return JSON.parse(response.text);
+        } catch (parseError) {
+          throw new Error(`Invalid JSON response from LLM: ${parseError instanceof Error ? parseError.message : String(parseError)}. Response: ${response.text}`);
+        }
+      }
+      
+      throw new Error('No response from LLM for JSON parsing');
+    }
+
+    // Default behavior: return text
     return response.text || '';
   }
 
@@ -92,15 +183,12 @@ export class UnifiedLLMClient {
     apiKey: string,
     modelName: string,
     messages: ChatMessage[],
-    options?: UnifiedLLMOptions & { systemPrompt: string }
+    options: UnifiedLLMOptions
   ): Promise<UnifiedLLMResponse> {
-    if (!options?.systemPrompt) {
-      throw new Error('systemPrompt is required when calling LLM with messages');
-    }
 
     const modelType = this.getModelType(modelName);
 
-    logger.debug('Calling LLM with messages:', {
+    logger.info('Calling LLM with messages:', {
       modelName,
       modelType,
       messageCount: messages.length,
@@ -110,25 +198,37 @@ export class UnifiedLLMClient {
     // Convert to OpenAI format with system prompt
     const openaiMessages = this.convertToOpenAIMessages(messages, options.systemPrompt);
     
-    logger.debug('Converted to OpenAI messages:', JSON.stringify(openaiMessages, null, 2));
+    logger.info(`Converted to OpenAI messages:\n${JSON.stringify(openaiMessages, null, 2)}`);
 
     try {
+      let response: any;
       if (modelType === 'litellm') {
-        const response = await this.callLiteLLMWithMessages(apiKey, modelName, openaiMessages, options);
-        return {
-          text: response.text,
-          functionCall: response.functionCall,
-          rawResponse: response.rawResponse,
-          reasoning: (response as any).reasoning, // LiteLLM may not have reasoning
-        };
+        response = await this.callLiteLLMWithMessages(apiKey, modelName, openaiMessages, options);
+      } else {
+        response = await this.callOpenAIWithMessages(apiKey, modelName, openaiMessages, options);
       }
-        const response = await this.callOpenAIWithMessages(apiKey, modelName, openaiMessages, options);
-        return {
-          text: response.text,
-          functionCall: response.functionCall,
-          rawResponse: response.rawResponse,
-          reasoning: response.reasoning,
-        };
+
+      const result: UnifiedLLMResponse = {
+        text: response.text,
+        functionCall: response.functionCall,
+        rawResponse: response.rawResponse,
+        reasoning: response.reasoning || (response as any).reasoning,
+      };
+
+      // Handle strict JSON mode parsing
+      if (options.strictJsonMode && result.text) {
+        try {
+          result.parsedJson = this.parseStrictJSON(result.text);
+        } catch (parseError) {
+          logger.error('JSON parsing failed in strict mode:', {
+            error: parseError instanceof Error ? parseError.message : String(parseError),
+            responseText: result.text,
+          });
+          // Don't throw here, let the caller handle it
+        }
+      }
+
+      return result;
 
     } catch (error) {
       logger.error('Error calling LLM with messages:', {
@@ -140,6 +240,40 @@ export class UnifiedLLMClient {
     }
   }
 
+
+  /**
+   * Parse strict JSON from LLM response, handling common formatting issues
+   */
+  private static parseStrictJSON(text: string): any {
+    // Trim whitespace
+    let jsonText = text.trim();
+
+    // Remove markdown code blocks if present
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
+    // Remove any leading/trailing text that's not part of JSON
+    const jsonMatch = jsonText.match(/\{.*\}/s) || jsonText.match(/\[.*\]/s);
+    if (jsonMatch) {
+      jsonText = jsonMatch[0];
+    }
+
+    // Try to parse
+    try {
+      return JSON.parse(jsonText);
+    } catch (error) {
+      // Log the problematic text for debugging
+      logger.error('Failed to parse JSON after cleanup:', {
+        original: text,
+        cleaned: jsonText,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new Error(`Unable to parse JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   /**
    * Converts internal ChatMessage array to OpenAI-compatible messages array
@@ -374,7 +508,10 @@ export class UnifiedLLMClient {
         apiKey || '',
         modelName,
         'Hello, this is a test message. Please respond with "OK".',
-        { maxTokens: 5 }
+        { 
+          systemPrompt: 'You are a helpful AI assistant for testing purposes.',
+          maxTokens: 5 
+        }
       );
       return { success: true };
     } catch (error) {

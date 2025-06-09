@@ -5,6 +5,7 @@
 import { FetcherTool } from '../../tools/FetcherTool.js';
 import { FinalizeWithCritiqueTool } from '../../tools/FinalizeWithCritiqueTool.js';
 import { SchemaBasedExtractorTool } from '../../tools/SchemaBasedExtractorTool.js';
+import { StreamlinedSchemaExtractorTool } from '../../tools/StreamlinedSchemaExtractorTool.js';
 import { NavigateURLTool, PerformActionTool, GetAccessibilityTreeTool, SearchContentTool, NavigateBackTool, NodeIDsToURLsTool, TakeScreenshotTool } from '../../tools/Tools.js';
 import { AIChatPanel } from '../../ui/AIChatPanel.js';
 import { ChatMessageEntity, type ChatMessage } from '../../ui/ChatView.js';
@@ -23,6 +24,8 @@ export function initializeConfiguredAgents(): void {
   ToolRegistry.registerToolFactory('node_ids_to_urls', () => new NodeIDsToURLsTool());
   ToolRegistry.registerToolFactory('fetcher_tool', () => new FetcherTool());
   ToolRegistry.registerToolFactory('schema_based_extractor', () => new SchemaBasedExtractorTool());
+  ToolRegistry.registerToolFactory('extract_schema_data', () => new SchemaBasedExtractorTool());
+  ToolRegistry.registerToolFactory('extract_schema_streamlined', () => new StreamlinedSchemaExtractorTool());
   ToolRegistry.registerToolFactory('finalize_with_critique', () => new FinalizeWithCritiqueTool());
   ToolRegistry.registerToolFactory('perform_action', () => new PerformActionTool());
   ToolRegistry.registerToolFactory('get_page_content', () => new GetAccessibilityTreeTool());
@@ -247,29 +250,49 @@ The final output should be in markdown format, and it should be lengthy and deta
 function createActionAgentConfig(): AgentToolConfig {
   return {
     name: 'action_agent',
-    description: 'Executes a single, low-level browser action (such as clicking a button, filling a field, selecting an option, or scrolling) on the current web page, based on a clear, actionable objective. This tool is limited to one atomic action per invocation and is not suitable for multi-step or high-level goals. It relies on the page\'s accessibility tree to identify elements and does not verify whether the action succeeded. Use this agent only when the desired outcome can be achieved with a single, direct browser interaction.',
-    systemPrompt: `You are an intelligent action agent in multi-step agentic framework  designed to interpret a user's objective and translate it into a specific browser action. Your task is to:
+    description: 'Executes a single, low-level browser action with enhanced targeting precision (such as clicking a button, filling a field, selecting an option, or scrolling) on the current web page, based on a clear, actionable objective. ENHANCED FEATURES: XPath-aware element targeting, HTML tag context understanding, improved accessibility tree with reduced noise. This tool is limited to one atomic action per invocation and is not suitable for multi-step or high-level goals. It relies on the enhanced accessibility tree to identify elements with greater precision and does not verify whether the action succeeded. Use this agent only when the desired outcome can be achieved with a single, direct browser interaction.',
+    systemPrompt: `You are an intelligent action agent with enhanced targeting capabilities in a multi-step agentic framework. You interpret a user's objective and translate it into a specific browser action with enhanced precision. Your task is to:
 
 1. Analyze the current page's accessibility tree to understand its structure
 2. Identify the most appropriate element to interact with based on the user's objective
 3. Determine the correct action to perform (click, fill, type, etc.)
 4. Execute that action precisely
 
+## ENHANCED CAPABILITIES AVAILABLE
+When analyzing page structure, you have access to:
+- XPath mappings for precise element targeting and location understanding
+- HTML tag names for semantic understanding beyond accessibility roles
+- URL mappings for direct link destinations
+- Clean accessibility tree with reduced noise for better focus
+
 ## Process Flow
-1. When given an objective, first analyze the page structure using get_page_content tool to access the accessibility tree or use schema_based_extractor to extract the specific element you need to interact with
-2. Carefully examine the tree to identify the element most likely to fulfill the user's objective
-3. Determine the appropriate action method based on the element type and objective:
-   - For links, buttons, checkboxes, radio buttons: use 'click'
+1. When given an objective, first analyze the page structure using get_page_content tool to access the enhanced accessibility tree or use schema_based_extractor to extract the specific element you need to interact with
+2. Carefully examine the tree and enhanced context (XPath, tag names, URL mappings) to identify the element most likely to fulfill the user's objective
+3. Use the enhanced context for more accurate element disambiguation when multiple similar elements exist
+4. Determine the appropriate action method based on the element type and objective:
+   - For links, buttons: use 'click'
+   - For checkboxes: use 'check' (to check), 'uncheck' (to uncheck), or 'setChecked' (to set to specific state)
+   - For radio buttons: use 'click' 
    - For input fields: use 'fill' with appropriate text
-   - For selection elements: use 'select' with appropriate option
-4. Execute the action using perform_action tool
-5. If an action fails, analyze the error message and try again with a different approach
+   - For dropdown/select elements: use 'selectOption' with the option value or text
+5. Execute the action using perform_action tool (which now has enhanced xpath resolution and element identification)
+6. If an action fails, analyze the error message and try again with a different approach, leveraging the enhanced context for better targeting
 
 ## Important Considerations
 - Be precise in your element selection, using the exact nodeId from the accessibility tree
-- Match the action type to the element type (don't try to 'fill' a button)
+- Leverage XPath information when available for more precise element targeting
+- Use HTML tag context to better understand element semantics
+- Use URL mappings to identify link destinations when relevant to the objective
+- Match the action type to the element type (don't try to 'fill' a button or 'click' a select element)
 - When filling forms, ensure the data format matches what the field expects
-- For complex objectives, you may need to break them down into multiple actions`,
+- For checkboxes, prefer 'check'/'uncheck' over 'click' for better reliability
+- For dropdowns, use 'selectOption' with the visible text or value of the option you want to select
+- For complex objectives, you may need to break them down into multiple actions
+
+## Method Examples
+- perform_action with method='check' for checkboxes: { "method": "check", "nodeId": 123 }
+- perform_action with method='selectOption' for dropdowns: { "method": "selectOption", "nodeId": 456, "args": { "text": "United States" } }
+- perform_action with method='setChecked' for specific checkbox state: { "method": "setChecked", "nodeId": 789, "args": { "checked": true } }`,
     tools: [
       'get_page_content',
       'perform_action',
@@ -428,14 +451,18 @@ Please verify if the action was successfully completed and achieved its intended
 function createClickActionAgentConfig(): AgentToolConfig {
   return {
     name: 'click_action_agent',
-    description: 'Specialized agent for clicking buttons, links, checkboxes and other clickable elements on a webpage.',
+    description: 'Specialized agent for clicking buttons, links, and other clickable elements on a webpage. Note: For checkboxes, prefer using check/uncheck methods for better reliability.',
     systemPrompt: `You are a specialized click action agent designed to find and click on the most appropriate element based on the user's objective.
 
 ## Your Specialized Skills
 You excel at:
-1. Finding clickable elements such as buttons, links, checkboxes, and radio buttons
+1. Finding clickable elements such as buttons, links, and interactive controls
 2. Determining which element best matches the user's intention
 3. Executing precise click actions to trigger the intended interaction
+
+## Important: When NOT to Use Click
+- For checkboxes: Use 'check'/'uncheck' methods instead for better reliability
+- For dropdown/select elements: Use 'selectOption' method instead
 
 ## Process Flow
 1. First analyze the page structure using get_page_content to access the accessibility tree
@@ -443,7 +470,7 @@ You excel at:
 3. Pay special attention to:
    - Button elements with matching text
    - Link elements with relevant text
-   - Form controls like checkboxes, radio buttons
+   - Radio buttons (for checkboxes, prefer check/uncheck methods)
    - Elements with click-related ARIA roles
    - Elements with descriptive text nearby that matches the objective
 4. Execute the click action using perform_action tool with the 'click' method

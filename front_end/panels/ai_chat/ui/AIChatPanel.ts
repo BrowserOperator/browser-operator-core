@@ -11,7 +11,6 @@ import * as Lit from '../../../ui/lit/lit.js';
 import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 import {AgentService, Events as AgentEvents} from '../core/AgentService.js';
 import { LiteLLMClient } from '../core/LiteLLMClient.js';
-import { EvaluationRunner } from '../evaluation/example-runner.js';
 import { createLogger } from '../core/Logger.js';
 
 const logger = createLogger('AIChatPanel');

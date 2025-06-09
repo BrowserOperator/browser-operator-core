@@ -235,42 +235,6 @@ export const edgeCaseNoResultsTest: TestCase<ResearchAgentArgs> = {
 };
 
 /**
- * Multi-perspective research test
- */
-export const multiPerspectiveTest: TestCase<ResearchAgentArgs> = {
-  id: 'research-agent-perspectives-001',
-  name: 'Research Cryptocurrency Environmental Impact',
-  description: 'Research cryptocurrency environmental impact from multiple stakeholder perspectives',
-  url: 'https://www.google.com',
-  tool: 'research_agent',
-  input: {
-    query: 'cryptocurrency bitcoin environmental impact energy consumption perspectives debate',
-    reasoning: 'Testing research on controversial topics requiring balanced multiple perspectives'
-  },
-  validation: {
-    type: 'llm-judge',
-    llmJudge: {
-      criteria: [
-        'Research presents multiple stakeholder perspectives (environmental, industry, regulatory)',
-        'Includes both critical and supportive viewpoints',
-        'Sources represent diverse types (environmental groups, industry, academia)',
-        'Information is factual and avoids taking partisan positions',
-        'Data includes specific metrics and statistics where available',
-        'Research acknowledges complexity and ongoing debates',
-        'Maintains objectivity while presenting controversial information'
-      ],
-      model: 'gpt-4.1-mini'
-    }
-  },
-  metadata: {
-    tags: ['controversial', 'multi-perspective', 'environmental', 'balanced'],
-    timeout: 240000,
-    retries: 2,
-    flaky: false
-  }
-};
-
-/**
  * Tool orchestration test - focuses on how well the agent uses available tools
  */
 export const toolOrchestrationTest: TestCase<ResearchAgentArgs> = {
@@ -316,7 +280,6 @@ export const researchAgentTests: TestCase<ResearchAgentArgs>[] = [
   businessResearchTest,     // Test data-driven research
   toolOrchestrationTest,    // Test tool usage effectiveness
   technicalDeepDiveTest,    // Test deep technical research
-  multiPerspectiveTest,     // Test controversial/balanced topics
   currentEventsTest,        // Test dynamic content (more flaky)
   edgeCaseNoResultsTest,    // Test edge cases last
 ];

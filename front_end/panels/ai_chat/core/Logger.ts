@@ -180,15 +180,23 @@ export class Logger {
     parts.push(`[${module}]`);
     
     const prefix = parts.join(' ');
-    const fullMessage = `${prefix} ${message}`;
+    // Convert \n to actual newlines and unescape quotes for better readability
+    let formattedMessage = message.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+    
+    // For very long multi-line messages, add some visual separation
+    if (formattedMessage.includes('\n') && formattedMessage.length > 200) {
+      formattedMessage = formattedMessage.replace(/^/, '\n').replace(/$/, '\n');
+    }
 
     // Choose console method based on level
     const consoleMethod = this.getConsoleMethod(level);
     
     if (data !== undefined) {
-      consoleMethod(fullMessage, data);
+      // When data is provided, log message and data separately
+      consoleMethod(`${prefix} ${formattedMessage}`, data);
     } else {
-      consoleMethod(fullMessage);
+      // For all messages, use a single console call to avoid repeated source locations
+      consoleMethod(`${prefix} ${formattedMessage}`);
     }
   }
 
@@ -276,13 +284,21 @@ export class Logger {
     const prefix = Logger.config.includeTimestamp 
       ? `[${entry.timestamp.toISOString()}] [ERROR] [${this.module}]`
       : `[ERROR] [${this.module}]`;
+    
+    // Convert \n to actual newlines and unescape quotes in error messages too
+    let formattedMessage = message.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+    
+    // For very long multi-line error messages, add some visual separation
+    if (formattedMessage.includes('\n') && formattedMessage.length > 200) {
+      formattedMessage = formattedMessage.replace(/^/, '\n').replace(/$/, '\n');
+    }
 
     if (entry.error) {
-      console.error(`${prefix} ${message}`, entry.error);
+      console.error(`${prefix} ${formattedMessage}`, entry.error);
     } else if (entry.data !== undefined) {
-      console.error(`${prefix} ${message}`, entry.data);
+      console.error(`${prefix} ${formattedMessage}`, entry.data);
     } else {
-      console.error(`${prefix} ${message}`);
+      console.error(`${prefix} ${formattedMessage}`);
     }
   }
 

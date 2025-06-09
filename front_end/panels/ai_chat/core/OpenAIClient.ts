@@ -262,10 +262,10 @@ export class OpenAIClient {
       }
 
       const data = await response.json();
-      logger.debug('OpenAI Response:', data);
+      logger.info('OpenAI Response:', data);
 
       if (data.usage) {
-        logger.debug('OpenAI Usage:', { inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens });
+        logger.info('OpenAI Usage:', { inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens });
       }
 
       return data;
@@ -321,7 +321,7 @@ export class OpenAIClient {
       };
     }
 
-    logger.debug('Request payload:', payloadBody);
+    logger.info('Request payload:', payloadBody);
 
     const data = await this.makeAPIRequest(apiKey, payloadBody);
     return this.processResponsesAPIOutput(data);

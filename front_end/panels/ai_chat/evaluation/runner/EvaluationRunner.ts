@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { GenericToolEvaluator } from './framework/GenericToolEvaluator.js';
-import { LLMEvaluator } from './framework/LLMEvaluator.js';
-import { AgentService } from '../core/AgentService.js';
-import { SchemaBasedExtractorTool } from '../tools/SchemaBasedExtractorTool.js';
-import { schemaExtractorTests, simpleTest } from './test-cases/schema-extractor-tests.js';
-import type { EvaluationConfig, TestResult } from './framework/types.js';
-import { createLogger } from '../core/Logger.js';
+import { GenericToolEvaluator } from '../framework/GenericToolEvaluator.js';
+import { LLMEvaluator } from '../framework/judges/LLMEvaluator.js';
+import { AgentService } from '../../core/AgentService.js';
+import { ToolRegistry } from '../../agent_framework/ConfigurableAgentTool.js';
+import type { EvaluationConfig, TestResult, TestCase } from '../framework/types.js';
+import { createLogger } from '../../core/Logger.js';
+import { TIMING_CONSTANTS } from '../../core/Constants.js';
 
 const logger = createLogger('EvaluationRunner');
 
@@ -35,7 +35,7 @@ export class EvaluationRunner {
       evaluationModel: 'gpt-4.1-mini',
       evaluationApiKey: apiKey,
       maxConcurrency: 1,
-      timeoutMs: 60000,
+      timeoutMs: TIMING_CONSTANTS.AGENT_TEST_SCHEMA_TIMEOUT,
       retries: 2,
       snapshotDir: './snapshots',
       reportDir: './reports'
@@ -48,16 +48,18 @@ export class EvaluationRunner {
   /**
    * Run a single test case
    */
-  async runSingleTest(testId?: string): Promise<TestResult> {
-    const testCase = testId ? 
-      schemaExtractorTests.find(t => t.id === testId) || simpleTest :
-      simpleTest;
+  async runSingleTest(testCase: TestCase<any>): Promise<TestResult> {
 
     logger.debug(`[EvaluationRunner] Running test: ${testCase.name}`);
     logger.debug(`[EvaluationRunner] URL: ${testCase.url}`);
+    logger.debug(`[EvaluationRunner] Tool: ${testCase.tool}`);
 
-    // Create the tool instance
-    const tool = new SchemaBasedExtractorTool();
+    // Get the tool instance from ToolRegistry based on what the test specifies
+    const tool = ToolRegistry.getRegisteredTool(testCase.tool);
+    if (!tool) {
+      throw new Error(`Tool "${testCase.tool}" not found in ToolRegistry. Ensure it is properly registered.`);
+    }
+
     const result = await this.evaluator.runTest(testCase, tool as any);
     
     // Add LLM evaluation if test passed
@@ -86,21 +88,29 @@ export class EvaluationRunner {
   }
 
   /**
-   * Run all tests
+   * Run all tests from a given test array
    */
-  async runAllTests(): Promise<TestResult[]> {
-    logger.debug(`[EvaluationRunner] Running ${schemaExtractorTests.length} tests...`);
+  async runAllTests(testCases: TestCase<any>[]): Promise<TestResult[]> {
+    logger.debug(`[EvaluationRunner] Running ${testCases.length} tests...`);
     
-    // Create tool instances map
+    // Create tool instances map based on tools used in test cases
     const toolInstances = new Map();
-    toolInstances.set('extract_schema_data', new SchemaBasedExtractorTool() as any);
+    const uniqueTools = new Set(testCases.map(test => test.tool));
     
-    const results = await this.evaluator.runBatch(schemaExtractorTests, toolInstances);
+    for (const toolName of uniqueTools) {
+      const tool = ToolRegistry.getRegisteredTool(toolName);
+      if (!tool) {
+        throw new Error(`Tool "${toolName}" not found in ToolRegistry. Ensure it is properly registered.`);
+      }
+      toolInstances.set(toolName, tool as any);
+    }
+    
+    const results = await this.evaluator.runBatch(testCases, toolInstances);
     
     // Add LLM evaluations
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-      const testCase = schemaExtractorTests[i];
+      const testCase = testCases[i];
       
       if (result.status === 'passed' && result.output && testCase.validation.type !== 'snapshot') {
         try {
@@ -120,7 +130,7 @@ export class EvaluationRunner {
       }
     }
 
-    this.printSummary(results);
+    this.printDetailedSummary(results);
     return results;
   }
 
@@ -152,19 +162,20 @@ export class EvaluationRunner {
       }
     }
     
-    if (result.output && result.status === 'passed') {
-      logger.debug('\nOutput Preview:');
-      const preview = JSON.stringify(result.output, null, 2);
-      logger.debug(preview.length > 500 ? preview.substring(0, 500) + '...' : preview);
+    // Always show the tool response regardless of pass/fail status
+    if (result.rawResponse !== undefined) {
+      logger.debug('\nTool Response:');
+      const rawPreview = JSON.stringify(result.rawResponse, null, 2);
+      logger.debug(rawPreview);  // Show full response without truncation
     }
     
     logger.debug('='.repeat(60));
   }
 
   /**
-   * Print summary of all results
+   * Print detailed summary including all test responses
    */
-  private printSummary(results: TestResult[]): void {
+  private printDetailedSummary(results: TestResult[]): void {
     const passed = results.filter(r => r.status === 'passed').length;
     const failed = results.filter(r => r.status === 'failed').length;
     const errors = results.filter(r => r.status === 'error').length;
@@ -172,7 +183,7 @@ export class EvaluationRunner {
     const avgDuration = results.reduce((sum, r) => sum + r.duration, 0) / results.length;
     
     logger.debug('\n' + '='.repeat(60));
-    logger.debug('EVALUATION SUMMARY');
+    logger.debug('DETAILED EVALUATION REPORT');
     logger.debug('='.repeat(60));
     logger.debug(`Total Tests: ${results.length}`);
     logger.debug(`Passed: ${passed}`);
@@ -191,19 +202,30 @@ export class EvaluationRunner {
       logger.debug(`Average LLM Score: ${Math.round(avgScore)}/100`);
     }
     
+    logger.debug('\n' + '='.repeat(60));
+    logger.debug('ALL TEST RESPONSES');
     logger.debug('='.repeat(60));
-  }
-
-  /**
-   * Quick test method for development
-   */
-  static async quickTest(): Promise<void> {
-    try {
-      const runner = new EvaluationRunner();
-      await runner.runSingleTest('github-repo-001');
-    } catch (error) {
-      logger.error('[EvaluationRunner] Quick test failed:', error);
-    }
+    
+    // Show all test responses
+    results.forEach((result, index) => {
+      logger.debug(`\n--- Test ${index + 1}: ${result.testId} ---`);
+      logger.debug(`Status: ${result.status.toUpperCase()}`);
+      logger.debug(`Duration: ${result.duration}ms`);
+      
+      if (result.rawResponse !== undefined) {
+        logger.debug('\nResponse:');
+        const rawPreview = JSON.stringify(result.rawResponse, null, 2);
+        logger.debug(rawPreview);
+      } else {
+        logger.debug('\nResponse: No response captured');
+      }
+      
+      if (result.error) {
+        logger.debug(`\nError: ${result.error}`);
+      }
+    });
+    
+    logger.debug('\n' + '='.repeat(60));
   }
 }
 

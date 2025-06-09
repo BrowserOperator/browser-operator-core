@@ -3,7 +3,20 @@
 // found in the LICENSE file.
 
 import type { TestResult, TestCase } from './types.js';
-import type { AgentConversationInfo } from '../AgentEvaluationRunner.js';
+
+/**
+ * Agent conversation information extracted from test output
+ */
+interface AgentConversationInfo {
+  toolsUsed: string[];
+  stepCount: number;
+  handoffOccurred: boolean;
+  handoffTarget?: string;
+  iterations: number;
+  researchSources?: string[];
+  errorCount: number;
+  finalStatus: string;
+}
 
 /**
  * Generates detailed markdown reports for evaluation results
@@ -88,7 +101,7 @@ export class MarkdownReportGenerator {
       
       if (testCase) {
         markdown.push(`**URL:** ${testCase.url}`);
-        markdown.push(`**Tags:** ${testCase.metadata.tags.join(', ')}`);
+        markdown.push(`**Tags:** ${testCase.metadata?.tags?.join(', ') || 'None'}`);
         markdown.push(`**Description:** ${testCase.description}`);
       }
       
@@ -123,6 +136,16 @@ export class MarkdownReportGenerator {
             });
           }
         }
+        markdown.push('');
+      }
+
+      // Raw tool/agent response
+      if (result.rawResponse !== undefined) {
+        markdown.push('#### RAW Response');
+        markdown.push('');
+        markdown.push('```json');
+        markdown.push(JSON.stringify(result.rawResponse, null, 2));
+        markdown.push('```');
         markdown.push('');
       }
 
@@ -223,7 +246,7 @@ export class MarkdownReportGenerator {
     
     results.forEach(result => {
       const testCase = testCases.find(tc => tc.id === result.testId);
-      if (testCase) {
+      if (testCase && testCase.metadata?.tags) {
         testCase.metadata.tags.forEach(tag => {
           const current = categories.get(tag) || { total: 0, passed: 0 };
           current.total++;
@@ -388,9 +411,11 @@ export class MarkdownReportGenerator {
 
     // Extract tool usage
     for (const message of output.messages) {
+      if (!message || typeof message !== 'object') continue;
+      
       if (message.tool_calls && Array.isArray(message.tool_calls)) {
         for (const toolCall of message.tool_calls) {
-          if (toolCall.function?.name) {
+          if (toolCall && toolCall.function?.name) {
             info.toolsUsed.push(toolCall.function.name);
           }
         }

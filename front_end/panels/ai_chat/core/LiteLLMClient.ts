@@ -187,7 +187,7 @@ export class LiteLLMClient {
       payloadBody.tool_choice = options.tool_choice;
     }
 
-    logger.debug('Request payload:', payloadBody);
+    logger.info('Request payload:', payloadBody);
 
     try {
       const endpoint = this.getEndpoint(options);
@@ -209,10 +209,10 @@ export class LiteLLMClient {
       }
 
       const data = await response.json();
-      logger.debug('LiteLLM Response:', data);
+      logger.info('LiteLLM Response:', data);
 
       if (data.usage) {
-        logger.debug('LiteLLM Usage:', { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens });
+        logger.info('LiteLLM Usage:', { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens });
       }
 
       // Process the response in standard OpenAI format
@@ -292,7 +292,7 @@ export class LiteLLMClient {
       payloadBody.tool_choice = options.tool_choice;
     }
 
-    logger.debug('Request payload:', payloadBody);
+    logger.info('Request payload:', payloadBody);
 
     try {
       const endpoint = this.getEndpoint(options);
@@ -314,10 +314,10 @@ export class LiteLLMClient {
       }
 
       const data = await response.json();
-      logger.debug('LiteLLM Response:', data);
+      logger.info('LiteLLM Response:', data);
 
       if (data.usage) {
-        logger.debug('LiteLLM Usage:', { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens });
+        logger.info('LiteLLM Usage:', { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens });
       }
 
       // Process the response in standard OpenAI format (same as before)

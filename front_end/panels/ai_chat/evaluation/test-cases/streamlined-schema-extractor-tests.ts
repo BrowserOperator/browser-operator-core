@@ -3,42 +3,80 @@
 // found in the LICENSE file.
 
 import type { TestCase } from '../framework/types.js';
-import type { SchemaExtractionArgs } from '../../tools/SchemaBasedExtractorTool.js';
 import type { StreamlinedSchemaExtractionArgs } from '../../tools/StreamlinedSchemaExtractorTool.js';
 
 /**
- * Test cases for SchemaBasedExtractorTool evaluation
- * Support for both original and streamlined extractor tools
+ * Test cases for StreamlinedSchemaExtractorTool evaluation
+ * All tests use the streamlined extractor tool
  */
 
 /**
- * Tool configuration for schema extraction tests
+ * Simple structured data test
  */
-export interface SchemaTestConfig {
-  useStreamlined: boolean; // If true, use StreamlinedSchemaExtractorTool
-}
+export const simpleTest: TestCase<StreamlinedSchemaExtractionArgs> = {
+  id: 'github-repo-001',
+  name: 'Extract GitHub Repository Info',
+  description: 'Extract basic repository information from a GitHub page',
+  url: 'https://github.com/microsoft/TypeScript',
+  tool: 'extract_schema_streamlined',
+  input: {
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        description: { type: 'string' },
+        language: { type: 'string' },
+        stars: { type: 'number' },
+        forks: { type: 'number' },
+        topics: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        readme: {
+          type: 'object',
+          properties: {
+            summary: { type: 'string' }
+          }
+        }
+      },
+      required: ['name', 'description']
+    },
+    instruction: 'Extract repository metadata and basic statistics',
+    reasoning: 'Testing extraction from a well-structured GitHub repository page'
+  },
+  validation: {
+    type: 'hybrid',
+    snapshot: {
+      excludePaths: ['stars', 'forks'], // These change frequently
+      structureOnly: false
+    },
+    llmJudge: {
+      criteria: [
+        'Repository name matches the GitHub page',
+        'Description accurately reflects the project purpose',
+        'Programming language is correctly identified',
+        'Topic tags are relevant to the project'
+      ],
+      model: 'gpt-4.1-mini'
+    }
+  },
+  metadata: {
+    tags: ['github', 'repository', 'structured'],
+    timeout: 30000,
+    retries: 1,
+    flaky: false
+  }
+};
 
 /**
- * Create a test case for the specified tool type
+ * Wikipedia article extraction test
  */
-function createSchemaTest(
-  baseConfig: Omit<TestCase<any>, 'tool'>,
-  useStreamlined: boolean = false
-): TestCase<any> {
-  return {
-    ...baseConfig,
-    tool: useStreamlined ? 'extract_schema_streamlined' : 'extract_schema_data'
-  };
-}
-
-/**
- * Wikipedia article extraction test base config
- */
-const wikipediaTestBase = {
+export const wikipediaTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'wikipedia-chrome-devtools-001',
   name: 'Extract Chrome DevTools Wikipedia Article',
   description: 'Extract structured information from the Chrome DevTools Wikipedia page',
   url: 'https://en.wikipedia.org/wiki/Chrome_DevTools',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -100,29 +138,14 @@ const wikipediaTestBase = {
 };
 
 /**
- * Wikipedia test for original tool
- */
-export const wikipediaTest: TestCase<SchemaExtractionArgs> = createSchemaTest(wikipediaTestBase, false);
-
-/**
- * Wikipedia test for streamlined tool  
- */
-export const wikipediaStreamlinedTest: TestCase<StreamlinedSchemaExtractionArgs> = createSchemaTest({
-  ...wikipediaTestBase,
-  id: 'wikipedia-chrome-devtools-001-streamlined',
-  name: 'Extract Chrome DevTools Wikipedia Article (Streamlined)',
-  description: 'Extract structured information from the Chrome DevTools Wikipedia page using streamlined extractor'
-}, true);
-
-/**
  * E-commerce product extraction test
  */
-export const ecommerceTest: TestCase<SchemaExtractionArgs> = {
+export const ecommerceTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'amazon-product-001',
   name: 'Extract Amazon Product Details',
   description: 'Extract product information from an Amazon product page',
   url: 'https://www.amazon.com/Obelisk-Climbing-Rustproof-Trellises-Clematis/dp/B0B4SBY6QD/',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -189,12 +212,12 @@ export const ecommerceTest: TestCase<SchemaExtractionArgs> = {
 /**
  * News article extraction test
  */
-export const newsTest: TestCase<SchemaExtractionArgs> = {
+export const newsTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'bbc-news-001',
   name: 'Extract BBC News Article',
   description: 'Extract article content and metadata from a BBC News page',
   url: 'https://www.bbc.com/news/technology',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -251,12 +274,12 @@ export const newsTest: TestCase<SchemaExtractionArgs> = {
 /**
  * Google Search results extraction test
  */
-export const googleSearchTest: TestCase<SchemaExtractionArgs> = {
+export const googleSearchTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'google-search-001',
   name: 'Extract Google Search Results',
   description: 'Extract search results from Google search page',
   url: 'https://www.google.com/search?q=chrome+devtools+tutorial',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -317,12 +340,12 @@ export const googleSearchTest: TestCase<SchemaExtractionArgs> = {
 /**
  * Bing Search results extraction test
  */
-export const bingSearchTest: TestCase<SchemaExtractionArgs> = {
+export const bingSearchTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'bing-search-001',
   name: 'Extract Bing Search Results',
   description: 'Extract search results from Bing search page',
   url: 'https://www.bing.com/search?q=web+scraping+best+practices',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -378,12 +401,12 @@ export const bingSearchTest: TestCase<SchemaExtractionArgs> = {
 /**
  * Wikipedia search results extraction test
  */
-export const wikipediaSearchTest: TestCase<SchemaExtractionArgs> = {
+export const wikipediaSearchTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'wikipedia-search-001',
   name: 'Extract Wikipedia Search Results',
   description: 'Extract search results from Wikipedia search',
   url: 'https://en.wikipedia.org/w/index.php?search=artificial+intelligence&title=Special:Search',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -444,12 +467,12 @@ export const wikipediaSearchTest: TestCase<SchemaExtractionArgs> = {
 /**
  * Home Depot product search extraction test
  */
-export const homeDepotTest: TestCase<SchemaExtractionArgs> = {
+export const homeDepotTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'homedepot-001',
   name: 'Extract Home Depot Product Search',
   description: 'Extract product listings from Home Depot search results',
   url: 'https://www.homedepot.com/s/power%2520drill',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -522,12 +545,12 @@ export const homeDepotTest: TestCase<SchemaExtractionArgs> = {
 /**
  * Macy's product listing extraction test
  */
-export const macysTest: TestCase<SchemaExtractionArgs> = {
+export const macysTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'macys-001',
   name: 'Extract Macy\'s Product Listings',
   description: 'Extract fashion products from Macy\'s category page',
   url: 'https://www.macys.com/shop/womens-clothing/womens-dresses',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -615,12 +638,12 @@ export const macysTest: TestCase<SchemaExtractionArgs> = {
 /**
  * Google Flights search extraction test
  */
-export const googleFlightsTest: TestCase<SchemaExtractionArgs> = {
+export const googleFlightsTest: TestCase<StreamlinedSchemaExtractionArgs> = {
   id: 'google-flights-001',
   name: 'Extract Google Flights Search Results',
   description: 'Extract flight options from Google Flights search',
   url: 'https://www.google.com/travel/flights/search?tfs=CBwQAhojEgoyMDI1LTEyLTI0agwIAhIIL20vMGQ5anJyBwgBEgNTRk8aIxIKMjAyNS0xMi0zMWoHCAESA1NGT3IMCAISCC9tLzBkOWpyQAFIAXABggELCP___________wGYAQE',
-  tool: 'extract_schema_data',
+  tool: 'extract_schema_streamlined',
   input: {
     schema: {
       type: 'object',
@@ -701,124 +724,9 @@ export const googleFlightsTest: TestCase<SchemaExtractionArgs> = {
 };
 
 /**
- * Simple structured data test
+ * All test cases for StreamlinedSchemaExtractorTool
  */
-export const simpleTest: TestCase<SchemaExtractionArgs> = {
-  id: 'github-repo-001',
-  name: 'Extract GitHub Repository Info',
-  description: 'Extract basic repository information from a GitHub page',
-  url: 'https://github.com/microsoft/TypeScript',
-  tool: 'extract_schema_data',
-  input: {
-    schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        description: { type: 'string' },
-        language: { type: 'string' },
-        stars: { type: 'number' },
-        forks: { type: 'number' },
-        topics: {
-          type: 'array',
-          items: { type: 'string' }
-        },
-        readme: {
-          type: 'object',
-          properties: {
-            summary: { type: 'string' }
-          }
-        }
-      },
-      required: ['name', 'description']
-    },
-    instruction: 'Extract repository metadata and basic statistics',
-    reasoning: 'Testing extraction from a well-structured GitHub repository page'
-  },
-  validation: {
-    type: 'hybrid',
-    snapshot: {
-      excludePaths: ['stars', 'forks'], // These change frequently
-      structureOnly: false
-    },
-    llmJudge: {
-      criteria: [
-        'Repository name matches the GitHub page',
-        'Description accurately reflects the project purpose',
-        'Programming language is correctly identified',
-        'Topic tags are relevant to the project'
-      ],
-      model: 'gpt-4.1-mini'
-    }
-  },
-  metadata: {
-    tags: ['github', 'repository', 'structured'],
-    timeout: 30000,
-    retries: 1,
-    flaky: false
-  }
-};
-
-/**
- * Create streamlined version of simple GitHub test
- */
-export const simpleStreamlinedTest: TestCase<StreamlinedSchemaExtractionArgs> = createSchemaTest({
-  id: 'github-repo-001-streamlined',
-  name: 'Extract GitHub Repository Info (Streamlined)',
-  description: 'Extract basic repository information from a GitHub page using streamlined extractor',
-  url: 'https://github.com/microsoft/TypeScript',
-  input: {
-    schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        description: { type: 'string' },
-        language: { type: 'string' },
-        stars: { type: 'number' },
-        forks: { type: 'number' },
-        topics: {
-          type: 'array',
-          items: { type: 'string' }
-        },
-        readme: {
-          type: 'object',
-          properties: {
-            summary: { type: 'string' }
-          }
-        }
-      },
-      required: ['name', 'description']
-    },
-    instruction: 'Extract repository metadata and basic statistics',
-    reasoning: 'Testing extraction from a well-structured GitHub repository page'
-  },
-  validation: {
-    type: 'hybrid',
-    snapshot: {
-      excludePaths: ['stars', 'forks'], // These change frequently
-      structureOnly: false
-    },
-    llmJudge: {
-      criteria: [
-        'Repository name matches the GitHub page',
-        'Description accurately reflects the project purpose',
-        'Programming language is correctly identified',
-        'Topic tags are relevant to the project'
-      ],
-      model: 'gpt-4.1-mini'
-    }
-  },
-  metadata: {
-    tags: ['github', 'repository', 'structured', 'streamlined'],
-    timeout: 30000,
-    retries: 1,
-    flaky: false
-  }
-}, true);
-
-/**
- * All test cases for original SchemaBasedExtractorTool
- */
-export const schemaExtractorTests: TestCase<SchemaExtractionArgs>[] = [
+export const streamlinedSchemaExtractorTests: TestCase<StreamlinedSchemaExtractionArgs>[] = [
   simpleTest,          // Start with simplest
   wikipediaTest,       // Stable, well-structured
   newsTest,            // Dynamic content
@@ -832,70 +740,15 @@ export const schemaExtractorTests: TestCase<SchemaExtractionArgs>[] = [
 ];
 
 /**
- * Test cases for StreamlinedSchemaExtractorTool
+ * Get a specific test by ID
  */
-export const streamlinedSchemaExtractorTests: TestCase<StreamlinedSchemaExtractionArgs>[] = [
-  simpleStreamlinedTest,     // Start with simplest
-  wikipediaStreamlinedTest,  // Stable, well-structured
-  // Note: Other tests can be converted to streamlined versions as needed
-];
-
-/**
- * All test cases (both original and streamlined)
- */
-export const allSchemaExtractorTests: TestCase<SchemaExtractionArgs | StreamlinedSchemaExtractionArgs>[] = [
-  ...schemaExtractorTests,
-  ...streamlinedSchemaExtractorTests
-];
-
-/**
- * Get a specific test by ID from any test suite
- */
-export function getTestById(id: string): TestCase<SchemaExtractionArgs | StreamlinedSchemaExtractionArgs> | undefined {
-  return allSchemaExtractorTests.find(test => test.id === id);
+export function getTestById(id: string): TestCase<StreamlinedSchemaExtractionArgs> | undefined {
+  return streamlinedSchemaExtractorTests.find(test => test.id === id);
 }
 
 /**
- * Get tests by tag from any test suite
+ * Get tests by tag
  */
-export function getTestsByTag(tag: string): TestCase<SchemaExtractionArgs | StreamlinedSchemaExtractionArgs>[] {
-  return allSchemaExtractorTests.filter(test => test.metadata.tags.includes(tag));
-}
-
-/**
- * Get original tool tests by tag
- */
-export function getOriginalTestsByTag(tag: string): TestCase<SchemaExtractionArgs>[] {
-  return schemaExtractorTests.filter(test => test.metadata.tags.includes(tag));
-}
-
-/**
- * Get streamlined tool tests by tag  
- */
-export function getStreamlinedTestsByTag(tag: string): TestCase<StreamlinedSchemaExtractionArgs>[] {
+export function getTestsByTag(tag: string): TestCase<StreamlinedSchemaExtractionArgs>[] {
   return streamlinedSchemaExtractorTests.filter(test => test.metadata.tags.includes(tag));
-}
-
-/**
- * Helper function to run comparison tests between original and streamlined tools
- */
-export function getComparisonTestPairs(): Array<{
-  original: TestCase<SchemaExtractionArgs>,
-  streamlined: TestCase<StreamlinedSchemaExtractionArgs>
-}> {
-  const pairs = [];
-  
-  // GitHub repo comparison
-  pairs.push({
-    original: simpleTest,
-    streamlined: simpleStreamlinedTest
-  });
-  
-  // Wikipedia comparison  
-  pairs.push({
-    original: wikipediaTest,
-    streamlined: wikipediaStreamlinedTest
-  });
-  
-  return pairs;
 }

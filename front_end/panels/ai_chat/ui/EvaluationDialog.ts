@@ -4,17 +4,48 @@
 
 import * as i18n from '../../../core/i18n/i18n.js';
 import * as UI from '../../../ui/legacy/legacy.js';
-import { EvaluationRunner } from '../evaluation/example-runner.js';
-import { VisionAgentEvaluationRunner } from '../evaluation/VisionAgentEvaluationRunner.js';
+import { EvaluationRunner } from '../evaluation/runner/EvaluationRunner.js';
+import { VisionAgentEvaluationRunner } from '../evaluation/runner/VisionAgentEvaluationRunner.js';
 import { MarkdownReportGenerator } from '../evaluation/framework/MarkdownReportGenerator.js';
 import { MarkdownViewerUtil } from '../common/MarkdownViewerUtil.js';
 import { schemaExtractorTests } from '../evaluation/test-cases/schema-extractor-tests.js';
-import { researchAgentTests, getBasicResearchTests } from '../evaluation/test-cases/research-agent-tests.js';
-import { actionAgentTests, getBasicActionTests } from '../evaluation/test-cases/action-agent-tests.js';
+import { streamlinedSchemaExtractorTests } from '../evaluation/test-cases/streamlined-schema-extractor-tests.js';
+import { researchAgentTests } from '../evaluation/test-cases/research-agent-tests.js';
+import { actionAgentTests } from '../evaluation/test-cases/action-agent-tests.js';
 import type { TestResult } from '../evaluation/framework/types.js';
 import { createLogger } from '../core/Logger.js';
 
 const logger = createLogger('EvaluationDialog');
+
+// Tool test mapping for extensibility - add new tools here
+const TOOL_TEST_MAPPING: Record<string, { tests: any[], displayName: string }> = {
+  'extract_schema': {
+    tests: schemaExtractorTests,
+    displayName: 'Original Schema Extractor'
+  },
+  'extract_schema_streamlined': {
+    tests: streamlinedSchemaExtractorTests,
+    displayName: 'Streamlined Schema Extractor'
+  },
+  // Future tools can be added here:
+  // 'html_to_markdown': { tests: htmlToMarkdownTests, displayName: 'HTML to Markdown' },
+  // 'fetcher_tool': { tests: fetcherToolTests, displayName: 'Fetcher Tool' },
+};
+
+// Agent test mapping for extensibility - add new agents here
+const AGENT_TEST_MAPPING: Record<string, { tests: any[], displayName: string }> = {
+  'research_agent': {
+    tests: researchAgentTests,
+    displayName: 'Research Agent'
+  },
+  'action_agent': {
+    tests: actionAgentTests,
+    displayName: 'Action Agent'
+  },
+  // Future agents can be added here:
+  // 'vision_agent': { tests: visionAgentTests, displayName: 'Vision Agent' },
+  // 'code_agent': { tests: codeAgentTests, displayName: 'Code Agent' },
+};
 
 const UIStrings = {
   /**
@@ -66,25 +97,13 @@ const UIStrings = {
    */
   clearResults: 'Clear Results',
   /**
-   * @description Tab for schema extractor tests
+   * @description Tab for tool tests
    */
-  schemaExtractorTests: 'Schema Extractor Tests',
+  toolTests: 'Tool Tests',
   /**
    * @description Tab for agent tests
    */
   agentTests: 'Agent Tests',
-  /**
-   * @description Run basic agent tests button
-   */
-  runBasicAgentTests: 'Run Basic Agent Tests',
-  /**
-   * @description Run all agent tests button
-   */
-  runAllAgentTests: 'Run All Agent Tests',
-  /**
-   * @description Run action agent tests button
-   */
-  runActionAgentTests: 'Run Action Agent Tests',
   /**
    * @description View detailed report button
    */
@@ -113,12 +132,13 @@ interface EvaluationDialogState {
   totalTests: number;
   completedTests: number;
   startTime?: number;
-  activeTab: 'schema-extractor' | 'agents';
-  agentType?: 'research' | 'action';
+  activeTab: 'tool-tests' | 'agents';
+  agentType: string;
   visionEnabled?: boolean;
   selectedTests: Set<string>;
   bottomPanelView: 'summary' | 'logs';
   testLogs: string[];
+  toolType: string;
 }
 
 export class EvaluationDialog {
@@ -127,12 +147,13 @@ export class EvaluationDialog {
     testResults: new Map(),
     totalTests: 0,
     completedTests: 0,
-    activeTab: 'schema-extractor',
-    agentType: 'research',
+    activeTab: 'tool-tests',
+    agentType: 'research_agent',
     visionEnabled: false,
     selectedTests: new Set(),
     bottomPanelView: 'summary',
     testLogs: [],
+    toolType: 'extract_schema',
   };
   
   #evaluationRunner?: EvaluationRunner;
@@ -611,6 +632,10 @@ export class EvaluationDialog {
   }
 
   #render(): void {
+    // Preserve scroll position of test list
+    const existingTestList = this.#dialog.contentElement.querySelector('.eval-test-list');
+    const scrollTop = existingTestList ? existingTestList.scrollTop : 0;
+    
     // Clear content but keep styles
     const existingStyle = this.#dialog.contentElement.querySelector('style');
     this.#dialog.contentElement.innerHTML = '';
@@ -629,6 +654,15 @@ export class EvaluationDialog {
     // Button area
     const buttons = this.#renderButtons();
     this.#dialog.contentElement.appendChild(buttons);
+
+    // Restore scroll position
+    const newTestList = this.#dialog.contentElement.querySelector('.eval-test-list');
+    if (newTestList && scrollTop > 0) {
+      // Use requestAnimationFrame to ensure DOM is fully rendered
+      requestAnimationFrame(() => {
+        newTestList.scrollTop = scrollTop;
+      });
+    }
   }
 
   #renderHeader(): HTMLElement {
@@ -701,6 +735,12 @@ export class EvaluationDialog {
       testsPanel.appendChild(agentSelector);
     }
 
+    // Add tool selector if on tool-tests tab
+    if (this.#state.activeTab === 'tool-tests') {
+      const toolSelector = this.#renderToolSelector();
+      testsPanel.appendChild(toolSelector);
+    }
+
     // Add selection controls
     const selectionControls = this.#renderSelectionControls();
     testsPanel.appendChild(selectionControls);
@@ -720,15 +760,15 @@ export class EvaluationDialog {
     const tabsContainer = document.createElement('div');
     tabsContainer.className = 'eval-tabs';
 
-    // Schema Extractor Tests tab
-    const schemaTab = document.createElement('button');
-    schemaTab.className = 'eval-tab';
-    if (this.#state.activeTab === 'schema-extractor') {
-      schemaTab.classList.add('active');
+    // Tool Tests tab
+    const toolTab = document.createElement('button');
+    toolTab.className = 'eval-tab';
+    if (this.#state.activeTab === 'tool-tests') {
+      toolTab.classList.add('active');
     }
-    schemaTab.textContent = i18nString(UIStrings.schemaExtractorTests);
-    schemaTab.addEventListener('click', () => {
-      this.#state.activeTab = 'schema-extractor';
+    toolTab.textContent = i18nString(UIStrings.toolTests);
+    toolTab.addEventListener('click', () => {
+      this.#state.activeTab = 'tool-tests';
       this.#state.testResults.clear(); // Clear results when switching tabs
       this.#state.selectedTests.clear(); // Clear selections when switching tabs
       this.#render();
@@ -748,10 +788,52 @@ export class EvaluationDialog {
       this.#render();
     });
 
-    tabsContainer.appendChild(schemaTab);
+    tabsContainer.appendChild(toolTab);
     tabsContainer.appendChild(agentTab);
 
     return tabsContainer;
+  }
+
+  #renderToolSelector(): HTMLElement {
+    const selectorContainer = document.createElement('div');
+    selectorContainer.style.cssText = 'padding: 8px 0; display: flex; align-items: center; gap: 12px;';
+
+    const label = document.createElement('label');
+    label.textContent = 'Tool:';
+    label.style.cssText = 'font-size: 13px; color: var(--sys-color-on-surface-variant);';
+
+    const select = document.createElement('select');
+    select.style.cssText = `
+      padding: 4px 8px;
+      border: 1px solid var(--sys-color-outline);
+      border-radius: 4px;
+      background: var(--sys-color-surface);
+      color: var(--sys-color-on-surface);
+      font-size: 13px;
+      cursor: pointer;
+    `;
+
+    // Add options dynamically from tool mapping
+    Object.entries(TOOL_TEST_MAPPING).forEach(([toolType, toolInfo]) => {
+      const option = document.createElement('option');
+      option.value = toolType;
+      option.textContent = toolInfo.displayName;
+      option.selected = this.#state.toolType === toolType;
+      select.appendChild(option);
+    });
+
+    // Handle selection change
+    select.addEventListener('change', () => {
+      this.#state.toolType = select.value;
+      this.#state.testResults.clear(); // Clear results when switching tools
+      this.#state.selectedTests.clear(); // Clear selections when switching tools
+      this.#render();
+    });
+
+    selectorContainer.appendChild(label);
+    selectorContainer.appendChild(select);
+
+    return selectorContainer;
   }
 
   #renderAgentSelector(): HTMLElement {
@@ -773,23 +855,18 @@ export class EvaluationDialog {
       cursor: pointer;
     `;
 
-    // Add options
-    const researchOption = document.createElement('option');
-    researchOption.value = 'research';
-    researchOption.textContent = 'Research Agent';
-    researchOption.selected = this.#state.agentType === 'research';
-
-    const actionOption = document.createElement('option');
-    actionOption.value = 'action';
-    actionOption.textContent = 'Action Agent';
-    actionOption.selected = this.#state.agentType === 'action';
-
-    select.appendChild(researchOption);
-    select.appendChild(actionOption);
+    // Add options dynamically from agent mapping
+    Object.entries(AGENT_TEST_MAPPING).forEach(([agentType, agentInfo]) => {
+      const option = document.createElement('option');
+      option.value = agentType;
+      option.textContent = agentInfo.displayName;
+      option.selected = this.#state.agentType === agentType;
+      select.appendChild(option);
+    });
 
     // Handle selection change
     select.addEventListener('change', () => {
-      this.#state.agentType = select.value as 'research' | 'action';
+      this.#state.agentType = select.value;
       this.#state.testResults.clear(); // Clear results when switching agent types
       this.#state.selectedTests.clear(); // Clear selections when switching agent types
       this.#render();
@@ -799,7 +876,7 @@ export class EvaluationDialog {
     selectorContainer.appendChild(select);
 
     // Add vision verification checkbox (only for action agent)
-    if (this.#state.agentType === 'action') {
+    if (this.#state.agentType === 'action_agent') {
       const visionContainer = document.createElement('div');
       visionContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-left: 16px;';
       
@@ -889,13 +966,16 @@ export class EvaluationDialog {
     const container = document.createElement('div');
     container.className = 'eval-test-list';
 
-    // Get tests based on active tab
+    // Get tests based on active tab using unified mapping approach
     let testCases;
-    if (this.#state.activeTab === 'schema-extractor') {
-      testCases = schemaExtractorTests;
+    if (this.#state.activeTab === 'tool-tests') {
+      // Use tool type to get tests from tool mapping
+      const toolMapping = TOOL_TEST_MAPPING[this.#state.toolType];
+      testCases = toolMapping ? toolMapping.tests : [];
     } else {
-      // Agent tests - check which agent type
-      testCases = this.#state.agentType === 'action' ? actionAgentTests : researchAgentTests;
+      // Use agent type to get tests from agent mapping
+      const agentMapping = AGENT_TEST_MAPPING[this.#state.agentType];
+      testCases = agentMapping ? agentMapping.tests : [];
     }
 
     if (testCases.length === 0) {
@@ -910,7 +990,7 @@ export class EvaluationDialog {
     }
 
     // Render test items
-    testCases.forEach(testCase => {
+    testCases.forEach((testCase: any) => {
       const testItem = this.#renderTestItem(testCase);
       container.appendChild(testItem);
     });
@@ -1267,39 +1347,22 @@ export class EvaluationDialog {
       buttons.appendChild(reportButton);
     }
 
-    // Buttons depend on active tab
-    if (this.#state.activeTab === 'schema-extractor') {
-      // Run single test button
-      const runTestButton = document.createElement('button');
-      runTestButton.className = 'eval-button primary';
-      runTestButton.textContent = `${i18nString(UIStrings.runTest)} (Simple)`;
-      runTestButton.disabled = this.#state.isRunning;
-      runTestButton.addEventListener('click', () => this.#runSingleTest());
-      buttons.appendChild(runTestButton);
+    // Unified buttons for both tools and agents
+    // Run first test button
+    const runTestButton = document.createElement('button');
+    runTestButton.className = 'eval-button primary';
+    runTestButton.textContent = `${i18nString(UIStrings.runTest)} (First)`;
+    runTestButton.disabled = this.#state.isRunning;
+    runTestButton.addEventListener('click', () => this.#runSingleTest());
+    buttons.appendChild(runTestButton);
 
-      // Run all tests button
-      const runAllButton = document.createElement('button');
-      runAllButton.className = 'eval-button primary';
-      runAllButton.textContent = i18nString(UIStrings.runAllTests);
-      runAllButton.disabled = this.#state.isRunning;
-      runAllButton.addEventListener('click', () => this.#runAllTests());
-      buttons.appendChild(runAllButton);
-    } else {
-      // Agent test buttons
-      const runBasicAgentButton = document.createElement('button');
-      runBasicAgentButton.className = 'eval-button primary';
-      runBasicAgentButton.textContent = i18nString(UIStrings.runBasicAgentTests);
-      runBasicAgentButton.disabled = this.#state.isRunning;
-      runBasicAgentButton.addEventListener('click', () => this.#runBasicAgentTests());
-      buttons.appendChild(runBasicAgentButton);
-
-      const runAllAgentButton = document.createElement('button');
-      runAllAgentButton.className = 'eval-button primary';
-      runAllAgentButton.textContent = i18nString(UIStrings.runAllAgentTests);
-      runAllAgentButton.disabled = this.#state.isRunning;
-      runAllAgentButton.addEventListener('click', () => this.#runAllAgentTests());
-      buttons.appendChild(runAllAgentButton);
-    }
+    // Run all tests button
+    const runAllButton = document.createElement('button');
+    runAllButton.className = 'eval-button primary';
+    runAllButton.textContent = i18nString(UIStrings.runAllTests);
+    runAllButton.disabled = this.#state.isRunning;
+    runAllButton.addEventListener('click', () => this.#runAllTests());
+    buttons.appendChild(runAllButton);
 
     // Close button
     const closeButton = document.createElement('button');
@@ -1333,11 +1396,26 @@ export class EvaluationDialog {
   }
 
   async #runSingleTest(): Promise<void> {
-    if (!this.#evaluationRunner || this.#state.isRunning) {
+    if (this.#state.isRunning) {
       return;
     }
 
-    const testId = 'github-repo-001'; // Simple test
+    // Get the first test from the current selection (tool or agent)
+    let testMapping, displayName;
+    if (this.#state.activeTab === 'tool-tests') {
+      testMapping = TOOL_TEST_MAPPING[this.#state.toolType];
+      displayName = testMapping?.displayName || 'Tool';
+    } else {
+      testMapping = AGENT_TEST_MAPPING[this.#state.agentType];
+      displayName = testMapping?.displayName || 'Agent';
+    }
+    
+    if (!testMapping || testMapping.tests.length === 0) {
+      logger.error('No tests available for selection:', this.#state.activeTab === 'tool-tests' ? this.#state.toolType : this.#state.agentType);
+      return;
+    }
+    
+    const testId = testMapping.tests[0].id; // First test
     this.#state.isRunning = true;
     this.#state.currentRunningTest = testId;
     this.#state.totalTests = 1;
@@ -1346,10 +1424,20 @@ export class EvaluationDialog {
     this.#render();
 
     try {
-      const logMessage = `🧪 Running single evaluation test: ${testId}`;
+      const firstTest = testMapping.tests[0];
+      const logMessage = `🧪 Running single ${displayName} test: ${testId}`;
       logger.info(logMessage);
       this.#addLog(logMessage);
-      const result = await this.#evaluationRunner.runSingleTest(testId);
+      
+      let result;
+      if (this.#state.activeTab === 'tool-tests' && this.#evaluationRunner) {
+        result = await this.#evaluationRunner.runSingleTest(firstTest);
+      } else if (this.#agentEvaluationRunner) {
+        const agentName = this.#state.agentType;
+        result = await this.#agentEvaluationRunner.runSingleTest(firstTest, agentName);
+      } else {
+        throw new Error('No evaluation runner available');
+      }
       
       this.#state.testResults.set(testId, result);
       this.#state.completedTests = 1;
@@ -1377,184 +1465,35 @@ export class EvaluationDialog {
   }
 
   async #runAllTests(): Promise<void> {
-    if (!this.#evaluationRunner || this.#state.isRunning) {
+    if (this.#state.isRunning) {
       return;
     }
 
-    this.#state.isRunning = true;
-    this.#state.testResults.clear();
-    this.#state.totalTests = schemaExtractorTests.length;
-    this.#state.completedTests = 0;
-    this.#state.startTime = Date.now();
-    this.#render();
-
-    try {
-      const logMessage = `🧪 Running all evaluation tests (${schemaExtractorTests.length} tests)...`;
-      logger.info(logMessage);
-      this.#addLog(logMessage);
-      
-      // Run tests sequentially with UI updates
-      for (const testCase of schemaExtractorTests) {
-        this.#state.currentRunningTest = testCase.id;
-        this.#render();
-        
-        try {
-          this.#addLog(`Running test: ${testCase.name}`);
-          const result = await this.#evaluationRunner.runSingleTest(testCase.id);
-          this.#state.testResults.set(testCase.id, result);
-          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
-        } catch (error) {
-          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
-          this.#state.testResults.set(testCase.id, {
-            testId: testCase.id,
-            status: 'error',
-            error: error instanceof Error ? error.message : String(error),
-            duration: 0,
-            timestamp: Date.now(),
-          });
-        }
-        
-        this.#state.completedTests++;
-        this.#render();
-        
-        // Small delay between tests
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      
-      const completionLog = '✅ All tests completed';
-      logger.info(completionLog);
-      this.#addLog(completionLog);
-      
-    } catch (error) {
-      logger.error('❌ Test batch failed:', error);
-    } finally {
-      this.#state.isRunning = false;
-      this.#state.currentRunningTest = undefined;
-      this.#render();
+    // Get the current test cases based on active tab (tool or agent)
+    let testMapping, displayName;
+    if (this.#state.activeTab === 'tool-tests') {
+      testMapping = TOOL_TEST_MAPPING[this.#state.toolType];
+      displayName = testMapping?.displayName || 'Tool';
+    } else {
+      testMapping = AGENT_TEST_MAPPING[this.#state.agentType];
+      displayName = testMapping?.displayName || 'Agent';
     }
-  }
-
-  async #runBasicAgentTests(): Promise<void> {
-    if (!this.#agentEvaluationRunner || this.#state.isRunning) {
-      return;
-    }
-
-    const basicTests = this.#state.agentType === 'action' ? getBasicActionTests() : getBasicResearchTests();
-    const agentName = this.#state.agentType === 'action' ? 'action_agent' : 'research_agent';
     
-    this.#state.isRunning = true;
-    this.#state.testResults.clear();
-    this.#state.totalTests = basicTests.length;
-    this.#state.completedTests = 0;
-    this.#state.startTime = Date.now();
-    this.#render();
-
-    try {
-      const logMessage = `🤖 Running basic ${this.#state.agentType} agent tests (${basicTests.length} tests)...`;
-      logger.info(logMessage);
-      this.#addLog(logMessage);
-      
-      // Run tests sequentially with UI updates
-      for (const testCase of basicTests) {
-        this.#state.currentRunningTest = testCase.id;
-        this.#render();
-        
-        try {
-          this.#addLog(`Running ${agentName} test: ${testCase.name}`);
-          const result = await this.#runAgentTest(testCase as any, agentName);
-          this.#state.testResults.set(testCase.id, result);
-          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
-        } catch (error) {
-          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
-          this.#state.testResults.set(testCase.id, {
-            testId: testCase.id,
-            status: 'error',
-            error: error instanceof Error ? error.message : String(error),
-            duration: 0,
-            timestamp: Date.now(),
-          });
-        }
-        
-        this.#state.completedTests++;
-        this.#render();
-        
-        // Longer delay between agent tests
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-      
-      const completionLog = '✅ Basic agent tests completed';
-      logger.info(completionLog);
-      this.#addLog(completionLog);
-      
-    } catch (error) {
-      logger.error('❌ Agent test batch failed:', error);
-    } finally {
-      this.#state.isRunning = false;
-      this.#state.currentRunningTest = undefined;
-      this.#render();
-    }
-  }
-
-  async #runAllAgentTests(): Promise<void> {
-    if (!this.#agentEvaluationRunner || this.#state.isRunning) {
+    if (!testMapping) {
+      logger.error('No mapping found for:', this.#state.activeTab === 'tool-tests' ? this.#state.toolType : this.#state.agentType);
       return;
     }
-
-    const allTests = this.#state.agentType === 'action' ? actionAgentTests : researchAgentTests;
-    const agentName = this.#state.agentType === 'action' ? 'action_agent' : 'research_agent';
-
-    this.#state.isRunning = true;
+    
+    const currentTestCases = testMapping.tests;
+    const logMessage = `🧪 Running all ${displayName} tests (${currentTestCases.length} tests)...`;
+    
+    // Clear results for all tests before running
     this.#state.testResults.clear();
-    this.#state.totalTests = allTests.length;
-    this.#state.completedTests = 0;
-    this.#state.startTime = Date.now();
-    this.#render();
-
-    try {
-      const logMessage = `🤖 Running all ${this.#state.agentType} agent tests (${allTests.length} tests)...`;
-      logger.info(logMessage);
-      this.#addLog(logMessage);
-      
-      // Run tests sequentially with UI updates
-      for (const testCase of allTests) {
-        this.#state.currentRunningTest = testCase.id;
-        this.#render();
-        
-        try {
-          this.#addLog(`Running ${agentName} test: ${testCase.name}`);
-          const result = await this.#runAgentTest(testCase as any, agentName);
-          this.#state.testResults.set(testCase.id, result);
-          this.#addLog(`Test ${testCase.id} completed: ${result.status.toUpperCase()}`);
-        } catch (error) {
-          this.#addLog(`ERROR in test ${testCase.id}: ${error instanceof Error ? error.message : String(error)}`);
-          this.#state.testResults.set(testCase.id, {
-            testId: testCase.id,
-            status: 'error',
-            error: error instanceof Error ? error.message : String(error),
-            duration: 0,
-            timestamp: Date.now(),
-          });
-        }
-        
-        this.#state.completedTests++;
-        this.#render();
-        
-        // Longer delay between agent tests
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-      
-      const completionLog = '✅ All agent tests completed';
-      logger.info(completionLog);
-      this.#addLog(completionLog);
-      
-    } catch (error) {
-      logger.error('❌ Agent test batch failed:', error);
-    } finally {
-      this.#state.isRunning = false;
-      this.#state.currentRunningTest = undefined;
-      this.#render();
-    }
+    
+    await this.#runTestBatch(currentTestCases, logMessage);
   }
+
+
 
   #viewDetailedReport(): void {
     if (this.#state.testResults.size === 0) {
@@ -1565,13 +1504,21 @@ export class EvaluationDialog {
     let testCases;
     let reportTitle;
     
-    if (this.#state.activeTab === 'schema-extractor') {
-      testCases = schemaExtractorTests;
-      reportTitle = 'Schema Extractor Test Report';
+    if (this.#state.activeTab === 'tool-tests') {
+      // Use tool type to get the right test array and title
+      const toolMapping = TOOL_TEST_MAPPING[this.#state.toolType];
+      if (toolMapping) {
+        testCases = toolMapping.tests;
+        reportTitle = `${toolMapping.displayName} Test Report`;
+      } else {
+        testCases = [];
+        reportTitle = 'Tool Test Report';
+      }
     } else {
-      // Agent tests
-      testCases = this.#state.agentType === 'action' ? actionAgentTests : researchAgentTests;
-      reportTitle = this.#state.agentType === 'action' ? 'Action Agent Test Report' : 'Research Agent Test Report';
+      // Agent tests - use agent mapping
+      const agentMapping = AGENT_TEST_MAPPING[this.#state.agentType];
+      testCases = agentMapping ? agentMapping.tests : [];
+      reportTitle = agentMapping ? `${agentMapping.displayName} Test Report` : 'Agent Test Report';
     }
 
     // Generate detailed markdown report
@@ -1601,42 +1548,61 @@ export class EvaluationDialog {
     // Get the appropriate test cases and filter by selection
     let allTests;
     let selectedTests;
-    let agentName = '';
     
-    if (this.#state.activeTab === 'schema-extractor') {
-      allTests = schemaExtractorTests;
-      selectedTests = allTests.filter(test => this.#state.selectedTests.has(test.id));
+    if (this.#state.activeTab === 'tool-tests') {
+      // Use tool type to get the right test array
+      const toolMapping = TOOL_TEST_MAPPING[this.#state.toolType];
+      allTests = toolMapping ? toolMapping.tests : [];
+      selectedTests = allTests.filter((test: any) => this.#state.selectedTests.has(test.id));
     } else {
-      allTests = this.#state.agentType === 'action' ? actionAgentTests : researchAgentTests;
-      selectedTests = allTests.filter(test => this.#state.selectedTests.has(test.id));
-      agentName = this.#state.agentType === 'action' ? 'action_agent' : 'research_agent';
+      // Agent tests - use agent mapping
+      const agentMapping = AGENT_TEST_MAPPING[this.#state.agentType];
+      allTests = agentMapping ? agentMapping.tests : [];
+      selectedTests = allTests.filter((test: any) => this.#state.selectedTests.has(test.id));
     }
 
+    const logMessage = `🎯 Running ${selectedTests.length} selected tests...`;
+    
+    await this.#runTestBatch(selectedTests, logMessage);
+    
+    // Clear selection after running
+    this.#state.selectedTests.clear();
+  }
+  
+  /**
+   * Shared method to run a batch of tests sequentially
+   */
+  async #runTestBatch(testCases: any[], logMessage: string): Promise<void> {
     this.#state.isRunning = true;
-    this.#state.totalTests = selectedTests.length;
+    this.#state.totalTests = testCases.length;
     this.#state.completedTests = 0;
     this.#state.startTime = Date.now();
     this.#render();
 
     try {
-      const logMessage = `🎯 Running ${selectedTests.length} selected tests...`;
       logger.info(logMessage);
       this.#addLog(logMessage);
       
-      // Run selected tests sequentially
-      for (const testCase of selectedTests) {
+      const agentName = this.#state.agentType;
+      const isToolTest = this.#state.activeTab === 'tool-tests';
+      const delay = isToolTest ? 1000 : 3000;
+      
+      // Run tests sequentially
+      for (const testCase of testCases) {
         this.#state.currentRunningTest = testCase.id;
         this.#render();
         
         try {
-          this.#addLog(`Running test: ${testCase.name}`);
+          const testTypePrefix = isToolTest ? 'tool' : agentName;
+          this.#addLog(`Running ${testTypePrefix} test: ${testCase.name}`);
+          
           let result;
-          if (this.#state.activeTab === 'schema-extractor' && this.#evaluationRunner) {
-            result = await this.#evaluationRunner.runSingleTest(testCase.id);
+          if (isToolTest && this.#evaluationRunner) {
+            result = await this.#evaluationRunner.runSingleTest(testCase);
           } else if (this.#agentEvaluationRunner) {
-            result = await this.#runAgentTest(testCase as any, agentName);
+            result = await this.#agentEvaluationRunner.runSingleTest(testCase, agentName);
           } else {
-            throw new Error('No runner available');
+            throw new Error('No evaluation runner available');
           }
           
           this.#state.testResults.set(testCase.id, result);
@@ -1655,20 +1621,16 @@ export class EvaluationDialog {
         this.#state.completedTests++;
         this.#render();
         
-        // Delay between tests (longer for agent tests)
-        const delay = this.#state.activeTab === 'agents' ? 3000 : 1000;
+        // Delay between tests
         await new Promise(resolve => setTimeout(resolve, delay));
       }
       
-      const completionLog = '✅ Selected tests completed';
+      const completionLog = '✅ Tests completed';
       logger.info(completionLog);
       this.#addLog(completionLog);
       
-      // Clear selection after running
-      this.#state.selectedTests.clear();
-      
     } catch (error) {
-      logger.error('❌ Selected test batch failed:', error);
+      logger.error('❌ Test batch failed:', error);
     } finally {
       this.#state.isRunning = false;
       this.#state.currentRunningTest = undefined;
@@ -1676,10 +1638,4 @@ export class EvaluationDialog {
     }
   }
 
-  async #runAgentTest(testCase: any, agentName: string): Promise<TestResult> {
-    if (!this.#agentEvaluationRunner) {
-      throw new Error('Agent evaluation runner not initialized');
-    }
-    return await this.#agentEvaluationRunner.runSingleTest(testCase, agentName);
-  }
 }

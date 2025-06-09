@@ -6,8 +6,21 @@ import type { Tool } from '../../tools/Tools.js';
 import { NavigateURLTool } from '../../tools/Tools.js';
 import type { TestCase, TestResult, EvaluationConfig } from './types.js';
 import { createLogger } from '../../core/Logger.js';
+import { SanitizationUtils } from '../utils/SanitizationUtils.js';
+import { ErrorHandlingUtils } from '../utils/ErrorHandlingUtils.js';
+import type { ToolExecutionResult } from '../utils/EvaluationTypes.js';
 
 const logger = createLogger('GenericToolEvaluator');
+
+/**
+ * Hooks for test execution lifecycle
+ */
+export interface TestExecutionHooks {
+  beforeNavigation?: (testCase: TestCase) => Promise<void>;
+  beforeToolExecution?: (testCase: TestCase, tool: Tool) => Promise<void>;
+  afterToolExecution?: (testCase: TestCase, tool: Tool, result: unknown) => Promise<void>;
+  beforeEvaluation?: (testCase: TestCase, result: TestResult) => Promise<void>;
+}
 
 /**
  * Generic evaluator that can test any tool without needing specific adapters
@@ -15,10 +28,12 @@ const logger = createLogger('GenericToolEvaluator');
 export class GenericToolEvaluator {
   private navigateTool: NavigateURLTool;
   private config: EvaluationConfig;
+  private hooks?: TestExecutionHooks;
 
-  constructor(config: EvaluationConfig) {
+  constructor(config: EvaluationConfig, hooks?: TestExecutionHooks) {
     this.config = config;
     this.navigateTool = new NavigateURLTool();
+    this.hooks = hooks;
   }
 
   /**
@@ -27,53 +42,85 @@ export class GenericToolEvaluator {
   async runTest(testCase: TestCase, tool: Tool): Promise<TestResult> {
     const startTime = Date.now();
 
-    try {
-      logger.info(`Starting test: ${testCase.name}`);
-      logger.info(`Tool: ${testCase.tool}, URL: ${testCase.url}`);
+    // Use withErrorHandling wrapper for better error management
+    return await ErrorHandlingUtils.withErrorHandling(
+      async () => {
+        logger.info(`Starting test: ${testCase.name}`);
+        logger.info(`Tool: ${testCase.tool}, URL: ${testCase.url}`);
 
-      // 1. Navigate to the URL if provided
-      if (testCase.url) {
-        const navResult = await this.navigateTool.execute({ url: testCase.url, reasoning: `Navigate to ${testCase.url} for test case ${testCase.name}` });
-        if ('error' in navResult) {
-          throw new Error(`Navigation failed: ${navResult.error}`);
+        // 1. Navigate to the URL if provided
+        if (testCase.url) {
+          // Call beforeNavigation hook
+          if (this.hooks?.beforeNavigation) {
+            logger.info('Calling beforeNavigation hook');
+            await this.hooks.beforeNavigation(testCase);
+          }
+          
+          const navResult = await this.navigateTool.execute({ url: testCase.url, reasoning: `Navigate to ${testCase.url} for test case ${testCase.name}` });
+          if ('error' in navResult) {
+            throw new Error(`Navigation failed: ${navResult.error}`);
+          }
+          // Wait for page to stabilize
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
-        // Wait for page to stabilize
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
 
-      // 2. Execute the tool with the input
-      const toolResult = await tool.execute(testCase.input);
+        // Call beforeToolExecution hook (after navigation, before tool execution)
+        if (this.hooks?.beforeToolExecution) {
+          logger.info('Calling beforeToolExecution hook');
+          await this.hooks.beforeToolExecution(testCase, tool);
+        }
 
-      // 4. Extract success/failure and output
-      const success = this.isSuccessfulResult(toolResult);
-      const output = this.extractOutput(toolResult);
-      const error = this.extractError(toolResult);
+        // 2. Execute the tool with the input - wrapped with error handling
+        const toolResult = await ErrorHandlingUtils.withErrorHandling(
+          async () => await tool.execute(testCase.input),
+          (error) => ({ error: ErrorHandlingUtils.formatUserFriendlyError(error, 'Tool execution failed') }),
+          logger,
+          `GenericToolEvaluator.toolExecution:${testCase.tool}`
+        );
 
-      return {
-        testId: testCase.id,
-        status: success ? 'passed' : 'failed',
-        output,
-        error,
-        duration: Date.now() - startTime,
-        timestamp: Date.now(),
-        validation: {
-          passed: success,
-          summary: success 
-            ? `Successfully executed ${testCase.tool}`
-            : `${testCase.tool} execution failed: ${error}`,
-        },
-      };
+        // 3. Store the raw tool response for debugging
+        const rawResponse = toolResult;
 
-    } catch (error) {
-      logger.error(`Test error:`, error);
-      return {
-        testId: testCase.id,
-        status: 'error',
-        error: error instanceof Error ? error.message : String(error),
-        duration: Date.now() - startTime,
-        timestamp: Date.now(),
-      };
-    }
+        // Call afterToolExecution hook
+        if (this.hooks?.afterToolExecution) {
+          logger.info('Calling afterToolExecution hook');
+          await this.hooks.afterToolExecution(testCase, tool, toolResult);
+        }
+
+        // 4. Extract success/failure and output
+        const success = this.isSuccessfulResult(toolResult);
+        const output = this.extractOutput(toolResult);
+        const error = this.extractError(toolResult);
+
+        const result: TestResult = {
+          testId: testCase.id,
+          status: success ? 'passed' : 'failed',
+          output,
+          error: error ? ErrorHandlingUtils.formatUserFriendlyError(error, undefined) : undefined,
+          duration: Date.now() - startTime,
+          timestamp: Date.now(),
+          validation: {
+            passed: success,
+            summary: success 
+              ? `Successfully executed ${testCase.tool}`
+              : `${testCase.tool} execution failed: ${error}`,
+          },
+          // Add raw response for debugging
+          rawResponse,
+        };
+
+        // Call beforeEvaluation hook
+        if (this.hooks?.beforeEvaluation) {
+          logger.info('Calling beforeEvaluation hook');
+          await this.hooks.beforeEvaluation(testCase, result);
+        }
+
+        return result;
+      },
+      (error) => ErrorHandlingUtils.createTestExecutionError(error, testCase.id, startTime),
+      logger,
+      'GenericToolEvaluator.runTest'
+    );
   }
 
   /**
@@ -106,13 +153,14 @@ export class GenericToolEvaluator {
    * Run a test with retry logic
    */
   private async runTestWithRetries(testCase: TestCase, tool: Tool): Promise<TestResult> {
-    const maxRetries = testCase.metadata.retries || this.config.retries || 1;
+    const maxRetries = testCase.metadata?.retries || this.config.retries || 1;
     let lastResult: TestResult | null = null;
+    let lastError: unknown = null;
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
         logger.info(`Retry ${attempt}/${maxRetries} for ${testCase.id}`);
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
       }
 
       lastResult = await this.runTest(testCase, tool);
@@ -122,66 +170,98 @@ export class GenericToolEvaluator {
         lastResult.retryCount = attempt;
         return lastResult;
       }
+      
+      // Check if the error is retryable
+      lastError = lastResult.error || lastResult.rawResponse;
+      if (!ErrorHandlingUtils.isRetryableError(lastError)) {
+        logger.info(`Error is not retryable, stopping retries for ${testCase.id}`);
+        lastResult.retryCount = attempt;
+        return lastResult;
+      }
     }
 
     // Return the last error result
-    return lastResult || {
-      testId: testCase.id,
-      status: 'error',
-      error: 'No test execution attempted',
-      duration: 0,
-      timestamp: Date.now(),
-      retryCount: maxRetries,
-    };
+    if (!lastResult) {
+      const errorResult = ErrorHandlingUtils.createTestExecutionError(
+        'No test execution attempted', 
+        testCase.id, 
+        Date.now()
+      );
+      errorResult.retryCount = maxRetries;
+      return errorResult;
+    }
+    lastResult.retryCount = maxRetries;
+    return lastResult;
   }
 
   /**
    * Determine if a tool result indicates success
    */
-  private isSuccessfulResult(result: any): boolean {
-    // Common success patterns across tools
-    if (typeof result === 'object' && result !== null) {
-      // Check for explicit success field
-      if ('success' in result) {
-        return Boolean(result.success);
-      }
-      // Check for error field (absence means success)
-      if ('error' in result) {
-        return !result.error;
-      }
-      // Check for status field
-      if ('status' in result) {
-        return result.status === 'success' || result.status === 'completed';
-      }
+  private isSuccessfulResult(result: unknown): boolean {
+    // Null/undefined is failure
+    if (result === null || result === undefined) {
+      return false;
     }
-    // If we have a result at all, consider it successful
-    return result !== null && result !== undefined;
+
+    // Check for explicit success/failure indicators
+    if (typeof result === 'object') {
+      if ('success' in result) return Boolean(result.success);
+      if ('error' in result) return !result.error;
+      if ('failed' in result) return !result.failed;
+    }
+
+    // Anything else (non-null string, number, object with content) is success
+    return true;
   }
 
   /**
    * Extract the meaningful output from any tool result
    */
-  private extractOutput(result: any): any {
+  private extractOutput(result: unknown): unknown {
     if (typeof result === 'object' && result !== null) {
       // Common output patterns
-      if ('data' in result) return result.data;
-      if ('output' in result) return result.output;
-      if ('result' in result) return result.result;
-      if ('value' in result) return result.value;
+      if ('data' in result) return this.sanitizeOutputIfNeeded(result.data);
+      if ('output' in result) return this.sanitizeOutputIfNeeded(result.output);
+      if ('result' in result) return this.sanitizeOutputIfNeeded(result.result);
+      if ('value' in result) return this.sanitizeOutputIfNeeded(result.value);
       
       // For tools that return success + other fields
       if ('success' in result) {
-        const { success, error, ...output } = result;
-        return output;
+        const resultObj = result as Record<string, unknown>;
+        const { success, error, ...output } = resultObj;
+        return this.sanitizeOutputIfNeeded(output);
       }
     }
-    return result;
+    return this.sanitizeOutputIfNeeded(result);
+  }
+  
+  /**
+   * Sanitize output data if it contains URLs or dynamic content
+   */
+  private sanitizeOutputIfNeeded(output: unknown): unknown {
+    if (typeof output === 'string' && this.looksLikeUrl(output)) {
+      return SanitizationUtils.sanitizeUrl(output);
+    }
+    
+    if (typeof output === 'object' && output !== null) {
+      // Deep clone and sanitize
+      return SanitizationUtils.sanitizeOutput(output);
+    }
+    
+    return output;
+  }
+  
+  /**
+   * Check if a string looks like a URL
+   */
+  private looksLikeUrl(str: string): boolean {
+    return str.startsWith('http://') || str.startsWith('https://') || str.includes('://');
   }
 
   /**
    * Extract error message from any tool result
    */
-  private extractError(result: any): string | undefined {
+  private extractError(result: unknown): string | undefined {
     if (typeof result === 'object' && result !== null) {
       if ('error' in result && result.error) {
         return String(result.error);
@@ -198,45 +278,9 @@ export class GenericToolEvaluator {
 
   /**
    * Sanitize output for snapshot comparison (static method for reusability)
+   * @deprecated Use SanitizationUtils.sanitizeOutput() instead
    */
-  static sanitizeOutput(output: any): any {
-    const sanitized = JSON.parse(JSON.stringify(output));
-    
-    function sanitize(obj: any): void {
-      if (!obj || typeof obj !== 'object') return;
-      
-      if (Array.isArray(obj)) {
-        obj.forEach(sanitize);
-        return;
-      }
-
-      for (const key in obj) {
-        const value = obj[key];
-        const lowerKey = key.toLowerCase();
-
-        // Sanitize common dynamic fields
-        if (lowerKey.includes('timestamp') || lowerKey.includes('time')) {
-          obj[key] = '[TIMESTAMP]';
-        } else if (lowerKey.includes('date')) {
-          obj[key] = '[DATE]';
-        } else if (lowerKey.includes('id') && typeof value === 'string') {
-          obj[key] = '[ID]';
-        } else if (lowerKey.includes('url') && typeof value === 'string') {
-          try {
-            const url = new URL(value);
-            obj[key] = `${url.origin}${url.pathname}[PARAMS]`;
-          } catch {
-            obj[key] = value;
-          }
-        } else if (lowerKey.includes('price') && typeof value === 'number') {
-          obj[key] = '[PRICE]';
-        } else if (typeof value === 'object') {
-          sanitize(value);
-        }
-      }
-    }
-
-    sanitize(sanitized);
-    return sanitized;
+  static sanitizeOutput(output: unknown): unknown {
+    return SanitizationUtils.sanitizeOutput(output);
   }
 }
