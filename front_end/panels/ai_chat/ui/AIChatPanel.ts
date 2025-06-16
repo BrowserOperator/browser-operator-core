@@ -5,6 +5,7 @@
 import type * as Common from '../../../core/common/common.js';
 import * as Host from '../../../core/host/host.js';
 import * as i18n from '../../../core/i18n/i18n.js';
+import * as SDK from '../../../core/sdk/sdk.js';
 import * as Buttons from '../../../ui/components/buttons/buttons.js';
 import * as UI from '../../../ui/legacy/legacy.js';
 import * as Lit from '../../../ui/lit/lit.js';
@@ -107,6 +108,10 @@ const UIStrings = {
    * @description Run evaluation tests
    */
   runEvaluationTests: 'Run Evaluation Tests',
+  /**
+   * @description Bookmark current page
+   */
+  bookmarkPage: 'Bookmark Page',
 } as const;
 
 const str_ = i18n.i18n.registerUIStrings('panels/ai_chat/ui/AIChatPanel.ts', UIStrings);
@@ -119,6 +124,7 @@ interface ToolbarViewInput {
   onHelpClick: () => void;
   onSettingsClick: () => void;
   onEvaluationTestClick: () => void;
+  onBookmarkClick: () => void;
   isDeleteHistoryButtonVisible: boolean;
   isCenteredView: boolean;
 }
@@ -165,6 +171,13 @@ function toolbarView(input: ToolbarViewInput): Lit.LitTemplate {
           .jslogContext=${'ai-chat.evaluation-tests'}
           .variant=${Buttons.Button.Variant.TOOLBAR}
           @click=${input.onEvaluationTestClick}></devtools-button>
+        <devtools-button
+          title=${i18nString(UIStrings.bookmarkPage)}
+          aria-label=${i18nString(UIStrings.bookmarkPage)}
+          .iconName=${'download'}
+          .jslogContext=${'ai-chat.bookmark-page'}
+          .variant=${Buttons.Button.Variant.TOOLBAR}
+          @click=${input.onBookmarkClick}></devtools-button>
         <devtools-button
           title=${i18nString(UIStrings.settings)}
           aria-label=${i18nString(UIStrings.settings)}
@@ -999,6 +1012,7 @@ export class AIChatPanel extends UI.Panel.Panel {
       onHelpClick: this.#onHelpClick.bind(this),
       onSettingsClick: this.#onSettingsClick.bind(this),
       onEvaluationTestClick: this.#onEvaluationTestClick.bind(this),
+      onBookmarkClick: this.#onBookmarkClick.bind(this),
       isDeleteHistoryButtonVisible: this.#messages.length > 1,
       isCenteredView,
     }), this.#toolbarContainer, { host: this });
@@ -1100,6 +1114,97 @@ export class AIChatPanel extends UI.Panel.Panel {
    */
   #onEvaluationTestClick(): void {
     EvaluationDialog.show();
+  }
+
+  /**
+   * Handles the bookmark button click event and bookmarks the current page
+   */
+  async #onBookmarkClick(): Promise<void> {
+    try {
+      // Import the BookmarkStoreTool dynamically
+      const { BookmarkStoreTool } = await import('../tools/BookmarkStoreTool.js');
+      const bookmarkTool = new BookmarkStoreTool();
+
+      // Get current page title for better user feedback
+      const currentPageTitle = await this.#getCurrentPageTitle();
+      
+      // Execute the bookmark tool
+      const result = await bookmarkTool.execute({
+        reasoning: 'User clicked bookmark button to save current page',
+        includeFullContent: true
+      });
+
+      if (result.success) {
+        // Add success message to chat
+        this.#messages.push({
+          entity: ChatMessageEntity.MODEL,
+          action: 'final',
+          answer: result.message || `Successfully bookmarked "${result.title || currentPageTitle}"`,
+          isFinalAnswer: true,
+        });
+        this.performUpdate();
+        logger.info('Page bookmarked successfully', { url: result.url, title: result.title });
+      } else {
+        // Add error message to chat
+        this.#messages.push({
+          entity: ChatMessageEntity.MODEL,
+          action: 'final',
+          answer: `Failed to bookmark page: ${result.error}`,
+          isFinalAnswer: true,
+        });
+        this.performUpdate();
+        logger.error('Failed to bookmark page', { error: result.error });
+      }
+    } catch (error: any) {
+      logger.error('Error in bookmark click handler', { error: error.message });
+      this.#messages.push({
+        entity: ChatMessageEntity.MODEL,
+        action: 'final',
+        answer: `Error bookmarking page: ${error.message}`,
+        isFinalAnswer: true,
+      });
+      this.performUpdate();
+    }
+  }
+
+  /**
+   * Get current page title for user feedback
+   */
+  async #getCurrentPageTitle(): Promise<string> {
+    try {
+      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
+      if (!target) return 'Current Page';
+
+      const runtimeModel = target.model(SDK.RuntimeModel.RuntimeModel);
+      if (!runtimeModel) return 'Current Page';
+
+      const executionContext = runtimeModel.defaultExecutionContext();
+      if (!executionContext) return 'Current Page';
+
+      const result = await executionContext.evaluate(
+        {
+          expression: 'document.title',
+          objectGroup: 'temp',
+          includeCommandLineAPI: false,
+          silent: true,
+          returnByValue: true,
+          generatePreview: false
+        },
+        /* userGesture */ false,
+        /* awaitPromise */ false
+      );
+
+      if ('error' in result) {
+        return 'Current Page';
+      }
+
+      if (result.object && result.object.value) {
+        return result.object.value;
+      }
+    } catch (error) {
+      logger.warn('Failed to get current page title', { error });
+    }
+    return 'Current Page';
   }
   
   /**

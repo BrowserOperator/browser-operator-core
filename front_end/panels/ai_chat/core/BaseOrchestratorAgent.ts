@@ -298,6 +298,7 @@ export function getSystemPrompt(agentType: string): string {
 export function getAgentTools(agentType: string): Array<Tool<any, any>> {
   return AGENT_CONFIGS[agentType]?.availableTools || [
     ToolRegistry.getToolInstance('action_agent') || (() => { throw new Error('action_agent tool not found'); })(),
+    ToolRegistry.getToolInstance('document_search') || (() => { throw new Error('document_search tool not found'); })(),
     new NavigateURLTool(),
     new NavigateBackTool(),
     new SchemaBasedExtractorTool(),

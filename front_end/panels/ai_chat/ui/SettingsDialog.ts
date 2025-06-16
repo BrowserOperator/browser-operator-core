@@ -23,6 +23,12 @@ const NANO_MODEL_STORAGE_KEY = 'ai_chat_nano_model';
 const LITELLM_ENDPOINT_KEY = 'ai_chat_litellm_endpoint';
 const LITELLM_API_KEY_STORAGE_KEY = 'ai_chat_litellm_api_key';
 const PROVIDER_SELECTION_KEY = 'ai_chat_provider';
+// Vector DB configuration keys - Milvus format
+const MILVUS_ENDPOINT_KEY = 'ai_chat_milvus_endpoint';
+const MILVUS_USERNAME_KEY = 'ai_chat_milvus_username';
+const MILVUS_PASSWORD_KEY = 'ai_chat_milvus_password';
+const MILVUS_COLLECTION_KEY = 'ai_chat_milvus_collection';
+const MILVUS_OPENAI_KEY = 'ai_chat_milvus_openai_key';
 
 // UI Strings
 const UIStrings = {
@@ -162,6 +168,66 @@ const UIStrings = {
    *@description Important notice title
    */
   importantNotice: 'Important Notice',
+  /**
+   *@description Milvus DB section label
+   */
+  vectorDBLabel: 'Milvus Vector Database (Bookmarks)',
+  /**
+   *@description Milvus endpoint label
+   */
+  vectorDBEndpoint: 'Milvus Endpoint',
+  /**
+   *@description Milvus endpoint hint
+   */
+  vectorDBEndpointHint: 'Enter the URL for your Milvus server (e.g., http://localhost:19530 or https://your-milvus.com)',
+  /**
+   *@description Milvus username label
+   */
+  vectorDBApiKey: 'Milvus Username',
+  /**
+   *@description Milvus username hint
+   */
+  vectorDBApiKeyHint: 'For self-hosted: username (default: root). For Milvus Cloud: leave as root',
+  /**
+   *@description Vector DB collection label
+   */
+  vectorDBCollection: 'Collection Name',
+  /**
+   *@description Vector DB collection hint
+   */
+  vectorDBCollectionHint: 'Name of the collection to store bookmarks (default: bookmarks)',
+  /**
+   *@description Milvus password/token label
+   */
+  milvusPassword: 'Password/API Token',
+  /**
+   *@description Milvus password/token hint
+   */
+  milvusPasswordHint: 'For self-hosted: password (default: Milvus). For Milvus Cloud: API token directly',
+  /**
+   *@description OpenAI API key for embeddings label
+   */
+  milvusOpenAIKey: 'OpenAI API Key (for embeddings)',
+  /**
+   *@description OpenAI API key for embeddings hint
+   */
+  milvusOpenAIKeyHint: 'Required for generating embeddings using OpenAI text-embedding-3-small model',
+  /**
+   *@description Test vector DB connection button
+   */
+  testVectorDBConnection: 'Test Connection',
+  /**
+   *@description Vector DB connection testing status
+   */
+  testingVectorDBConnection: 'Testing connection...',
+  /**
+   *@description Vector DB connection success message
+   */
+  vectorDBConnectionSuccess: 'Vector DB connection successful!',
+  /**
+   *@description Vector DB connection failed message
+   */
+  vectorDBConnectionFailed: 'Vector DB connection failed',
 };
 
 const str_ = i18n.i18n.registerUIStrings('panels/ai_chat/ui/SettingsDialog.ts', UIStrings);
@@ -950,6 +1016,207 @@ export class SettingsDialog {
     
     // Initialize LiteLLM model selectors
     updateLiteLLMModelSelectors();
+    
+    // Add Vector DB configuration section
+    const vectorDBSection = document.createElement('div');
+    vectorDBSection.classList.add('settings-section');
+    contentDiv.appendChild(vectorDBSection);
+    
+    const vectorDBTitle = document.createElement('h3');
+    vectorDBTitle.textContent = i18nString(UIStrings.vectorDBLabel);
+    vectorDBTitle.classList.add('settings-subtitle');
+    vectorDBSection.appendChild(vectorDBTitle);
+    
+    // Vector DB Endpoint
+    const vectorDBEndpointDiv = document.createElement('div');
+    vectorDBEndpointDiv.classList.add('settings-field');
+    vectorDBSection.appendChild(vectorDBEndpointDiv);
+    
+    const vectorDBEndpointLabel = document.createElement('label');
+    vectorDBEndpointLabel.textContent = i18nString(UIStrings.vectorDBEndpoint);
+    vectorDBEndpointLabel.classList.add('settings-label');
+    vectorDBEndpointDiv.appendChild(vectorDBEndpointLabel);
+    
+    const vectorDBEndpointHint = document.createElement('div');
+    vectorDBEndpointHint.textContent = i18nString(UIStrings.vectorDBEndpointHint);
+    vectorDBEndpointHint.classList.add('settings-hint');
+    vectorDBEndpointDiv.appendChild(vectorDBEndpointHint);
+    
+    const vectorDBEndpointInput = document.createElement('input');
+    vectorDBEndpointInput.classList.add('settings-input');
+    vectorDBEndpointInput.type = 'text';
+    vectorDBEndpointInput.placeholder = 'http://localhost:19530';
+    vectorDBEndpointInput.value = localStorage.getItem(MILVUS_ENDPOINT_KEY) || '';
+    vectorDBEndpointDiv.appendChild(vectorDBEndpointInput);
+    
+    // Vector DB API Key
+    const vectorDBApiKeyDiv = document.createElement('div');
+    vectorDBApiKeyDiv.classList.add('settings-field');
+    vectorDBSection.appendChild(vectorDBApiKeyDiv);
+    
+    const vectorDBApiKeyLabel = document.createElement('label');
+    vectorDBApiKeyLabel.textContent = i18nString(UIStrings.vectorDBApiKey);
+    vectorDBApiKeyLabel.classList.add('settings-label');
+    vectorDBApiKeyDiv.appendChild(vectorDBApiKeyLabel);
+    
+    const vectorDBApiKeyHint = document.createElement('div');
+    vectorDBApiKeyHint.textContent = i18nString(UIStrings.vectorDBApiKeyHint);
+    vectorDBApiKeyHint.classList.add('settings-hint');
+    vectorDBApiKeyDiv.appendChild(vectorDBApiKeyHint);
+    
+    const vectorDBApiKeyInput = document.createElement('input');
+    vectorDBApiKeyInput.classList.add('settings-input');
+    vectorDBApiKeyInput.type = 'text';
+    vectorDBApiKeyInput.placeholder = 'root';
+    vectorDBApiKeyInput.value = localStorage.getItem(MILVUS_USERNAME_KEY) || 'root';
+    vectorDBApiKeyDiv.appendChild(vectorDBApiKeyInput);
+    
+    // Milvus Password
+    const milvusPasswordDiv = document.createElement('div');
+    milvusPasswordDiv.classList.add('settings-field');
+    vectorDBSection.appendChild(milvusPasswordDiv);
+    
+    const milvusPasswordLabel = document.createElement('label');
+    milvusPasswordLabel.textContent = i18nString(UIStrings.milvusPassword);
+    milvusPasswordLabel.classList.add('settings-label');
+    milvusPasswordDiv.appendChild(milvusPasswordLabel);
+    
+    const milvusPasswordHint = document.createElement('div');
+    milvusPasswordHint.textContent = i18nString(UIStrings.milvusPasswordHint);
+    milvusPasswordHint.classList.add('settings-hint');
+    milvusPasswordDiv.appendChild(milvusPasswordHint);
+    
+    const milvusPasswordInput = document.createElement('input');
+    milvusPasswordInput.classList.add('settings-input');
+    milvusPasswordInput.type = 'password';
+    milvusPasswordInput.placeholder = 'Milvus (self-hosted) or API token (cloud)';
+    milvusPasswordInput.value = localStorage.getItem(MILVUS_PASSWORD_KEY) || 'Milvus';
+    milvusPasswordDiv.appendChild(milvusPasswordInput);
+    
+    // OpenAI API Key for embeddings
+    const milvusOpenAIDiv = document.createElement('div');
+    milvusOpenAIDiv.classList.add('settings-field');
+    vectorDBSection.appendChild(milvusOpenAIDiv);
+    
+    const milvusOpenAILabel = document.createElement('label');
+    milvusOpenAILabel.textContent = i18nString(UIStrings.milvusOpenAIKey);
+    milvusOpenAILabel.classList.add('settings-label');
+    milvusOpenAIDiv.appendChild(milvusOpenAILabel);
+    
+    const milvusOpenAIHint = document.createElement('div');
+    milvusOpenAIHint.textContent = i18nString(UIStrings.milvusOpenAIKeyHint);
+    milvusOpenAIHint.classList.add('settings-hint');
+    milvusOpenAIDiv.appendChild(milvusOpenAIHint);
+    
+    const milvusOpenAIInput = document.createElement('input');
+    milvusOpenAIInput.classList.add('settings-input');
+    milvusOpenAIInput.type = 'password';
+    milvusOpenAIInput.placeholder = 'sk-...';
+    milvusOpenAIInput.value = localStorage.getItem(MILVUS_OPENAI_KEY) || '';
+    milvusOpenAIDiv.appendChild(milvusOpenAIInput);
+    
+    // Vector DB Collection Name
+    const vectorDBCollectionDiv = document.createElement('div');
+    vectorDBCollectionDiv.classList.add('settings-field');
+    vectorDBSection.appendChild(vectorDBCollectionDiv);
+    
+    const vectorDBCollectionLabel = document.createElement('label');
+    vectorDBCollectionLabel.textContent = i18nString(UIStrings.vectorDBCollection);
+    vectorDBCollectionLabel.classList.add('settings-label');
+    vectorDBCollectionDiv.appendChild(vectorDBCollectionLabel);
+    
+    const vectorDBCollectionHint = document.createElement('div');
+    vectorDBCollectionHint.textContent = i18nString(UIStrings.vectorDBCollectionHint);
+    vectorDBCollectionHint.classList.add('settings-hint');
+    vectorDBCollectionDiv.appendChild(vectorDBCollectionHint);
+    
+    const vectorDBCollectionInput = document.createElement('input');
+    vectorDBCollectionInput.classList.add('settings-input');
+    vectorDBCollectionInput.type = 'text';
+    vectorDBCollectionInput.placeholder = 'bookmarks';
+    vectorDBCollectionInput.value = localStorage.getItem(MILVUS_COLLECTION_KEY) || 'bookmarks';
+    vectorDBCollectionDiv.appendChild(vectorDBCollectionInput);
+    
+    // Test Vector DB Connection Button
+    const vectorDBTestDiv = document.createElement('div');
+    vectorDBTestDiv.classList.add('settings-field', 'test-connection-field');
+    vectorDBSection.appendChild(vectorDBTestDiv);
+    
+    const vectorDBTestButton = document.createElement('button');
+    vectorDBTestButton.classList.add('settings-button', 'test-button');
+    vectorDBTestButton.setAttribute('type', 'button');
+    vectorDBTestButton.textContent = i18nString(UIStrings.testVectorDBConnection);
+    vectorDBTestDiv.appendChild(vectorDBTestButton);
+    
+    const vectorDBTestStatus = document.createElement('div');
+    vectorDBTestStatus.classList.add('settings-status');
+    vectorDBTestStatus.style.display = 'none';
+    vectorDBTestDiv.appendChild(vectorDBTestStatus);
+    
+    // Save Vector DB settings on input change
+    const saveVectorDBSettings = () => {
+      localStorage.setItem(MILVUS_ENDPOINT_KEY, vectorDBEndpointInput.value);
+      localStorage.setItem(MILVUS_USERNAME_KEY, vectorDBApiKeyInput.value);
+      localStorage.setItem(MILVUS_PASSWORD_KEY, milvusPasswordInput.value);
+      localStorage.setItem(MILVUS_COLLECTION_KEY, vectorDBCollectionInput.value);
+      localStorage.setItem(MILVUS_OPENAI_KEY, milvusOpenAIInput.value);
+    };
+    
+    vectorDBEndpointInput.addEventListener('input', saveVectorDBSettings);
+    vectorDBApiKeyInput.addEventListener('input', saveVectorDBSettings);
+    milvusPasswordInput.addEventListener('input', saveVectorDBSettings);
+    vectorDBCollectionInput.addEventListener('input', saveVectorDBSettings);
+    milvusOpenAIInput.addEventListener('input', saveVectorDBSettings);
+    
+    // Test Vector DB connection
+    vectorDBTestButton.addEventListener('click', async () => {
+      const endpoint = vectorDBEndpointInput.value.trim();
+      
+      if (!endpoint) {
+        vectorDBTestStatus.textContent = 'Please enter an endpoint URL';
+        vectorDBTestStatus.style.color = 'var(--color-accent-red)';
+        vectorDBTestStatus.style.display = 'block';
+        setTimeout(() => {
+          vectorDBTestStatus.style.display = 'none';
+        }, 3000);
+        return;
+      }
+      
+      vectorDBTestButton.disabled = true;
+      vectorDBTestStatus.textContent = i18nString(UIStrings.testingVectorDBConnection);
+      vectorDBTestStatus.style.color = 'var(--color-text-secondary)';
+      vectorDBTestStatus.style.display = 'block';
+      
+      try {
+        // Import and test the Vector DB client
+        const { VectorDBClient } = await import('../tools/VectorDBClient.js');
+        const vectorClient = new VectorDBClient({
+          endpoint,
+          username: vectorDBApiKeyInput.value || 'root',
+          password: milvusPasswordInput.value || 'Milvus',
+          collection: vectorDBCollectionInput.value || 'bookmarks',
+          openaiApiKey: milvusOpenAIInput.value || undefined
+        });
+        
+        const testResult = await vectorClient.testConnection();
+        
+        if (testResult.success) {
+          vectorDBTestStatus.textContent = i18nString(UIStrings.vectorDBConnectionSuccess);
+          vectorDBTestStatus.style.color = 'var(--color-accent-green)';
+        } else {
+          vectorDBTestStatus.textContent = `${i18nString(UIStrings.vectorDBConnectionFailed)}: ${testResult.error}`;
+          vectorDBTestStatus.style.color = 'var(--color-accent-red)';
+        }
+      } catch (error: any) {
+        vectorDBTestStatus.textContent = `${i18nString(UIStrings.vectorDBConnectionFailed)}: ${error.message}`;
+        vectorDBTestStatus.style.color = 'var(--color-accent-red)';
+      } finally {
+        vectorDBTestButton.disabled = false;
+        setTimeout(() => {
+          vectorDBTestStatus.style.display = 'none';
+        }, 5000);
+      }
+    });
     
     // Add disclaimer section
     const disclaimerSection = document.createElement('div');

@@ -6,6 +6,8 @@ import { FetcherTool } from '../../tools/FetcherTool.js';
 import { FinalizeWithCritiqueTool } from '../../tools/FinalizeWithCritiqueTool.js';
 import { SchemaBasedExtractorTool } from '../../tools/SchemaBasedExtractorTool.js';
 import { StreamlinedSchemaExtractorTool } from '../../tools/StreamlinedSchemaExtractorTool.js';
+import { BookmarkStoreTool } from '../../tools/BookmarkStoreTool.js';
+import { DocumentSearchTool } from '../../tools/DocumentSearchTool.js';
 import { NavigateURLTool, PerformActionTool, GetAccessibilityTreeTool, SearchContentTool, NavigateBackTool, NodeIDsToURLsTool, TakeScreenshotTool } from '../../tools/Tools.js';
 import { AIChatPanel } from '../../ui/AIChatPanel.js';
 import { ChatMessageEntity, type ChatMessage } from '../../ui/ChatView.js';
@@ -13,6 +15,9 @@ import {
   ConfigurableAgentTool,
   ToolRegistry, type AgentToolConfig, type ConfigurableAgentArgs
 } from '../ConfigurableAgentTool.js';
+import { initializeEmailAgents } from './EmailAgents.js';
+import { initializeJobApplicationAgents } from './JobApplicationAgents.js';
+import { initializeOnboardingAgents } from './OnboardingAgents.js';
 
 /**
  * Initialize all configured agents
@@ -31,6 +36,10 @@ export function initializeConfiguredAgents(): void {
   ToolRegistry.registerToolFactory('get_page_content', () => new GetAccessibilityTreeTool());
   ToolRegistry.registerToolFactory('search_content', () => new SearchContentTool());
   ToolRegistry.registerToolFactory('take_screenshot', () => new TakeScreenshotTool());
+  
+  // Register bookmark and document search tools
+  ToolRegistry.registerToolFactory('bookmark_store', () => new BookmarkStoreTool());
+  ToolRegistry.registerToolFactory('document_search', () => new DocumentSearchTool());
 
   // Create and register Research Agent
   const researchAgentConfig = createResearchAgentConfig();
@@ -77,6 +86,15 @@ export function initializeConfiguredAgents(): void {
   const ecommerceProductInfoAgentConfig = createEcommerceProductInfoAgentConfig();
   const ecommerceProductInfoAgent = new ConfigurableAgentTool(ecommerceProductInfoAgentConfig);
   ToolRegistry.registerToolFactory('ecommerce_product_info_fetcher_tool', () => ecommerceProductInfoAgent);
+
+  // Initialize all email agents
+  initializeEmailAgents();
+
+  // Initialize all job application agents
+  initializeJobApplicationAgents();
+
+  // Initialize all onboarding agents
+  initializeOnboardingAgents();
 }
 
 /**
@@ -148,7 +166,9 @@ Remember: You are a tool that executes research autonomously. Complete your task
       'navigate_back',
       'fetcher_tool',
       'schema_based_extractor',
-      'node_ids_to_urls'
+      'node_ids_to_urls',
+      'bookmark_store',
+      'document_search'
     ],
     maxIterations: 15,
     modelName: () => AIChatPanel.getMiniModel(),
