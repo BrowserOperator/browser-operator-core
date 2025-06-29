@@ -62,14 +62,6 @@ export class StreamlinedSchemaExtractorTool implements Tool<StreamlinedSchemaExt
     required: ['schema', 'instruction']
   };
 
-  /**
-   * Helper function to detect provider from user's settings
-   */
-  private detectProvider(modelName: string): 'openai' | 'litellm' {
-    // Respect user's provider selection from settings
-    const selectedProvider = localStorage.getItem('ai_chat_provider') || 'openai';
-    return selectedProvider as 'openai' | 'litellm';
-  }
 
   async execute(args: StreamlinedSchemaExtractionArgs): Promise<StreamlinedExtractionResult> {
     try {
@@ -245,11 +237,11 @@ IMPORTANT: Only extract data that you can see in the accessibility tree above. D
           extractionPrompt += `\n\nIMPORTANT: Previous attempt ${attempt - 1} failed due to invalid JSON. Please ensure you return ONLY valid JSON that can be parsed. Do not hallucinate any data - only extract what actually exists in the tree.`;
         }
 
-        const modelName = AIChatPanel.getMiniModel();
+        const { model, provider } = AIChatPanel.getMiniModelWithProvider();
         const llm = LLMClient.getInstance();
         const llmResponse = await llm.call({
-          provider: this.detectProvider(modelName),
-          model: modelName,
+          provider,
+          model,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: extractionPrompt }
@@ -371,11 +363,11 @@ Extract data according to the schema. For URL fields, return different nodeId nu
 CRITICAL: Only use nodeIds that you can actually see in the accessibility tree above. Do not invent, guess, or make up any nodeIds.`;
 
     try {
-      const modelName = AIChatPanel.getMiniModel();
+      const { model, provider } = AIChatPanel.getMiniModelWithProvider();
       const llm = LLMClient.getInstance();
       const llmResponse = await llm.call({
-        provider: this.detectProvider(modelName),
-        model: modelName,
+        provider,
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: extractionPrompt }

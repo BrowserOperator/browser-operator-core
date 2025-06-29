@@ -53,20 +53,6 @@ export class CritiqueTool implements Tool<CritiqueToolArgs, CritiqueToolResult> 
   name = 'critique_tool';
   description = 'Evaluates if finalresponse satisfies the user\'s requirements and provides feedback if needed.';
 
-  /**
-   * Helper method to detect provider from model name
-   */
-  private detectProvider(modelName: string): LLMProvider {
-    // OpenAI patterns
-    if (modelName.startsWith('gpt-') || 
-        modelName.startsWith('o1-') ||
-        modelName.startsWith('o4-')) {
-      return 'openai';
-    }
-    
-    // Everything else goes to LiteLLM
-    return 'litellm';
-  }
 
   schema = {
     type: 'object',
@@ -181,13 +167,12 @@ Return a JSON array of requirement statements. Example format:
 ["Requirement 1", "Requirement 2", ...]`;
 
     try {
-      const modelName = AIChatPanel.getMiniModel();
+      const { model, provider } = AIChatPanel.getNanoModelWithProvider();
       const llm = LLMClient.getInstance();
-      const provider = this.detectProvider(modelName);
       
       const response = await llm.call({
         provider,
-        model: modelName,
+        model,
         messages: [
           { role: 'user', content: userPrompt }
         ],
@@ -275,13 +260,12 @@ Return a JSON object evaluating the plan against the requirements using this sch
 ${JSON.stringify(evaluationSchema, null, 2)}`;
 
     try {
-      const modelName = AIChatPanel.getMiniModel();
+      const { model, provider } = AIChatPanel.getNanoModelWithProvider();
       const llm = LLMClient.getInstance();
-      const provider = this.detectProvider(modelName);
       
       const response = await llm.call({
         provider,
-        model: modelName,
+        model,
         messages: [
           { role: 'user', content: userPrompt }
         ],
@@ -336,13 +320,12 @@ Provide clear, actionable feedback focused on helping improve the final response
 Be concise, specific, and constructive.`;
 
     try {
-      const modelName = AIChatPanel.getMiniModel();
+      const { model, provider } = AIChatPanel.getNanoModelWithProvider();
       const llm = LLMClient.getInstance();
-      const provider = this.detectProvider(modelName);
       
       const response = await llm.call({
         provider,
-        model: modelName,
+        model,
         messages: [
           { role: 'user', content: userPrompt }
         ],

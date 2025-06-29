@@ -7,6 +7,7 @@ import { ChatMessageEntity, type ModelChatMessage, type ToolResultMessage, type 
 
 import { LLMClient } from '../LLM/LLMClient.js';
 import type { LLMMessage, LLMProvider } from '../LLM/LLMTypes.js';
+import { AIChatPanel } from '../ui/AIChatPanel.js';
 import { createSystemPromptAsync, getAgentToolsFromState } from './GraphHelpers.js';
 import { createLogger } from './Logger.js';
 import type { AgentState } from './State.js';
@@ -102,8 +103,8 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
       try {
         const llm = LLMClient.getInstance();
         
-        // Detect provider from model name
-        const provider = this.detectProvider(this.modelName);
+        // Get provider for the specific model
+        const provider = AIChatPanel.getProviderForModel(this.modelName);
         
         // Get tools for the current agent type
         const tools = getAgentToolsFromState(state);
@@ -190,14 +191,6 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
       this.callCount = 0;
     }
 
-    /**
-     * Detect provider from user's settings, not just model name
-     */
-    private detectProvider(modelName: string): LLMProvider {
-      // Respect user's provider selection from settings
-      const selectedProvider = localStorage.getItem('ai_chat_provider') || 'openai';
-      return selectedProvider as LLMProvider;
-    }
 
     /**
      * Convert ChatMessage[] to LLMMessage[]
