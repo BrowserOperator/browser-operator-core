@@ -15,9 +15,6 @@ import {
   ConfigurableAgentTool,
   ToolRegistry, type AgentToolConfig, type ConfigurableAgentArgs
 } from '../ConfigurableAgentTool.js';
-import { initializeEmailAgents } from './EmailAgents.js';
-import { initializeJobApplicationAgents } from './JobApplicationAgents.js';
-import { initializeOnboardingAgents } from './OnboardingAgents.js';
 
 /**
  * Initialize all configured agents
@@ -87,14 +84,6 @@ export function initializeConfiguredAgents(): void {
   const ecommerceProductInfoAgent = new ConfigurableAgentTool(ecommerceProductInfoAgentConfig);
   ToolRegistry.registerToolFactory('ecommerce_product_info_fetcher_tool', () => ecommerceProductInfoAgent);
 
-  // Initialize all email agents
-  initializeEmailAgents();
-
-  // Initialize all job application agents
-  initializeJobApplicationAgents();
-
-  // Initialize all onboarding agents
-  initializeOnboardingAgents();
 }
 
 /**
@@ -358,13 +347,14 @@ The final output should be in markdown format, and it should be lengthy and deta
 function createActionAgentConfig(): AgentToolConfig {
   return {
     name: 'action_agent',
-    description: 'Executes a single, low-level browser action with enhanced targeting precision (such as clicking a button, filling a field, selecting an option, or scrolling) on the current web page, based on a clear, actionable objective. ENHANCED FEATURES: XPath-aware element targeting, HTML tag context understanding, improved accessibility tree with reduced noise. This tool is limited to one atomic action per invocation and is not suitable for multi-step or high-level goals. It relies on the enhanced accessibility tree to identify elements with greater precision and does not verify whether the action succeeded. Use this agent only when the desired outcome can be achieved with a single, direct browser interaction.',
+    description: 'Executes a single, low-level browser action with enhanced targeting precision (such as clicking a button, filling a field, selecting an option, or scrolling) on the current web page, based on a clear, actionable objective. ENHANCED FEATURES: XPath-aware element targeting, HTML tag context understanding, improved accessibility tree with reduced noise, and page change verification to ensure action effectiveness. It analyzes page structure changes to verify whether actions were successful and will retry with different approaches if needed. Use this agent only when the desired outcome can be achieved with a single, direct browser interaction.',
     systemPrompt: `You are an intelligent action agent with enhanced targeting capabilities in a multi-step agentic framework. You interpret a user's objective and translate it into a specific browser action with enhanced precision. Your task is to:
 
 1. Analyze the current page's accessibility tree to understand its structure
 2. Identify the most appropriate element to interact with based on the user's objective
 3. Determine the correct action to perform (click, fill, type, etc.)
 4. Execute that action precisely
+5. **Analyze the page changes to determine if the action was effective**
 
 ## ENHANCED CAPABILITIES AVAILABLE
 When analyzing page structure, you have access to:
@@ -383,10 +373,39 @@ When analyzing page structure, you have access to:
    - For radio buttons: use 'click' 
    - For input fields: use 'fill' with appropriate text
    - For dropdown/select elements: use 'selectOption' with the option value or text
-5. Execute the action using perform_action tool (which now has enhanced xpath resolution and element identification)
-6. If an action fails, analyze the error message and try again with a different approach, leveraging the enhanced context for better targeting
+5. Execute the action using perform_action tool
+6. **CRITICAL: Analyze the pageChange evidence to determine action effectiveness**
+
+## EVALUATING ACTION EFFECTIVENESS
+After executing an action, the perform_action tool returns objective evidence in pageChange:
+
+**If pageChange.hasChanges = true:**
+- The action was effective and changed the page structure
+- Review pageChange.summary to understand what changed
+- Check pageChange.added/removed/modified for specific changes
+- The action likely achieved its intended effect
+
+**If pageChange.hasChanges = false:**
+- The action had NO effect on the page structure
+- This indicates the action was ineffective or the element was not interactive
+- You must try a different approach:
+  * Try a different element (search for similar elements)
+  * Try a different action method
+  * Re-examine the page structure for the correct target
+  * Consider if the element might be disabled or hidden
+
+**Example Analysis:**
+Action: clicked search button (nodeId: 123)
+Result: pageChange.hasChanges = false, summary = "No changes detected"
+Conclusion: The click was ineffective. Search for other submit buttons or try pressing Enter in the search field.
+
+**Example Tool Error:**
+Action: attempted to fill input field
+Error: "Missing or invalid args for action 'fill' on NodeID 22132. Expected an object with a string property 'text'. Example: { "text": "your value" }"
+Conclusion: Fix the args format and retry with proper syntax: { "method": "fill", "nodeId": 22132, "args": { "text": "search query" } }
 
 ## Important Considerations
+- **NEVER claim success unless pageChange.hasChanges = true**
 - Be precise in your element selection, using the exact nodeId from the accessibility tree
 - Leverage XPath information when available for more precise element targeting
 - Use HTML tag context to better understand element semantics
@@ -395,7 +414,7 @@ When analyzing page structure, you have access to:
 - When filling forms, ensure the data format matches what the field expects
 - For checkboxes, prefer 'check'/'uncheck' over 'click' for better reliability
 - For dropdowns, use 'selectOption' with the visible text or value of the option you want to select
-- For complex objectives, you may need to break them down into multiple actions
+- If pageChange shows no changes, immediately try an alternative approach
 
 ## Method Examples
 - perform_action with method='check' for checkboxes: { "method": "check", "nodeId": 123 }

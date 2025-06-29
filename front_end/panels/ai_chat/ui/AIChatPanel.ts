@@ -225,6 +225,34 @@ export class AIChatPanel extends UI.Panel.Panel {
     const instance = AIChatPanel.instance();
     return instance.#nanoModel || instance.#miniModel || instance.#selectedModel;
   }
+
+  static getNanoModelWithProvider(): { model: string, provider: 'openai' | 'litellm' | 'groq' | 'openrouter' } {
+    const modelName = AIChatPanel.getNanoModel();
+    const allModelOptions = AIChatPanel.getModelOptions();
+    const modelOption = allModelOptions.find(option => option.value === modelName);
+    
+    return {
+      model: modelName,
+      provider: (modelOption?.type as 'openai' | 'litellm' | 'groq' | 'openrouter') || 'openai'
+    };
+  }
+
+  static getMiniModelWithProvider(): { model: string, provider: 'openai' | 'litellm' | 'groq' | 'openrouter' } {
+    const modelName = AIChatPanel.getMiniModel();
+    const allModelOptions = AIChatPanel.getModelOptions();
+    const modelOption = allModelOptions.find(option => option.value === modelName);
+    
+    return {
+      model: modelName,
+      provider: (modelOption?.type as 'openai' | 'litellm' | 'groq' | 'openrouter') || 'openai'
+    };
+  }
+
+  static getProviderForModel(modelName: string): 'openai' | 'litellm' | 'groq' | 'openrouter' {
+    const allModelOptions = AIChatPanel.getModelOptions();
+    const modelOption = allModelOptions.find(option => option.value === modelName);
+    return (modelOption?.type as 'openai' | 'litellm' | 'groq' | 'openrouter') || 'openai';
+  }
   
   /**
    * Gets all model options or filters by provider
