@@ -10,6 +10,37 @@ import { createLogger } from '../core/Logger.js';
 
 const logger = createLogger('Tools');
 
+/**
+ * Helper function to create tracing observation for any tool execution
+ */
+async function createToolTracingObservation(toolName: string, args: any): Promise<void> {
+  try {
+    const { getCurrentTracingContext, createTracingProvider } = await import('../tracing/TracingConfig.js');
+    const context = getCurrentTracingContext();
+    if (context) {
+      const tracingProvider = createTracingProvider();
+      await tracingProvider.createObservation({
+        id: `event-tool-execute-${toolName}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: `Tool Execute: ${toolName}`,
+        type: 'event',
+        startTime: new Date(),
+        input: { 
+          toolName, 
+          toolArgs: args,
+          contextInfo: `Direct tool execution in ${toolName}`
+        },
+        metadata: {
+          executionPath: 'direct-tool',
+          toolName
+        }
+      }, context.traceId);
+    }
+  } catch (tracingError) {
+    // Don't fail tool execution due to tracing errors
+    console.error(`[TRACING ERROR in ${toolName}]`, tracingError);
+  }
+}
+
 // Value imports first, then types, ordered correctly
 import type { AccessibilityNode } from '../common/context.js';
 import type { LogLine } from '../common/log.js';
@@ -310,6 +341,7 @@ export class ExecuteJavaScriptTool implements Tool<{ code: string }, JavaScriptE
   description = 'Executes JavaScript code in the page context';
 
   async execute(args: { code: string }): Promise<JavaScriptExecutionResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     logger.info('execute_javascript', args);
     const code = args.code;
     if (typeof code !== 'string') {
@@ -368,6 +400,7 @@ export class NetworkAnalysisTool implements Tool<{ url?: string, limit?: number 
   description = 'Analyzes network requests, optionally filtered by URL pattern';
 
   async execute(args: { url?: string, limit?: number }): Promise<NetworkAnalysisResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     const url = args.url;
     const limit = args.limit || 10;
 
@@ -600,7 +633,11 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
   name = 'navigate_url';
   description = 'Navigates the page to a specified URL and waits for it to load';
 
+  constructor() {
+  }
+
   async execute(args: { url: string, reasoning: string /* Add reasoning to signature */ }): Promise<NavigationResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     logger.info('navigate_url', args);
     const url = args.url;
     const LOAD_TIMEOUT_MS = 30000; // 30 seconds timeout for page load
@@ -852,6 +889,7 @@ export class NavigateBackTool implements Tool<{ steps: number, reasoning: string
   };
 
   async execute(args: { steps: number, reasoning: string }): Promise<NavigateBackResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     logger.error('navigate_back', args);
     const steps = args.steps;
     if (typeof steps !== 'number' || steps <= 0) {
@@ -956,6 +994,7 @@ export class GetPageHTMLTool implements Tool<Record<string, unknown>, PageHTMLRe
   description = 'Gets the HTML contents and structure of the current page for analysis and summarization with CSS, JavaScript, and other non-essential content removed';
 
   async execute(_args: Record<string, unknown>): Promise<PageHTMLResult | ErrorResult> {
+    await createToolTracingObservation(this.name, _args);
     // Get the main target
     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!target) {
@@ -1068,6 +1107,8 @@ export class ClickElementTool implements Tool<{ selector: string }, ClickElement
   description = 'Clicks on an element identified by a CSS selector';
 
   async execute(args: { selector: string }): Promise<ClickElementResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
+    
     const selector = args.selector;
     if (typeof selector !== 'string') {
       return { error: 'Selector must be a string' };
@@ -1141,6 +1182,8 @@ export class SearchContentTool implements Tool<{ query: string, limit?: number }
   description = 'Searches for text content on the page and returns matching elements';
 
   async execute(args: { query: string, limit?: number }): Promise<SearchContentResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
+    
     const query = args.query;
     const limit = args.limit || 5;
 
@@ -1283,6 +1326,7 @@ export class ScrollPageTool implements Tool<{ position?: { x: number, y: number 
   description = 'Scrolls the page to a specific position or in a specific direction';
 
   async execute(args: { position?: { x: number, y: number }, direction?: string, amount?: number }): Promise<ScrollResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     const position = args.position;
     const direction = args.direction;
     const amount = args.amount || 300;  // Default scroll amount
@@ -1384,6 +1428,7 @@ export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, Screenshot
   description = 'Takes a screenshot of the current page view or the entire page';
 
   async execute(args: {fullPage?: boolean}): Promise<ScreenshotResult|ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     const fullPage = args.fullPage || false;
 
     // Get the main target
@@ -1441,6 +1486,7 @@ export class GetAccessibilityTreeTool implements Tool<{ reasoning: string }, Acc
   description = 'Gets the accessibility tree of the current page, providing a hierarchical structure of all accessible elements.';
 
   async execute(args: { reasoning: string }): Promise<AccessibilityTreeResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     try {
       // Log reasoning for this action (addresses unused args warning)
       logger.warn(`Getting accessibility tree: ${args.reasoning}`);
@@ -1485,6 +1531,7 @@ export class GetVisibleAccessibilityTreeTool implements Tool<{ reasoning: string
   description = 'Gets the accessibility tree of only the visible content in the viewport, providing a focused view of what the user can currently see.';
 
   async execute(args: { reasoning: string }): Promise<AccessibilityTreeResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     try {
       // Log reasoning for this action
       logger.warn(`Getting visible accessibility tree: ${args.reasoning}`);
@@ -1541,6 +1588,7 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number 
   description = 'Performs an action on a DOM element identified by NodeID';
 
   async execute(args: { method: string, nodeId: number | string, reasoning: string, args?: Record<string, unknown> | unknown[] }): Promise<PerformActionResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     logger.info('Executing with args:', JSON.stringify(args));
     const method = args.method;
     const nodeId = args.nodeId;
@@ -2445,6 +2493,7 @@ Important guidelines:
 
 
   async execute(args: { objective: string, offset?: number, chunkSize?: number, maxRetries?: number }): Promise<ObjectiveDrivenActionResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     const { objective, offset = 0, chunkSize = 60000, maxRetries = 1 } = args; // Default offset 0, chunkSize 60000, maxRetries 1
     let currentTry = 0;
     let lastError: string | null = null;
@@ -2694,6 +2743,7 @@ export class NodeIDsToURLsTool implements Tool<{ nodeIds: number[] }, NodeIDsToU
   description = 'Gets URLs associated with DOM elements identified by NodeIDs from accessibility tree.';
 
   async execute(args: { nodeIds: number[] }): Promise<NodeIDsToURLsResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     if (!Array.isArray(args.nodeIds)) {
       return { error: 'nodeIds must be an array of numbers' };
     }
@@ -3380,6 +3430,7 @@ CRITICAL:
 
 
   async execute(args: { objective: string, schema: Record<string, unknown>, offset?: number, chunkSize?: number, maxRetries?: number }): Promise<SchemaBasedDataExtractionResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     const { objective, schema, offset = 0, chunkSize = 60000, maxRetries = 1 } = args; // Default offset 0, chunkSize 60000, maxRetries 1
     let currentTry = 0;
     let lastError: string | null = null;
@@ -3585,6 +3636,7 @@ export class GetVisitsByDomainTool implements Tool<{ domain: string }, VisitHist
   description = 'Get a list of visited pages filtered by domain name';
 
   async execute(args: { domain: string }): Promise<VisitHistoryDomainResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     try {
       const visits = await VisitHistoryManager.getInstance().getVisitsByDomain(args.domain);
 
@@ -3623,6 +3675,7 @@ export class GetVisitsByKeywordTool implements Tool<{ keyword: string }, VisitHi
   description = 'Get a list of visited pages containing a specific keyword';
 
   async execute(args: { keyword: string }): Promise<VisitHistoryKeywordResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     try {
       const visits = await VisitHistoryManager.getInstance().getVisitsByKeyword(args.keyword);
 
@@ -3668,6 +3721,7 @@ export class SearchVisitHistoryTool implements Tool<{
     daysAgo?: number,
     limit?: number,
   }): Promise<VisitHistorySearchResult | ErrorResult> {
+    await createToolTracingObservation(this.name, args);
     try {
       const { domain, keyword, daysAgo, limit } = args;
 
