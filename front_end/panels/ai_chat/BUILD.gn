@@ -96,6 +96,7 @@ devtools_module("ai_chat") {
     "../../models/logs:bundle",
     "../../ui/components/helpers:bundle",
     "../../ui/components/markdown_view:bundle",
+    "../../ui/components/snackbars:bundle",
     "../../ui/components/text_editor:bundle",
     "../../ui/legacy:bundle",
     "../../ui/lit:bundle",

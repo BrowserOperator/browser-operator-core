@@ -301,6 +301,8 @@ export const AGENT_CONFIGS: {[key: string]: AgentConfig} = {
     systemPrompt: SYSTEM_PROMPTS[BaseOrchestratorAgentType.DEEP_RESEARCH],
     availableTools: [
       ToolRegistry.getToolInstance('research_agent') || (() => { throw new Error('research_agent tool not found'); })(),
+      ToolRegistry.getToolInstance('document_search') || (() => { throw new Error('document_search tool not found'); })(),
+      ToolRegistry.getToolInstance('bookmark_store') || (() => { throw new Error('bookmark_store tool not found'); })(),
       new FinalizeWithCritiqueTool(),
       new HTMLToMarkdownTool(),
       new NavigateURLTool(),
@@ -316,6 +318,8 @@ export const AGENT_CONFIGS: {[key: string]: AgentConfig} = {
     systemPrompt: SYSTEM_PROMPTS[BaseOrchestratorAgentType.SHOPPING],
     availableTools: [
       ToolRegistry.getToolInstance('action_agent') || (() => { throw new Error('action_agent tool not found'); })(),
+      ToolRegistry.getToolInstance('document_search') || (() => { throw new Error('document_search tool not found'); })(),
+      ToolRegistry.getToolInstance('bookmark_store') || (() => { throw new Error('bookmark_store tool not found'); })(),
       new NavigateURLTool(),
       new NavigateBackTool(),
       new SchemaBasedExtractorTool(),
@@ -390,6 +394,7 @@ export function getAgentTools(agentType: string): Array<Tool<any, any>> {
   return AGENT_CONFIGS[agentType]?.availableTools || [
     ToolRegistry.getToolInstance('action_agent') || (() => { throw new Error('action_agent tool not found'); })(),
     ToolRegistry.getToolInstance('document_search') || (() => { throw new Error('document_search tool not found'); })(),
+    ToolRegistry.getToolInstance('bookmark_store') || (() => { throw new Error('bookmark_store tool not found'); })(),
     ToolRegistry.getToolInstance('research_agent') || (() => { throw new Error('research_agent tool not found'); })(),
     new NavigateURLTool(),
     new NavigateBackTool(),

@@ -26,8 +26,9 @@ import {
   State as ChatViewState,
 } from './ChatView.js';
 import { HelpDialog } from './HelpDialog.js';
-import { SettingsDialog } from './SettingsDialog.js';
+import { SettingsDialog, isVectorDBEnabled } from './SettingsDialog.js';
 import { EvaluationDialog } from './EvaluationDialog.js';
+import * as Snackbars from '../../../ui/components/snackbars/snackbars.js';
 
 const {html} = Lit;
 
@@ -127,6 +128,7 @@ interface ToolbarViewInput {
   onBookmarkClick: () => void;
   isDeleteHistoryButtonVisible: boolean;
   isCenteredView: boolean;
+  isVectorDBEnabled: boolean;
 }
 
 function toolbarView(input: ToolbarViewInput): Lit.LitTemplate {
@@ -171,13 +173,15 @@ function toolbarView(input: ToolbarViewInput): Lit.LitTemplate {
           .jslogContext=${'ai-chat.evaluation-tests'}
           .variant=${Buttons.Button.Variant.TOOLBAR}
           @click=${input.onEvaluationTestClick}></devtools-button>
-        <devtools-button
-          title=${i18nString(UIStrings.bookmarkPage)}
-          aria-label=${i18nString(UIStrings.bookmarkPage)}
-          .iconName=${'download'}
-          .jslogContext=${'ai-chat.bookmark-page'}
-          .variant=${Buttons.Button.Variant.TOOLBAR}
-          @click=${input.onBookmarkClick}></devtools-button>
+        ${input.isVectorDBEnabled
+          ? html`<devtools-button
+              title=${i18nString(UIStrings.bookmarkPage)}
+              aria-label=${i18nString(UIStrings.bookmarkPage)}
+              .iconName=${'download'}
+              .jslogContext=${'ai-chat.bookmark-page'}
+              .variant=${Buttons.Button.Variant.TOOLBAR}
+              @click=${input.onBookmarkClick}></devtools-button>`
+          : Lit.nothing}
         <devtools-button
           title=${i18nString(UIStrings.settings)}
           aria-label=${i18nString(UIStrings.settings)}
@@ -1169,6 +1173,7 @@ export class AIChatPanel extends UI.Panel.Panel {
       onBookmarkClick: this.#onBookmarkClick.bind(this),
       isDeleteHistoryButtonVisible: this.#messages.length > 1,
       isCenteredView,
+      isVectorDBEnabled: isVectorDBEnabled(),
     }), this.#toolbarContainer, { host: this });
   }
   
@@ -1274,6 +1279,14 @@ export class AIChatPanel extends UI.Panel.Panel {
    * Handles the bookmark button click event and bookmarks the current page
    */
   async #onBookmarkClick(): Promise<void> {
+    // Show immediate "working" notification that doesn't auto-dismiss
+    const workingSnackbar = Snackbars.Snackbar.Snackbar.show({
+      message: 'Bookmarking page...',
+      closable: true, // Make it closable to prevent auto-dismiss
+    });
+    workingSnackbar.classList.add('bookmark-notification');
+    this.#applyFullWidthSnackbarStyles(workingSnackbar);
+
     try {
       // Import the BookmarkStoreTool dynamically
       const { BookmarkStoreTool } = await import('../tools/BookmarkStoreTool.js');
@@ -1288,37 +1301,109 @@ export class AIChatPanel extends UI.Panel.Panel {
         includeFullContent: true
       });
 
+      // Close the working notification properly by clicking the close button
+      const closeButton = workingSnackbar.shadowRoot?.querySelector('.dismiss') as HTMLElement;
+      if (closeButton) {
+        closeButton.click();
+      }
+
       if (result.success) {
-        // Add success message to chat
-        this.#messages.push({
-          entity: ChatMessageEntity.MODEL,
-          action: 'final',
-          answer: result.message || `Successfully bookmarked "${result.title || currentPageTitle}"`,
-          isFinalAnswer: true,
+        // Show success snackbar with shorter duration
+        const successMessage = result.message || `Successfully bookmarked "${result.title || currentPageTitle}"`;
+        const snackbar = Snackbars.Snackbar.Snackbar.show({
+          message: successMessage,
+          closable: false,
         });
-        this.performUpdate();
+        snackbar.dismissTimeout = 3000; // 3 seconds instead of default 5
+        snackbar.classList.add('bookmark-notification'); // Add custom CSS class
+        this.#applyFullWidthSnackbarStyles(snackbar); // Apply full-width styles
         logger.info('Page bookmarked successfully', { url: result.url, title: result.title });
       } else {
-        // Add error message to chat
-        this.#messages.push({
-          entity: ChatMessageEntity.MODEL,
-          action: 'final',
-          answer: `Failed to bookmark page: ${result.error}`,
-          isFinalAnswer: true,
+        // Show error snackbar
+        const errorSnackbar = Snackbars.Snackbar.Snackbar.show({
+          message: `Failed to bookmark page: ${result.error}`,
+          closable: true,
         });
-        this.performUpdate();
+        errorSnackbar.classList.add('bookmark-notification'); // Add custom CSS class
+        this.#applyFullWidthSnackbarStyles(errorSnackbar); // Apply full-width styles
         logger.error('Failed to bookmark page', { error: result.error });
       }
     } catch (error: any) {
+      // Close the working notification properly by clicking the close button
+      const closeButton = workingSnackbar.shadowRoot?.querySelector('.dismiss') as HTMLElement;
+      if (closeButton) {
+        closeButton.click();
+      }
+      
       logger.error('Error in bookmark click handler', { error: error.message });
-      this.#messages.push({
-        entity: ChatMessageEntity.MODEL,
-        action: 'final',
-        answer: `Error bookmarking page: ${error.message}`,
-        isFinalAnswer: true,
+      // Show error snackbar
+      const errorSnackbar = Snackbars.Snackbar.Snackbar.show({
+        message: `Error bookmarking page: ${error.message}`,
+        closable: true,
       });
-      this.performUpdate();
+      errorSnackbar.classList.add('bookmark-notification'); // Add custom CSS class
+      this.#applyFullWidthSnackbarStyles(errorSnackbar); // Apply full-width styles
     }
+  }
+
+  /**
+   * Apply full-width styles to snackbar for bookmark notifications
+   */
+  #applyFullWidthSnackbarStyles(snackbar: Snackbars.Snackbar.Snackbar): void {
+    // Ensure the slideInFromTop animation is available globally
+    this.#ensureGlobalSnackbarStyles();
+    
+    // Position below toolbar
+    const toolbarOffset = 25; // Reduced height
+    
+    // Apply inline styles with !important to force override
+    snackbar.style.setProperty('position', 'fixed', 'important');
+    snackbar.style.setProperty('top', `${toolbarOffset}px`, 'important');
+    snackbar.style.setProperty('left', '0', 'important');
+    snackbar.style.setProperty('right', '0', 'important');
+    snackbar.style.setProperty('bottom', 'unset', 'important');
+    snackbar.style.setProperty('width', '100vw', 'important');
+    snackbar.style.setProperty('max-width', 'none', 'important');
+    snackbar.style.setProperty('margin', '0', 'important');
+    snackbar.style.setProperty('z-index', '10000', 'important');
+    
+    // Apply styles to the container inside the snackbar
+    setTimeout(() => {
+      const container = snackbar.shadowRoot?.querySelector('.container') as HTMLElement;
+      if (container) {
+        container.style.width = '100%';
+        container.style.maxWidth = '100%';
+        container.style.borderRadius = '0';
+        container.style.borderBottom = '1px solid var(--sys-color-divider)';
+        container.style.animation = 'slideInFromTop 200ms cubic-bezier(0, 0, 0.3, 1)';
+      }
+    }, 0);
+  }
+
+  /**
+   * Ensure global styles for bookmark snackbars are available
+   */
+  #ensureGlobalSnackbarStyles(): void {
+    const styleId = 'bookmark-snackbar-styles';
+    if (document.getElementById(styleId)) {
+      return; // Already added
+    }
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      @keyframes slideInFromTop {
+        from {
+          transform: translateY(-100%);
+          opacity: 0%;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 100%;
+        }
+      }
+    `;
+    document.head.appendChild(style);
   }
 
   /**
@@ -1398,6 +1483,8 @@ export class AIChatPanel extends UI.Panel.Panel {
     
     this.#updateModelSelections();
     this.#initializeAgentService();
+    // Update toolbar to reflect vector DB enabled state
+    this.#updateToolbar();
   }
   
   /**
