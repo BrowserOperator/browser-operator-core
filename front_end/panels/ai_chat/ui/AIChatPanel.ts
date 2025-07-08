@@ -12,6 +12,10 @@ import * as Lit from '../../../ui/lit/lit.js';
 import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 import {AgentService, Events as AgentEvents} from '../core/AgentService.js';
 import { LLMClient } from '../LLM/LLMClient.js';
+import { OpenAIProvider } from '../LLM/OpenAIProvider.js';
+import { LiteLLMProvider } from '../LLM/LiteLLMProvider.js';
+import { GroqProvider } from '../LLM/GroqProvider.js';
+import { OpenRouterProvider } from '../LLM/OpenRouterProvider.js';
 import { createLogger } from '../core/Logger.js';
 
 const logger = createLogger('AIChatPanel');
@@ -105,6 +109,10 @@ const UIStrings = {
    * @description Placeholder when LiteLLM endpoint is missing
    */
   missingLiteLLMEndpoint: 'Please configure LiteLLM endpoint in Settings',
+  /**
+   * @description Generic placeholder when provider credentials are missing
+   */
+  missingProviderCredentials: 'Provider credentials required. Please configure in Settings',
   /**
    * @description Run evaluation tests
    */
@@ -870,54 +878,51 @@ export class AIChatPanel extends UI.Panel.Panel {
   }
   
   /**
-   * Checks if required credentials are available based on provider
-   * @param provider The selected provider ('openai', 'litellm', or 'groq')
+   * Checks if required credentials are available based on provider using provider-specific validation
+   * @param provider The selected provider ('openai', 'litellm', 'groq', 'openrouter')
    * @param isLiteLLM Whether the selected model is a LiteLLM model
    * @returns Object with canProceed flag and apiKey
    */
   #checkCredentials(provider: string, isLiteLLM: boolean): {canProceed: boolean, apiKey: string | null} {
-    let canProceed = false;
+    // Use provider-specific validation
+    const validation = LLMClient.validateProviderCredentials(provider);
+    
     let apiKey: string | null = null;
     
-    if (provider === 'litellm') {
-      // For LiteLLM: endpoint is required, API key is optional
-      const liteLLMEndpoint = localStorage.getItem(LITELLM_ENDPOINT_KEY);
-      const hasLiteLLMEndpoint = Boolean(liteLLMEndpoint);
-      canProceed = hasLiteLLMEndpoint;
-      
-      // For LiteLLM, prefer the dedicated LiteLLM API key, but fall back to regular API key
-      apiKey = localStorage.getItem(LITELLM_API_KEY_STORAGE_KEY) || localStorage.getItem('ai_chat_api_key') || null;
-      
-      if (!canProceed) {
-        logger.info("LiteLLM selected but no endpoint configured. Messages disabled.");
-      } else if (!apiKey) {
-        logger.info("LiteLLM endpoint configured but no API key provided. Some models may still work.");
-      } else {
-        logger.info(`LiteLLM configured with endpoint ${liteLLMEndpoint} and API key is ${apiKey ? 'provided' : 'missing'}`);
-      }
-    } else if (provider === 'groq') {
-      // For Groq: API key is required
-      apiKey = localStorage.getItem('ai_chat_groq_api_key');
-      canProceed = Boolean(apiKey);
-      
-      if (!canProceed) {
-        logger.info("Groq selected but no API key configured. Messages disabled.");
-      } else {
-        logger.info("Groq configured with API key.");
-      }
-    } else {
-      // For OpenAI: API key is required
-      apiKey = localStorage.getItem('ai_chat_api_key');
-      canProceed = Boolean(apiKey);
-      
-      if (!canProceed) {
-        logger.info("OpenAI selected but no API key configured. Messages disabled.");
-      } else {
-        logger.info("OpenAI configured with API key.");
+    if (validation.isValid) {
+      // Get the API key from the provider-specific storage
+      try {
+        // Create a temporary provider instance to get storage keys
+        let tempProvider;
+        switch (provider) {
+          case 'openai':
+            tempProvider = new OpenAIProvider('');
+            break;
+          case 'litellm':
+            tempProvider = new LiteLLMProvider('', '');
+            break;
+          case 'groq':
+            tempProvider = new GroqProvider('');
+            break;
+          case 'openrouter':
+            tempProvider = new OpenRouterProvider('');
+            break;
+          default:
+            logger.warn(`Unknown provider: ${provider}`);
+            return {canProceed: false, apiKey: null};
+        }
+        
+        const storageKeys = tempProvider.getCredentialStorageKeys();
+        apiKey = localStorage.getItem(storageKeys.apiKey || '') || null;
+        
+      } catch (error) {
+        logger.error(`Failed to get API key for ${provider}:`, error);
+        return {canProceed: false, apiKey: null};
       }
     }
     
-    return {canProceed, apiKey};
+    logger.info(validation.message);
+    return {canProceed: validation.isValid, apiKey};
   }
 
   /**
@@ -947,10 +952,8 @@ export class AIChatPanel extends UI.Panel.Panel {
       return i18nString(UIStrings.inputPlaceholder);
     } else if (selectedProvider === 'litellm') {
       return i18nString(UIStrings.missingLiteLLMEndpoint);
-    } else if (selectedProvider === 'groq') {
-      return 'Groq API key required. Please add API key in Settings.';
     } else {
-      return i18nString(UIStrings.missingOpenAIKey);
+      return i18nString(UIStrings.missingProviderCredentials);
     }
   }
 
@@ -1090,11 +1093,17 @@ export class AIChatPanel extends UI.Panel.Panel {
   #addCredentialErrorMessage(): void {
     const selectedProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
     
-    let errorText = 'OpenAI API key is missing. Please add API key in Settings.';
+    // Generate provider name safely, with fallback
+    const providerName = selectedProvider ? 
+      selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1) : 
+      'Provider';
+    
+    // Generic error message that works for any provider
+    let errorText = `${providerName} credentials are missing or invalid. Please configure them in Settings.`;
+    
+    // Special case for LiteLLM which needs endpoint configuration
     if (selectedProvider === 'litellm') {
       errorText = 'LiteLLM endpoint is not configured. Please add endpoint in Settings.';
-    } else if (selectedProvider === 'groq') {
-      errorText = 'Groq API key is missing. Please add API key in Settings.';
     }
     
     const errorMessage: ModelChatMessage = {
