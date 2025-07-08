@@ -166,15 +166,17 @@ Present findings in a comprehensive, detailed markdown report with these expande
 
 ## CRITICAL: Final Output Format
 
-When calling 'finalize_with_critique', structure your response exactly as:
+When finalizing your research, use the 'render_markdown' tool with isFinalAnswer=true for automatic critique validation.
 
-<reasoning>
-[2-3 sentences explaining your research approach, key insights, and organization method]
-</reasoning>
+## Available Tools
 
-<markdown_report>
-[Your comprehensive markdown report - will be displayed in enhanced document viewer]
-</markdown_report>
+You have access to the **render_markdown** tool which can display markdown content with proper formatting:
+- Use format 'document' for comprehensive reports (opens in document viewer)
+- Use format 'inline' for short content (displays in chat)
+- Use format 'auto' to automatically determine the best display method
+- You can include metadata like title, author, date, and tags for professional documents
+- **For final answers**: Set isFinalAnswer=true to enable automatic critique validation against user requirements
+- Include reasoning parameter to explain your research approach and key insights
 
 The markdown report will be extracted and shown via an enhanced document viewer button while only the reasoning appears in chat.`,
 
@@ -304,7 +306,7 @@ export const AGENT_CONFIGS: {[key: string]: AgentConfig} = {
       ToolRegistry.getToolInstance('web_task_agent') || (() => { throw new Error('web_task_agent tool not found'); })(),
       ToolRegistry.getToolInstance('document_search') || (() => { throw new Error('document_search tool not found'); })(),
       ToolRegistry.getToolInstance('bookmark_store') || (() => { throw new Error('bookmark_store tool not found'); })(),
-      new FinalizeWithCritiqueTool(),
+      ToolRegistry.getToolInstance('render_markdown') || (() => { throw new Error('render_markdown tool not found'); })(),
     ]
   },
   [BaseOrchestratorAgentType.SHOPPING]: {

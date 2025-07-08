@@ -10,6 +10,7 @@ import { BookmarkStoreTool } from '../../tools/BookmarkStoreTool.js';
 import { DocumentSearchTool } from '../../tools/DocumentSearchTool.js';
 import { NavigateURLTool, PerformActionTool, GetAccessibilityTreeTool, SearchContentTool, NavigateBackTool, NodeIDsToURLsTool, TakeScreenshotTool, ScrollPageTool } from '../../tools/Tools.js';
 import { HTMLToMarkdownTool } from '../../tools/HTMLToMarkdownTool.js';
+import { MarkdownRendererTool } from '../../tools/MarkdownRendererTool.js';
 import { AIChatPanel } from '../../ui/AIChatPanel.js';
 import { ChatMessageEntity, type ChatMessage } from '../../ui/ChatView.js';
 import {
@@ -106,6 +107,7 @@ export function initializeConfiguredAgents(): void {
   ToolRegistry.registerToolFactory('search_content', () => new SearchContentTool());
   ToolRegistry.registerToolFactory('take_screenshot', () => new TakeScreenshotTool());
   ToolRegistry.registerToolFactory('html_to_markdown', () => new HTMLToMarkdownTool());
+  ToolRegistry.registerToolFactory('render_markdown', () => new MarkdownRendererTool());
   ToolRegistry.registerToolFactory('scroll_page', () => new ScrollPageTool());
   
   // Register bookmark and document search tools
