@@ -8,6 +8,7 @@ import { LLMClient } from '../LLM/LLMClient.js';
 import { createLogger } from '../core/Logger.js';
 import { getTracingConfig, setTracingConfig, isTracingEnabled } from '../tracing/TracingConfig.js';
 import { getEvaluationConfig, setEvaluationConfig, isEvaluationEnabled, testEvaluationConnection, connectToEvaluationService, getEvaluationClientId, isEvaluationConnected } from '../common/EvaluationConfig.js';
+import { DEFAULT_PROVIDER_MODELS } from './AIChatPanel.js';
 
 const logger = createLogger('SettingsDialog');
 
@@ -571,6 +572,7 @@ export class SettingsDialog {
       logger.debug(`Available models for ${selectedProvider}:`, availableModels);
       logger.debug(`Current miniModel: ${miniModel}, nanoModel: ${nanoModel}`);
 
+
       // Refresh model selectors based on new provider
       if (selectedProvider === 'openai') {
         // Use our reusable function to update OpenAI model selectors
@@ -623,6 +625,10 @@ export class SettingsDialog {
       const openaiModels = getModelOptions('openai');
       logger.debug('OpenAI models from getModelOptions:', openaiModels);
 
+      // Get valid models using generic helper
+      const validMiniModel = getValidModelForProvider(miniModel, openaiModels, 'openai', 'mini');
+      const validNanoModel = getValidModelForProvider(nanoModel, openaiModels, 'openai', 'nano');
+
       // Clear any existing model selectors
       const existingSelectors = openaiContent.querySelectorAll('.model-selection-section');
       existingSelectors.forEach(selector => selector.remove());
@@ -648,7 +654,7 @@ export class SettingsDialog {
         i18nString(UIStrings.miniModelDescription),
         'mini-model-select',
         openaiModels,
-        miniModel,
+        validMiniModel,
         i18nString(UIStrings.defaultMiniOption),
         undefined // No focus handler for OpenAI
       );
@@ -662,7 +668,7 @@ export class SettingsDialog {
         i18nString(UIStrings.nanoModelDescription),
         'nano-model-select',
         openaiModels,
-        nanoModel,
+        validNanoModel,
         i18nString(UIStrings.defaultNanoOption),
         undefined // No focus handler for OpenAI
       );
@@ -858,6 +864,10 @@ export class SettingsDialog {
       const litellmModels = getModelOptions('litellm');
       logger.debug('LiteLLM models from getModelOptions:', litellmModels);
 
+      // Get valid models using generic helper
+      const validMiniModel = getValidModelForProvider(miniModel, litellmModels, 'litellm', 'mini');
+      const validNanoModel = getValidModelForProvider(nanoModel, litellmModels, 'litellm', 'nano');
+
       // Clear any existing model selectors
       const existingSelectors = litellmContent.querySelectorAll('.model-selection-section');
       existingSelectors.forEach(selector => selector.remove());
@@ -902,7 +912,7 @@ export class SettingsDialog {
         i18nString(UIStrings.miniModelDescription),
         'litellm-mini-model-select',
         litellmModels,
-        miniModel,
+        validMiniModel,
         i18nString(UIStrings.defaultMiniOption),
         onLiteLLMSelectorFocus
       );
@@ -916,7 +926,7 @@ export class SettingsDialog {
         i18nString(UIStrings.nanoModelDescription),
         'litellm-nano-model-select',
         litellmModels,
-        nanoModel,
+        validNanoModel,
         i18nString(UIStrings.defaultNanoOption),
         onLiteLLMSelectorFocus
       );
@@ -1261,6 +1271,28 @@ export class SettingsDialog {
       fetchGroqModelsButton.disabled = !groqApiKeyInput.value.trim();
     });
     
+    // Generic helper function to get valid model for provider
+    function getValidModelForProvider(
+      currentModel: string, 
+      providerModels: ModelOption[], 
+      provider: 'openai' | 'litellm' | 'groq' | 'openrouter',
+      modelType: 'mini' | 'nano'
+    ): string {
+      // Check if current model is valid for this provider
+      if (providerModels.some(model => model.value === currentModel)) {
+        return currentModel;
+      }
+      
+      // Get defaults from AIChatPanel's DEFAULT_PROVIDER_MODELS
+      const defaults = DEFAULT_PROVIDER_MODELS[provider] || DEFAULT_PROVIDER_MODELS.openai;
+      const defaultModel = modelType === 'mini' ? defaults.mini : defaults.nano;
+      
+      // Return default if it exists in provider models, otherwise return current model
+      return defaultModel && providerModels.some(model => model.value === defaultModel) 
+        ? defaultModel 
+        : currentModel;
+    }
+    
     // Function to update Groq model selectors
     function updateGroqModelSelectors() {
       logger.debug('Updating Groq model selectors');
@@ -1268,6 +1300,12 @@ export class SettingsDialog {
       // Get the latest model options filtered for Groq provider
       const groqModels = getModelOptions('groq');
       logger.debug('Groq models from getModelOptions:', groqModels);
+
+      // Get valid models using generic helper
+      const validMiniModel = getValidModelForProvider(miniModel, groqModels, 'groq', 'mini');
+      const validNanoModel = getValidModelForProvider(nanoModel, groqModels, 'groq', 'nano');
+      
+      logger.debug('Groq model selection:', { originalMini: miniModel, validMini: validMiniModel, originalNano: nanoModel, validNano: validNanoModel });
 
       // Clear any existing model selectors
       const existingSelectors = groqContent.querySelectorAll('.model-selection-section');
@@ -1292,7 +1330,7 @@ export class SettingsDialog {
         i18nString(UIStrings.miniModelDescription),
         'groq-mini-model-select',
         groqModels,
-        miniModel,
+        validMiniModel,
         i18nString(UIStrings.defaultMiniOption),
         undefined // No focus handler needed for Groq
       );
@@ -1306,7 +1344,7 @@ export class SettingsDialog {
         i18nString(UIStrings.nanoModelDescription),
         'groq-nano-model-select',
         groqModels,
-        nanoModel,
+        validNanoModel,
         i18nString(UIStrings.defaultNanoOption),
         undefined // No focus handler needed for Groq
       );
@@ -1427,6 +1465,12 @@ export class SettingsDialog {
       const openrouterModels = getModelOptions('openrouter');
       logger.debug('OpenRouter models from getModelOptions:', openrouterModels);
 
+      // Get valid models using generic helper
+      const validMiniModel = getValidModelForProvider(miniModel, openrouterModels, 'openrouter', 'mini');
+      const validNanoModel = getValidModelForProvider(nanoModel, openrouterModels, 'openrouter', 'nano');
+      
+      logger.debug('OpenRouter model selection:', { originalMini: miniModel, validMini: validMiniModel, originalNano: nanoModel, validNano: validNanoModel });
+
       // Clear any existing model selectors
       const existingSelectors = openrouterContent.querySelectorAll('.model-selection-section');
       existingSelectors.forEach(selector => selector.remove());
@@ -1443,7 +1487,7 @@ export class SettingsDialog {
         i18nString(UIStrings.miniModelDescription),
         'openrouter-mini-model-select',
         openrouterModels,
-        miniModel,
+        validMiniModel,
         i18nString(UIStrings.defaultMiniOption),
         undefined // No focus handler needed for OpenRouter
       );
@@ -1455,7 +1499,7 @@ export class SettingsDialog {
         i18nString(UIStrings.nanoModelDescription),
         'openrouter-nano-model-select',
         openrouterModels,
-        nanoModel,
+        validNanoModel,
         i18nString(UIStrings.defaultNanoOption),
         undefined // No focus handler needed for OpenRouter
       );

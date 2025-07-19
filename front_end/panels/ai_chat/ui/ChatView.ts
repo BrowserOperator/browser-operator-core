@@ -96,20 +96,6 @@ class DeepResearchMarkdownRenderer extends MarkdownView.MarkdownView.MarkdownIns
   }
 }
 
-// Function to detect if content should use deep-research rendering
-function isDeepResearchContent(text: string): boolean {
-  // Require minimum content length
-  if (text.length < CONTENT_THRESHOLDS.DEEP_RESEARCH_MIN_LENGTH) {
-    return false;
-  }
-  
-  // Check if content contains multiple headings (indicating structured document)
-  const headingMatches = text.match(REGEX_PATTERNS.HEADING);
-  const hasMultipleHeadings = headingMatches ? headingMatches.length >= CONTENT_THRESHOLDS.DEEP_RESEARCH_MIN_HEADINGS : false;
-  
-  return hasMultipleHeadings;
-}
-
 // Function to render text as markdown
 function renderMarkdown(text: string, markdownRenderer: MarkdownRenderer, onOpenTableInViewer?: (markdownContent: string) => void): Lit.TemplateResult {
   let tokens: Marked.Marked.MarkedToken[] = [];
@@ -699,7 +685,6 @@ export class ChatView extends HTMLElement {
                 return this.#renderStructuredResponse(structuredResponse, combinedIndex);
               } else {
                 // Regular response - use the old logic
-                const isDeepResearch = isDeepResearchContent(modelMessage.answer || '');
                 
                 return html`
                   <div class="message model-message final">
@@ -707,16 +692,7 @@ export class ChatView extends HTMLElement {
                       ${modelMessage.answer ?
                         html`
                           <div class="message-text">${renderMarkdown(modelMessage.answer, this.#markdownRenderer, this.#openInAIAssistantViewer.bind(this))}</div>
-                          ${isDeepResearch ? html`
-                            <div class="deep-research-actions">
-                              <button 
-                                class="view-document-btn"
-                                @click=${() => this.#openInAIAssistantViewer(modelMessage.answer || '')}
-                                title="Open in full document viewer with table of contents">
-                                📄 View as Document
-                              </button>
-                            </div>
-                          ` : Lit.nothing}
+                          ${Lit.nothing}
                         ` :
                         Lit.nothing
                       }

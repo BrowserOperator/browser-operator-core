@@ -436,8 +436,19 @@ export class OpenRouterProvider extends LLMBaseProvider {
         }
       },
       {
-        id: 'google/gemini-pro-1.5',
-        name: 'Gemini Pro 1.5',
+        id: 'google/gemini-2.5-pro',
+        name: 'Gemini Pro 2.5',
+        provider: 'openrouter' as LLMProvider,
+        capabilities: {
+          functionCalling: true,
+          reasoning: false,
+          vision: true,
+          structured: true
+        }
+      },
+      {
+        id: 'google/gemini-2.5-flash',
+        name: 'Gemini Pro 2.5 Flash',
         provider: 'openrouter' as LLMProvider,
         capabilities: {
           functionCalling: true,

@@ -12,6 +12,7 @@ import * as Lit from '../../../ui/lit/lit.js';
 import * as VisualLogging from '../../../ui/visual_logging/visual_logging.js';
 import {AgentService, Events as AgentEvents} from '../core/AgentService.js';
 import { LLMClient } from '../LLM/LLMClient.js';
+import { LLMProviderRegistry } from '../LLM/LLMProviderRegistry.js';
 import { OpenAIProvider } from '../LLM/OpenAIProvider.js';
 import { LiteLLMProvider } from '../LLM/LiteLLMProvider.js';
 import { GroqProvider } from '../LLM/GroqProvider.js';
@@ -50,6 +51,30 @@ const DEFAULT_OPENAI_MODELS: ModelOption[] = [
   {value: 'gpt-4.1-nano-2025-04-14', label: 'GPT-4.1 Nano', type: 'openai'},
   {value: 'gpt-4.1-2025-04-14', label: 'GPT-4.1', type: 'openai'},
 ];
+
+// Default model selections for each provider
+export const DEFAULT_PROVIDER_MODELS: Record<string, {main: string, mini?: string, nano?: string}> = {
+  openai: {
+    main: 'gpt-4.1-2025-04-14',
+    mini: 'gpt-4.1-mini-2025-04-14',
+    nano: 'gpt-4.1-nano-2025-04-14'
+  },
+  litellm: {
+    main: '', // Will use first available model
+    mini: '',
+    nano: ''
+  },
+  groq: {
+    main: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    mini: 'qwen/qwen3-32b',
+    nano: 'llama-3.1-8b-instant'
+  },
+  openrouter: {
+    main: 'anthropic/claude-sonnet-4',
+    mini: 'google/gemini-2.5-flash',
+    nano: 'google/gemini-2.0-flash-001'
+  }
+};
 
 // This will hold the current active model options
 let MODEL_OPTIONS: ModelOption[] = [...DEFAULT_OPENAI_MODELS];
@@ -263,7 +288,17 @@ export class AIChatPanel extends UI.Panel.Panel {
   static getProviderForModel(modelName: string): 'openai' | 'litellm' | 'groq' | 'openrouter' {
     const allModelOptions = AIChatPanel.getModelOptions();
     const modelOption = allModelOptions.find(option => option.value === modelName);
-    return (modelOption?.type as 'openai' | 'litellm' | 'groq' | 'openrouter') || 'openai';
+    const originalProvider = (modelOption?.type as 'openai' | 'litellm' | 'groq' | 'openrouter') || 'openai';
+    
+    // Check if the model's original provider is available in the registry
+    if (LLMProviderRegistry.hasProvider(originalProvider)) {
+      return originalProvider;
+    }
+    
+    // If the original provider isn't available, fall back to the currently selected provider
+    const currentProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
+    logger.debug(`Provider ${originalProvider} not available for model ${modelName}, falling back to current provider: ${currentProvider}`);
+    return currentProvider as 'openai' | 'litellm' | 'groq' | 'openrouter';
   }
   
   /**
@@ -608,6 +643,10 @@ export class AIChatPanel extends UI.Panel.Panel {
    * Loads model selections from localStorage
    */
   #loadModelSelections(): void {
+    // Get the current provider
+    const currentProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
+    const providerDefaults = DEFAULT_PROVIDER_MODELS[currentProvider] || DEFAULT_PROVIDER_MODELS.openai;
+    
     // Load the selected model
     const storedModel = localStorage.getItem(MODEL_SELECTION_KEY);
     
@@ -619,30 +658,46 @@ export class AIChatPanel extends UI.Panel.Panel {
     if (storedModel && MODEL_OPTIONS.some(option => option.value === storedModel)) {
       this.#selectedModel = storedModel;
     } else if (MODEL_OPTIONS.length > 0) {
-      // If stored model is not valid, select the first available model
-      this.#selectedModel = MODEL_OPTIONS[0].value;
+      // Check if provider default main model is available
+      if (providerDefaults.main && MODEL_OPTIONS.some(option => option.value === providerDefaults.main)) {
+        this.#selectedModel = providerDefaults.main;
+      } else {
+        // Otherwise, use the first available model
+        this.#selectedModel = MODEL_OPTIONS[0].value;
+      }
       localStorage.setItem(MODEL_SELECTION_KEY, this.#selectedModel);
     }
     
-    // Load mini model
+    // Load mini model - check that it belongs to current provider
     const storedMiniModel = localStorage.getItem(MINI_MODEL_STORAGE_KEY);
-    if (storedMiniModel && MODEL_OPTIONS.some(option => option.value === storedMiniModel)) {
+    const storedMiniModelOption = storedMiniModel ? MODEL_OPTIONS.find(option => option.value === storedMiniModel) : null;
+    if (storedMiniModelOption && storedMiniModelOption.type === currentProvider && storedMiniModel) {
       this.#miniModel = storedMiniModel;
+    } else if (providerDefaults.mini && MODEL_OPTIONS.some(option => option.value === providerDefaults.mini)) {
+      // Use provider default mini model if available
+      this.#miniModel = providerDefaults.mini;
+      localStorage.setItem(MINI_MODEL_STORAGE_KEY, this.#miniModel);
     } else {
       this.#miniModel = '';
       localStorage.removeItem(MINI_MODEL_STORAGE_KEY);
     }
 
-    // Load nano model
+    // Load nano model - check that it belongs to current provider
     const storedNanoModel = localStorage.getItem(NANO_MODEL_STORAGE_KEY);
-    if (storedNanoModel && MODEL_OPTIONS.some(option => option.value === storedNanoModel)) {
+    const storedNanoModelOption = storedNanoModel ? MODEL_OPTIONS.find(option => option.value === storedNanoModel) : null;
+    if (storedNanoModelOption && storedNanoModelOption.type === currentProvider && storedNanoModel) {
       this.#nanoModel = storedNanoModel;
+    } else if (providerDefaults.nano && MODEL_OPTIONS.some(option => option.value === providerDefaults.nano)) {
+      // Use provider default nano model if available
+      this.#nanoModel = providerDefaults.nano;
+      localStorage.setItem(NANO_MODEL_STORAGE_KEY, this.#nanoModel);
     } else {
       this.#nanoModel = '';
       localStorage.removeItem(NANO_MODEL_STORAGE_KEY);
     }
     
     logger.info('Loaded model selections:', {
+      provider: currentProvider,
       selectedModel: this.#selectedModel,
       miniModel: this.#miniModel,
       nanoModel: this.#nanoModel
@@ -833,7 +888,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     
     // Get the selected provider and check model status
     const selectedProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
-    const { isLiteLLM, isPlaceholder } = this.#getModelStatus(this.#selectedModel);
+    const { isPlaceholder } = this.#getModelStatus(this.#selectedModel);
     
     // Don't initialize if the selected model is a placeholder
     if (isPlaceholder) {
@@ -842,7 +897,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     }
     
     // Check credentials based on provider
-    const {canProceed, apiKey} = this.#checkCredentials(selectedProvider, isLiteLLM);
+    const {canProceed, apiKey} = this.#checkCredentials(selectedProvider);
     
     // Update state if we can't proceed
     if (!canProceed) {
@@ -880,10 +935,9 @@ export class AIChatPanel extends UI.Panel.Panel {
   /**
    * Checks if required credentials are available based on provider using provider-specific validation
    * @param provider The selected provider ('openai', 'litellm', 'groq', 'openrouter')
-   * @param isLiteLLM Whether the selected model is a LiteLLM model
    * @returns Object with canProceed flag and apiKey
    */
-  #checkCredentials(provider: string, isLiteLLM: boolean): {canProceed: boolean, apiKey: string | null} {
+  #checkCredentials(provider: string): {canProceed: boolean, apiKey: string | null} {
     // Use provider-specific validation
     const validation = LLMClient.validateProviderCredentials(provider);
     
@@ -1500,29 +1554,64 @@ export class AIChatPanel extends UI.Panel.Panel {
    * Updates model selections based on updated options
    */
   #updateModelSelections(): void {
+    // Get the current provider and its defaults
+    const currentProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
+    const providerDefaults = DEFAULT_PROVIDER_MODELS[currentProvider] || DEFAULT_PROVIDER_MODELS.openai;
+    
     // Load saved mini/nano models if valid
     const storedMiniModel = localStorage.getItem(MINI_MODEL_STORAGE_KEY);
     const storedNanoModel = localStorage.getItem(NANO_MODEL_STORAGE_KEY);
     
-    // Check if mini/nano models are still valid with the new MODEL_OPTIONS
-    if (storedMiniModel && MODEL_OPTIONS.some(option => option.value === storedMiniModel)) {
+    // Check if mini/nano models are still valid with the new MODEL_OPTIONS AND belong to current provider
+    const storedMiniModelOption = storedMiniModel ? MODEL_OPTIONS.find(option => option.value === storedMiniModel) : null;
+    if (storedMiniModelOption && storedMiniModelOption.type === currentProvider && storedMiniModel) {
       this.#miniModel = storedMiniModel;
+    } else if (providerDefaults.mini && MODEL_OPTIONS.some(option => option.value === providerDefaults.mini)) {
+      // Use provider default mini model if available
+      this.#miniModel = providerDefaults.mini;
+      localStorage.setItem(MINI_MODEL_STORAGE_KEY, this.#miniModel);
     } else {
       this.#miniModel = '';
+      localStorage.removeItem(MINI_MODEL_STORAGE_KEY);
     }
     
-    if (storedNanoModel && MODEL_OPTIONS.some(option => option.value === storedNanoModel)) {
+    const storedNanoModelOption = storedNanoModel ? MODEL_OPTIONS.find(option => option.value === storedNanoModel) : null;
+    if (storedNanoModelOption && storedNanoModelOption.type === currentProvider && storedNanoModel) {
       this.#nanoModel = storedNanoModel;
+    } else if (providerDefaults.nano && MODEL_OPTIONS.some(option => option.value === providerDefaults.nano)) {
+      // Use provider default nano model if available
+      this.#nanoModel = providerDefaults.nano;
+      localStorage.setItem(NANO_MODEL_STORAGE_KEY, this.#nanoModel);
     } else {
       this.#nanoModel = '';
+      localStorage.removeItem(NANO_MODEL_STORAGE_KEY);
     }
     
     // Check if the current selected model is valid for the new provider
-    if (!MODEL_OPTIONS.some(opt => opt.value === this.#selectedModel) && MODEL_OPTIONS.length > 0) {
-      logger.info(`Selected model ${this.#selectedModel} is no longer valid with selected provider`);
-      this.#selectedModel = MODEL_OPTIONS[0].value;
+    const selectedModelOption = MODEL_OPTIONS.find(opt => opt.value === this.#selectedModel);
+    if (!selectedModelOption || selectedModelOption.type !== currentProvider) {
+      logger.info(`Selected model ${this.#selectedModel} is not valid for provider ${currentProvider}`);
+      
+      // Try to use provider default main model first
+      if (providerDefaults.main && MODEL_OPTIONS.some(option => option.value === providerDefaults.main)) {
+        this.#selectedModel = providerDefaults.main;
+      } else if (MODEL_OPTIONS.length > 0) {
+        // Otherwise, use the first available model
+        this.#selectedModel = MODEL_OPTIONS[0].value;
+      }
       localStorage.setItem(MODEL_SELECTION_KEY, this.#selectedModel);
     }
+    
+    // Log the updated selections
+    logger.info('Updated model selections for provider change:', {
+      provider: currentProvider,
+      selectedModel: this.#selectedModel,
+      miniModel: this.#miniModel,
+      nanoModel: this.#nanoModel
+    });
+    
+    // Trigger UI update to reflect the new model selections
+    this.performUpdate();
   }
 
   /**
