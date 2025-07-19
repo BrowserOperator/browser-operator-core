@@ -1291,7 +1291,7 @@ export class AIChatPanel extends UI.Panel.Panel {
     this.#isProcessing = false;
     this.#selectedAgentType = null; // Reset selected agent type
     this.performUpdate();
-    UI.ARIAUtils.alert(i18nString(UIStrings.newChatCreated));
+    UI.ARIAUtils.LiveAnnouncer.alert(i18nString(UIStrings.newChatCreated));
   }
 
   /**
@@ -1305,7 +1305,7 @@ export class AIChatPanel extends UI.Panel.Panel {
 
   #onDeleteClick(): void {
     this.#onNewChatClick();
-    UI.ARIAUtils.alert(i18nString(UIStrings.chatDeleted));
+    UI.ARIAUtils.LiveAnnouncer.alert(i18nString(UIStrings.chatDeleted));
   }
 
   #onHelpClick(): void {
