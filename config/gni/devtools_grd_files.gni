@@ -602,7 +602,6 @@ grd_files_bundled_sources = [
   "front_end/panels/ai_assistance/ai_assistance-meta.js",
   "front_end/panels/ai_assistance/ai_assistance.js",
   "front_end/panels/ai_chat/ui/AIChatPanel.js",
-  "front_end/panels/ai_chat/ui/AIChatPanel.test.js",
   "front_end/panels/ai_chat/ui/ChatView.js",
   "front_end/panels/ai_chat/ui/chatView.css.js",
   "front_end/panels/ai_chat/ui/HelpDialog.js",

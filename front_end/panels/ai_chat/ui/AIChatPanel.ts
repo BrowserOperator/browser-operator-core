@@ -374,19 +374,29 @@ export class AIChatPanel extends UI.Panel.Panel {
     // Try to get from all_model_options first (comprehensive list)
     const allModelOptionsStr = localStorage.getItem('ai_chat_all_model_options');
     if (allModelOptionsStr) {
-      const allModelOptions = JSON.parse(allModelOptionsStr);
-      // If provider is specified, filter by it
-      return provider ? allModelOptions.filter((opt: ModelOption) => opt.type === provider) : allModelOptions;
+      try {
+        const allModelOptions = JSON.parse(allModelOptionsStr);
+        // If provider is specified, filter by it
+        return provider ? allModelOptions.filter((opt: ModelOption) => opt.type === provider) : allModelOptions;
+      } catch (error) {
+        console.warn('Failed to parse ai_chat_all_model_options from localStorage, removing corrupted data:', error);
+        localStorage.removeItem('ai_chat_all_model_options');
+      }
     }
     
     // Fallback to legacy model_options if all_model_options doesn't exist
     const modelOptionsStr = localStorage.getItem('ai_chat_model_options');
     if (modelOptionsStr) {
-      const modelOptions = JSON.parse(modelOptionsStr);
-      // If we got legacy options, migrate them to all_model_options for future use
-      localStorage.setItem('ai_chat_all_model_options', modelOptionsStr);
-      // Apply provider filter if needed
-      return provider ? modelOptions.filter((opt: ModelOption) => opt.type === provider) : modelOptions;
+      try {
+        const modelOptions = JSON.parse(modelOptionsStr);
+        // If we got legacy options, migrate them to all_model_options for future use
+        localStorage.setItem('ai_chat_all_model_options', modelOptionsStr);
+        // Apply provider filter if needed
+        return provider ? modelOptions.filter((opt: ModelOption) => opt.type === provider) : modelOptions;
+      } catch (error) {
+        console.warn('Failed to parse ai_chat_model_options from localStorage, removing corrupted data:', error);
+        localStorage.removeItem('ai_chat_model_options');
+      }
     }
     
     // If nothing is found, return default OpenAI models
@@ -404,10 +414,22 @@ export class AIChatPanel extends UI.Panel.Panel {
     const selectedProvider = localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai';
     
     // Get existing models from localStorage
-    const existingAllModels = JSON.parse(localStorage.getItem('ai_chat_all_model_options') || '[]');
+    let existingAllModels: ModelOption[] = [];
+    try {
+      existingAllModels = JSON.parse(localStorage.getItem('ai_chat_all_model_options') || '[]');
+    } catch (error) {
+      console.warn('Failed to parse ai_chat_all_model_options from localStorage, using empty array:', error);
+      localStorage.removeItem('ai_chat_all_model_options');
+    }
     
     // Get existing custom models (if any) - these are for LiteLLM only
-    const savedCustomModels = JSON.parse(localStorage.getItem('ai_chat_custom_models') || '[]');
+    let savedCustomModels: string[] = [];
+    try {
+      savedCustomModels = JSON.parse(localStorage.getItem('ai_chat_custom_models') || '[]');
+    } catch (error) {
+      console.warn('Failed to parse ai_chat_custom_models from localStorage, using empty array:', error);
+      localStorage.removeItem('ai_chat_custom_models');
+    }
     const customModels = savedCustomModels.map((model: string) => ({
       value: model,
       label: `LiteLLM: ${model}`,
