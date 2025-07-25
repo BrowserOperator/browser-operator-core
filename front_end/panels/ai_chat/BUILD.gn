@@ -17,6 +17,7 @@ generate_css("css_files") {
 devtools_module("ai_chat") {
   sources = [
     "ui/AIChatPanel.ts",
+    "ui/AIChatPanel.test.ts",
     "ui/ChatView.ts",
     "ui/HelpDialog.ts",
     "ui/SettingsDialog.ts",
@@ -114,6 +115,7 @@ devtools_module("ai_chat") {
 # List of source files also used to determine JS outputs for metadata
 _ai_chat_sources = [
     "ui/AIChatPanel.ts",
+    "ui/AIChatPanel.test.ts",
     "ui/ChatView.ts",
     "ui/HelpDialog.ts",
     "ui/PromptEditDialog.ts",
