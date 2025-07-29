@@ -718,64 +718,103 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
   }
 
   /**
-   * Resolve URLs in the data using LLM without function calls
+   * Recursively find and replace node IDs with URLs in a data structure
+   */
+  private findAndReplaceNodeIds(data: any, nodeIdToUrlMap: Record<number, string>): any {
+    // Handle null/undefined
+    if (data === null || data === undefined) {
+      return data;
+    }
+
+    // Check if it's a numeric value that matches a node ID
+    if (typeof data === 'number' && nodeIdToUrlMap[data]) {
+      return nodeIdToUrlMap[data];
+    }
+
+    // Check if it's a string that represents a numeric node ID
+    if (typeof data === 'string') {
+      const numValue = parseInt(data, 10);
+      if (!isNaN(numValue) && nodeIdToUrlMap[numValue]) {
+        return nodeIdToUrlMap[numValue];
+      }
+    }
+
+    // Recursively process arrays
+    if (Array.isArray(data)) {
+      return data.map(item => this.findAndReplaceNodeIds(item, nodeIdToUrlMap));
+    }
+
+    // Recursively process objects
+    if (typeof data === 'object' && data !== null) {
+      const result: any = {};
+      for (const [key, value] of Object.entries(data)) {
+        result[key] = this.findAndReplaceNodeIds(value, nodeIdToUrlMap);
+      }
+      return result;
+    }
+
+    // Return data unchanged for other types
+    return data;
+  }
+
+  /**
+   * Collect all numeric values from a data structure that could be node IDs
+   */
+  private collectPotentialNodeIds(data: any, nodeIds: Set<number>): void {
+    if (data === null || data === undefined) {
+      return;
+    }
+
+    // Check if it's a numeric value
+    if (typeof data === 'number' && data > 0 && Number.isInteger(data)) {
+      nodeIds.add(data);
+    }
+
+    // Check if it's a string that represents a number
+    if (typeof data === 'string') {
+      const numValue = parseInt(data, 10);
+      if (!isNaN(numValue) && numValue > 0 && Number.isInteger(numValue)) {
+        nodeIds.add(numValue);
+      }
+    }
+
+    // Recursively process arrays
+    if (Array.isArray(data)) {
+      data.forEach(item => this.collectPotentialNodeIds(item, nodeIds));
+    }
+
+    // Recursively process objects
+    if (typeof data === 'object' && data !== null) {
+      Object.values(data).forEach(value => this.collectPotentialNodeIds(value, nodeIds));
+    }
+  }
+
+  /**
+   * Resolve URLs in the data using programmatic approach (no LLM calls)
    */
   private async resolveUrlsWithLLM(options: {
     data: any,
     apiKey: string,
     schema: SchemaDefinition,
   }): Promise<any> {
-    const { data, apiKey, schema } = options;
-    logger.debug('Starting URL resolution with LLM...');
-
-    // 1. First LLM call to identify nodeIDs
-    const nodeIdExtractionPrompt = `
-Extract all numeric values that appear to be accessibility node IDs from fields like "link", "url", or "href" in the data.
-
-ORIGINAL SCHEMA:
-\`\`\`json
-${JSON.stringify(schema, null, 2)}
-\`\`\`
-
-EXTRACTED DATA (containing nodeIDs instead of URLs):
-\`\`\`json
-${JSON.stringify(data, null, 2)}
-\`\`\`
-
-TASK: Return ONLY a JSON array of the numeric node IDs found. Example: [12345, 67890].
-Do not add any conversational text or explanations or thinking tags.
-`;
+    const { data, schema } = options;
+    logger.debug('Starting URL resolution programmatically...');
 
     try {
-      const { model, provider } = AIChatPanel.getNanoModelWithProvider();
-      const llmClient = LLMClient.getInstance();
-      
-      const llmResponse = await llmClient.call({
-        provider,
-        model,
-        messages: [
-          { role: 'system', content: 'You are a JSON processor that extracts numeric node IDs.' },
-          { role: 'user', content: nodeIdExtractionPrompt }
-        ],
-        systemPrompt: 'You are a JSON processor that extracts numeric node IDs.',
-        temperature: 0
-      });
-      const response = llmResponse.text || '';
+      // 1. Collect all potential node IDs from the data
+      const nodeIds = new Set<number>();
+      this.collectPotentialNodeIds(data, nodeIds);
 
-      logger.debug('Node ID extraction response:', response);
-
-      // Parse the array of nodeIds
-      const nodeIds = this.parseJsonResponse(response);
-      if (!Array.isArray(nodeIds) || nodeIds.length === 0) {
-        logger.debug('No nodeIDs found for URL conversion');
-        return data; // Return original data if no nodeIds found
+      if (nodeIds.size === 0) {
+        logger.debug('No potential node IDs found in data');
+        return data;
       }
 
-      logger.debug(`Found ${nodeIds.length} nodeIDs to convert:`, nodeIds);
+      logger.debug(`Found ${nodeIds.size} potential node IDs to check:`, Array.from(nodeIds));
 
-      // 2. Execute the NodeIDsToURLsTool with the found nodeIds
+      // 2. Use NodeIDsToURLsTool to get URL mappings
       const urlTool = new NodeIDsToURLsTool();
-      const urlResult = await urlTool.execute({ nodeIds });
+      const urlResult = await urlTool.execute({ nodeIds: Array.from(nodeIds) });
 
       if ('error' in urlResult) {
         logger.error('Error from NodeIDsToURLsTool:', urlResult.error);
@@ -792,54 +831,19 @@ Do not add any conversational text or explanations or thinking tags.
 
       logger.debug(`Created nodeId to URL mapping with ${Object.keys(nodeIdToUrlMap).length} entries`);
 
-      // 4. Second LLM call to replace nodeIDs with URLs
-      const urlReplacementPrompt = `
-Replace numeric accessibility node IDs with their corresponding URLs in the data structure.
-
-ORIGINAL DATA (with numeric nodeIDs):
-\`\`\`json
-${JSON.stringify(data, null, 2)}
-\`\`\`
-
-NODE ID TO URL MAPPING:
-\`\`\`json
-${JSON.stringify(nodeIdToUrlMap, null, 2)}
-\`\`\`
-
-TASK: Replace all numeric nodeIDs in the data with their corresponding URLs from the mapping.
-Return the full updated data structure with the URLs replaced. 
-Do not add any conversational text or explanations or thinking tags.
-`;
-
-      const llmClient2 = LLMClient.getInstance();
-      const llmUrlResponse = await llmClient2.call({
-        provider,
-        model,
-        messages: [
-          { role: 'system', content: 'You are an expert data transformation assistant.' },
-          { role: 'user', content: urlReplacementPrompt }
-        ],
-        systemPrompt: 'You are an expert data transformation assistant.',
-        temperature: 0
-      });
-      const urlReplacementResponse = llmUrlResponse.text;
-
-      if (!urlReplacementResponse) {
-        logger.error('No response from URL replacement LLM');
-        return data; // Return original data if we can't get a response
+      // 4. Use programmatic replacement instead of LLM
+      if (Object.keys(nodeIdToUrlMap).length === 0) {
+        logger.debug('No valid URL mappings found, returning original data');
+        return data;
       }
 
-      // Parse the response
-      const updatedData = this.parseJsonResponse(urlReplacementResponse);
-      if (!updatedData) {
-        logger.error('[SchemaBasedExtractorTool] Failed to parse updated data from LLM response');
-        return data; // Return original data if parsing fails
-      }
+      // 5. Replace node IDs with URLs in the data
+      const updatedData = this.findAndReplaceNodeIds(data, nodeIdToUrlMap);
 
-      logger.debug('Successfully replaced nodeIDs with URLs');
+      logger.debug('Successfully replaced nodeIDs with URLs programmatically');
       return updatedData;
     } catch (error) {
-      logger.error('[SchemaBasedExtractorTool] Error in URL resolution with LLM:', error);
+      logger.error('[SchemaBasedExtractorTool] Error in programmatic URL resolution:', error);
       return data; // Return original data on error
     }
   }

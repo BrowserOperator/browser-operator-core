@@ -118,7 +118,6 @@ export interface NetworkAnalysisResult {
  * Type for navigation result
  */
 export interface NavigationResult {
-  success: boolean;
   url: string;
   message: string;
   metadata?: { url: string, title: string };
@@ -148,7 +147,6 @@ export interface PageHTMLResult {
  * Type for click element result
  */
 export interface ClickElementResult {
-  success: boolean;
   message: string;
   elementInfo?: {
     tagName: string,
@@ -187,10 +185,19 @@ export interface ScrollResult {
 /**
  * Type for screenshot result
  */
-export interface ScreenshotResult {
-  success: boolean;
-  dataUrl?: string;
-  message: string;
+/**
+ * Interface for tool results that can include image data
+ */
+export interface ImageToolResult {
+  imageData?: string;  // Base64 data URL for sending to LLM
+  error?: string;
+}
+
+/**
+ * Result type for screenshot operations
+ */
+export interface ScreenshotResult extends ImageToolResult {
+  // Inherits success, message, imageData, error from ImageToolResult
 }
 
 /**
@@ -231,7 +238,7 @@ export interface AccessibilityTreeResult {
 /**
  * Type for perform action result
  */
-export interface PerformActionResult {
+export interface PerformActionResult extends ImageToolResult {
   xpath: string;
   pageChange: {
     hasChanges: boolean;
@@ -245,6 +252,7 @@ export interface PerformActionResult {
       modified: boolean;
     };
   };
+  visualCheck?: string; // LLM's assessment of success
 }
 
 /**
@@ -659,7 +667,6 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
         // Proceed but without metadata, perhaps? Or return error?
         // Let's return success but indicate metadata failure.
         return {
-          success: true,
           url: target.inspectedURL() || url, // Use inspectedURL as fallback
           message: `Successfully navigated to ${target.inspectedURL() || url}, but failed to fetch metadata: ${metadataEval.exceptionDetails.text}`,
           metadata: undefined,
@@ -715,7 +722,6 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
         // Return an error or modify success message?
         // Let's modify the message but still return success=true, as the page *did* load.
         return {
-          success: true, // Technically navigated and loaded *something*
           url: finalUrl,
           message: `Navigation ended at ${finalUrl} (expected ${intendedUrl}) but page loaded.${verificationMessage}`,
           metadata,
@@ -724,7 +730,6 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
       // **********************************************************
 
       return {
-        success: true,
         url: metadata.url, // Use URL from metadata
         message: `Navigated to ${metadata.url} and page loaded.${verificationMessage}`,
         metadata,
@@ -1388,7 +1393,7 @@ export class ScrollPageTool implements Tool<{ position?: { x: number, y: number 
  */
 export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, ScreenshotResult|ErrorResult> {
   name = 'take_screenshot';
-  description = 'Takes a screenshot of the current page view or the entire page';
+  description = 'Takes a screenshot of the current page view or the entire page. The image will be provided to the LLM for analysis.';
 
   async execute(args: {fullPage?: boolean}): Promise<ScreenshotResult|ErrorResult> {
     const fullPage = args.fullPage || false;
@@ -1419,10 +1424,10 @@ export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, Screenshot
       // Get base64 data from result
       const data = result.data;
 
+      const imageData = `data:image/png;base64,${data}`;
+      
       return {
-        success: true,
-        dataUrl: `data:image/png;base64,${data}`,
-        message: `Successfully took ${fullPage ? 'full page' : 'viewport'} screenshot`,
+        imageData: imageData
       };
     } catch (error) {
       return {error: `Failed to take screenshot: ${error.message}`};
@@ -1776,6 +1781,19 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number 
         logger.warn('Failed to capture tree before action:', error);
       }
 
+      // --- Capture screenshot before action ---
+      let beforeScreenshotData: string | undefined;
+      try {
+        const beforeScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
+          format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
+          captureBeyondViewport: false
+        });
+        beforeScreenshotData = beforeScreenshotResult.data;
+        logger.info('Captured before screenshot');
+      } catch (error) {
+        logger.warn('Failed to capture before screenshot:', error);
+      }
+
       // --- Perform Action (Do this BEFORE verification) ---
       logger.info(`Executing Utils.performAction('${method}', args: ${JSON.stringify(actionArgsArray)}, xpath: '${xpath}', iframeNodeId: '${iframeNodeId || 'none'}')`);
       await Utils.performAction(target, method, actionArgsArray, xpath, iframeNodeId);
@@ -1894,7 +1912,169 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number 
         }
       }
 
+      // Visual verification using before/after screenshots and LLM
+      let visualCheck: string | undefined;
+      try {
+        // Take after screenshot
+        const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
+          format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
+          captureBeyondViewport: false
+        });
+
+        if (afterScreenshotResult.data && beforeScreenshotData) {
+          // Get current page content for context
+          let currentPageContent = '';
+          try {
+            const currentTreeResult = await Utils.getAccessibilityTree(target);
+            currentPageContent = currentTreeResult.simplified;
+          } catch (error) {
+            logger.warn('Failed to get current page content for visual verification:', error);
+            currentPageContent = 'Page content unavailable';
+          }
+
+          // Ask LLM to verify using nano model for efficiency
+          const llmClient = LLMClient.getInstance();
+          const { model, provider } = AIChatPanel.getNanoModelWithProvider();
+          const response = await llmClient.call({
+            provider,
+            model,
+            systemPrompt: 'You are a visual verification assistant. Compare before/after screenshots and page context to determine if actions succeeded.',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: `Analyze the before and after screenshots to determine if this ${method} action succeeded and describe what you observe.
+
+ACTION DETAILS:
+- Method: ${method}
+- Target Element XPath: ${xpath}
+- Node ID: ${nodeId}
+- Arguments: ${JSON.stringify(actionArgsArray)}
+- Reasoning: ${reasoning}
+
+CURRENT PAGE CONTENT (visible elements):
+${currentPageContent}
+
+Please compare the before and after screenshots and describe:
+- What visual changes occurred between the two images
+- Whether these changes indicate the action was successful
+- Any error messages, validation warnings, or unexpected behavior you notice
+- Loading states, navigation changes, or form submissions that occurred
+- Your overall assessment of whether the action achieved its intended result
+
+The first image shows the page BEFORE the action, the second image shows the page AFTER the action.
+
+Provide a clear, descriptive response about what happened and whether the action appears to have succeeded.`
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:image/png;base64,${beforeScreenshotData}`
+                    }
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:image/png;base64,${afterScreenshotResult.data}`
+                    }
+                  }
+                ]
+              }
+            ],
+            temperature: 0
+          });
+          
+          visualCheck = response.text || 'No response';
+          logger.info('Visual verification result:', visualCheck);
+        } else if (afterScreenshotResult.data && !beforeScreenshotData) {
+          // Fallback to single after screenshot if before screenshot failed
+          logger.warn('Before screenshot unavailable, using after screenshot only');
+          
+          // Get current page content for context
+          let currentPageContent = '';
+          try {
+            const currentTreeResult = await Utils.getAccessibilityTree(target);
+            currentPageContent = currentTreeResult.simplified;
+          } catch (error) {
+            logger.warn('Failed to get current page content for visual verification:', error);
+            currentPageContent = 'Page content unavailable';
+          }
+
+          const llmClient = LLMClient.getInstance();
+          const { model, provider } = AIChatPanel.getNanoModelWithProvider();
+          const response = await llmClient.call({
+            provider,
+            model,
+            systemPrompt: 'You are a visual verification assistant. Analyze screenshots and page context to determine if actions succeeded.',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: `Analyze this screenshot to determine if the ${method} action succeeded and describe what you observe.
+
+ACTION DETAILS:
+- Method: ${method}
+- Target Element XPath: ${xpath}
+- Node ID: ${nodeId}
+- Arguments: ${JSON.stringify(actionArgsArray)}
+- Reasoning: ${reasoning}
+
+CURRENT PAGE CONTENT (visible elements):
+${currentPageContent}
+
+Please examine the screenshot and page content to describe:
+- What the current state of the page shows
+- Any visible indicators that suggest the action succeeded or failed
+- Error messages, validation warnings, or unexpected behavior you notice
+- Loading states, navigation changes, or form submissions that may have occurred
+- Your assessment of whether the action achieved its intended result
+
+Note: Only the after-action screenshot is available for analysis.
+
+Provide a clear, descriptive response about what you observe and whether the action appears to have succeeded.`
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:image/png;base64,${afterScreenshotResult.data}`
+                    }
+                  }
+                ]
+              }
+            ],
+            temperature: 0
+          });
+          
+          visualCheck = response.text || 'No response';
+          logger.info('Visual verification result (after only):', visualCheck);
+        } else {
+          logger.error('Screenshot data is empty or undefined');
+        }
+      } catch (error) {
+        logger.warn('Visual verification failed:', error);
+        // Don't fail the action, just log the issue
+      }
+
+      // Get after-action screenshot data for returning to main LLM
+      let afterActionImageData: string | undefined;
+      try {
+        const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
+          format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
+          captureBeyondViewport: false
+        });
+        if (afterScreenshotResult.data) {
+          afterActionImageData = `data:image/png;base64,${afterScreenshotResult.data}`;
+        }
+      } catch (error) {
+        logger.warn('Failed to capture after-action image for main LLM:', error);
+      }
+
       return {
+        imageData: afterActionImageData,
         xpath,
         pageChange: treeDiff ? {
           hasChanges: treeDiff.hasChanges,
@@ -1915,6 +2095,7 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number 
           modified: [],
           hasMore: { added: false, removed: false, modified: false }
         },
+        visualCheck
       };
     } catch (error: unknown) {
       logger.info('Error during execution:', error instanceof Error ? error.message : String(error));

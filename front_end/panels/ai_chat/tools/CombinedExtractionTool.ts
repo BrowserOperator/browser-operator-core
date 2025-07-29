@@ -108,13 +108,8 @@ export class CombinedExtractionTool implements Tool<CombinedExtractionArgs, Comb
       }
 
       // At this point, navigationResult is definitely NavigationResult
-      if (!navigationResult.success) {
-        return {
-          success: false,
-          url,
-          error: `Navigation failed: ${navigationResult.message}`
-        };
-      }
+      // Navigation is considered successful if there's no error field
+      // (NavigationResult doesn't have an error field, only ErrorResult does)
 
       // Basic result with navigation info
       const result: CombinedExtractionResult = {
