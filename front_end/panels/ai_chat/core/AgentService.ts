@@ -355,7 +355,7 @@ export class AgentService extends Common.ObjectWrapper.ObjectWrapper<{
       },
       ...(parentObservationId && { parentObservationId })
     }, traceId);
-
+    
     try {
       // Create initial state for this run
       const state: AgentState = {

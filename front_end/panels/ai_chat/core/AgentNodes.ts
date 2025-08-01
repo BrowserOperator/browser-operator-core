@@ -111,7 +111,7 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
       let generationId: string | undefined;
       const generationStartTime = new Date();
 
-      if (tracingContext?.traceId) {
+      if (tracingContext?.traceId) {        
         generationId = `gen-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         await this.tracingProvider.createObservation({
           id: generationId,
@@ -134,7 +134,7 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
             } : null
           }
         }, tracingContext.traceId);
-        
+
         // Update tracing context with current generation ID
         tracingContext.currentGenerationId = generationId;
       }
@@ -467,8 +467,8 @@ export function createToolExecutorNode(state: AgentState): Runnable<AgentState, 
             parentObservationId: executionContext.parentObservationId,
             currentAgentSpanId: executionContext.currentAgentSpanId
           });
-        }
-        
+        }  
+              
         const result = await withTracingContext(executionContext, async () => {
           console.log(`[TOOL EXECUTION PATH 1] Inside withTracingContext for tool: ${toolName}`);
           return await selectedTool.execute(toolArgs as any);

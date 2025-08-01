@@ -351,6 +351,5 @@ if (typeof window !== 'undefined') {
   window.resetTracingProvider = () => {
     // Add a convenience function to reset the singleton
     TracingProviderSingleton.reset();
-    console.log('🔄 TracingProvider singleton reset');
   };
 }

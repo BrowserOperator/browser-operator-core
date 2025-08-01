@@ -7,6 +7,7 @@ import type { Tool } from '../tools/Tools.js';
 import { AIChatPanel } from '../ui/AIChatPanel.js';
 import { ChatMessageEntity, type ChatMessage } from '../ui/ChatView.js';
 import { createLogger } from '../core/Logger.js';
+import { getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { AgentSession } from './AgentSessionTypes.js';
 
 const logger = createLogger('ConfigurableAgentTool');
@@ -370,6 +371,8 @@ export class ConfigurableAgentTool implements Tool<ConfigurableAgentArgs, Config
   async execute(args: ConfigurableAgentArgs): Promise<ConfigurableAgentResult & { agentSession: AgentSession }> {
     logger.info(`Executing ${this.name} via AgentRunner with args:`, args);
 
+    // Get current tracing context for debugging
+    const tracingContext = getCurrentTracingContext();
     const agentService = AgentService.getInstance();
     const apiKey = agentService.getApiKey();
 
