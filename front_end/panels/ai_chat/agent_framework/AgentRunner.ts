@@ -11,6 +11,7 @@ import { ChatMessageEntity, type ChatMessage, type ModelChatMessage, type ToolRe
 import { createLogger } from '../core/Logger.js';
 import { createTracingProvider, getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { AgentSession, AgentMessage } from './AgentSessionTypes.js';
+import { AgentErrorHandler } from '../core/AgentErrorHandler.js';
 
 const logger = createLogger('AgentRunner');
 
@@ -382,6 +383,14 @@ export class AgentRunner {
       }
     }));
 
+    // Create centralized error handler
+    const errorHandler = AgentErrorHandler.createErrorHandler({
+      continueOnError: true,
+      agentName,
+      availableTools: Array.from(toolMap.keys()),
+      session: agentSession
+    });
+
     // Add handoff tools based on the executing agent's config
     if (executingAgent?.config.handoffs) {
         // Iterate over the configured handoffs
@@ -582,7 +591,7 @@ export class AgentRunner {
         messages.push(systemErrorMessage);
         
         // Generate summary of error scenario
-        const errorSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, apiKey, modelName, 'error');
+        const errorSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'error');
         
         // Complete session with error
         agentSession.status = 'error';
@@ -679,10 +688,19 @@ export class AgentRunner {
           // Execute tool
           const toolToExecute = toolMap.get(toolName);
           if (!toolToExecute) {
-            throw new Error(`Agent requested unknown tool: ${toolName}`);
+            const result = errorHandler.handleUnknownTool(toolName, toolCallId);
+            if (result.shouldContinue && result.errorMessage) {
+              messages.push(result.errorMessage);
+              if (result.sessionMessage) {
+                errorHandler.addSessionMessage(result.sessionMessage);
+              }
+              continue; // Continue to next iteration
+            }
+            // If not continuing, this would throw an error (but our config sets continueOnError: true)
+            continue; // Ensure we don't proceed with undefined tool
           }
 
-          let toolResultText: string;
+          let toolResultText: string = '';
           let toolIsError = false;
           let toolResultData: any = null;
           let imageData: string | undefined;
@@ -733,10 +751,7 @@ export class AgentRunner {
               
               return { ...handoffResult, agentSession };
 
-          }
-          if (!toolToExecute) { // Regular tool, but not found
-              throw new Error(`Agent requested unknown tool: ${toolName}`);
-          } else {
+          } else if (toolToExecute) {
             // *** Regular tool execution ***
             
             // Create tool execution span
@@ -942,7 +957,7 @@ export class AgentRunner {
           logger.info(`${agentName} LLM provided final answer.`);
           
           // Generate summary of successful completion
-          const completionSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, apiKey, modelName, 'final_answer');
+          const completionSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'final_answer');
           
           // Complete session naturally
           agentSession.status = 'completed';
@@ -957,8 +972,18 @@ export class AgentRunner {
           };
           return { ...result, agentSession };
 
+        } else if (parsedAction.type === 'error') {
+          const result = errorHandler.handleParsingError(parsedAction.error);
+          if (result.shouldContinue && result.errorMessage) {
+            messages.push(result.errorMessage);
+            if (result.sessionMessage) {
+              errorHandler.addSessionMessage(result.sessionMessage);
+            }
+            continue; // Continue to next iteration so the LLM can try again
+          }
         } else {
-          throw new Error(parsedAction.error);
+          // Unknown parsed action type
+          throw new Error(`Unknown parsed action type: ${(parsedAction as any).type}`);
         }
 
       } catch (error: any) {
@@ -975,7 +1000,7 @@ export class AgentRunner {
         messages.push(systemErrorMessage);
         
         // Generate summary of error scenario
-        const errorSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, apiKey, modelName, 'error');
+        const errorSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'error');
         
         // Complete session with error
         agentSession.status = 'error';
@@ -1039,7 +1064,7 @@ export class AgentRunner {
     agentSession.terminationReason = 'max_iterations';
     
     // Generate summary of agent progress instead of generic error message
-    const progressSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, apiKey, modelName);
+    const progressSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName);
     const result = createErrorResult('Agent reached maximum iterations', messages, 'max_iterations');
     result.summary = {
       type: 'timeout',
@@ -1056,7 +1081,6 @@ export class AgentRunner {
     messages: ChatMessage[], 
     maxIterations: number, 
     agentName: string,
-    apiKey: string,
     modelName: string,
     completionType: 'final_answer' | 'max_iterations' | 'error' = 'max_iterations'
   ): Promise<string> {

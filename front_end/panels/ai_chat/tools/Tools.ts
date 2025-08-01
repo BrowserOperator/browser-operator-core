@@ -32,6 +32,7 @@ import { FullPageAccessibilityTreeToMarkdownTool, type FullPageAccessibilityTree
 import { HTMLToMarkdownTool, type HTMLToMarkdownResult } from './HTMLToMarkdownTool.js';
 import { SchemaBasedExtractorTool, type SchemaExtractionResult, type SchemaDefinition } from './SchemaBasedExtractorTool.js';
 import { VisitHistoryManager, type VisitData } from './VisitHistoryManager.js';
+import { SequentialThinkingTool, type SequentialThinkingResult, type SequentialThinkingArgs, type ExecutedStep } from './SequentialThinkingTool.js';
 
 /**
  * Base interface for all tools
@@ -310,6 +311,16 @@ export interface SchemaBasedDataExtractionResult {
   totalLength: number;
   truncated: boolean;
   metadata?: { url: string, title: string };
+}
+
+/**
+ * Type for wait result
+ */
+export interface WaitResult {
+  waited: number;
+  reason: string;
+  completed: boolean;
+  viewportSummary?: string;
 }
 
 /**
@@ -1389,11 +1400,123 @@ export class ScrollPageTool implements Tool<{ position?: { x: number, y: number 
 }
 
 /**
+ * Tool for waiting a specified duration
+ */
+export class WaitTool implements Tool<{ seconds?: number, duration?: number, reason?: string, reasoning?: string }, WaitResult | ErrorResult> {
+  name = 'wait_for_page_load';
+  description = 'Waits for a specified number of seconds to allow page content to load, animations to complete, or dynamic content to appear. After waiting, returns a summary of what is currently visible in the viewport to help determine if additional waiting is needed. Provide the number of seconds to wait and an optional reasoning for waiting.';
+
+  async execute(args: { seconds?: number, duration?: number, reason?: string, reasoning?: string }): Promise<WaitResult | ErrorResult> {
+    // Handle both 'seconds' and 'duration' parameter names for flexibility
+    const waitTime = args.seconds ?? args.duration;
+    const waitReason = args.reason ?? args.reasoning;
+    
+    // Validate input
+    if (typeof waitTime !== 'number') {
+      return { error: 'Must provide either "seconds" or "duration" parameter as a number' };
+    }
+    
+    if (waitTime < 0.1) {
+      return { error: 'Wait time must be at least 0.1 seconds' };
+    }
+    
+    if (waitTime > 300) {
+      return { error: 'Wait time cannot exceed 300 seconds (5 minutes) for safety' };
+    }
+
+    // Log the wait reason if provided
+    logger.info(`Waiting for ${waitTime} seconds${waitReason ? `: ${waitReason}` : ''}`);
+
+    // Wait for the specified duration
+    await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+
+    // Get viewport summary after waiting
+    let viewportSummary: string | undefined;
+    try {
+      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
+      if (target) {
+        // Get visible accessibility tree
+        const treeResult = await Utils.getVisibleAccessibilityTree(target);
+        
+        // Generate summary using LLM
+        const { model, provider } = AIChatPanel.getNanoModelWithProvider();
+        const llm = LLMClient.getInstance();
+        
+        const reasonContext = waitReason ? `The wait was specifically for: ${waitReason}` : 'No specific reason was provided for the wait.';
+        
+        const systemPrompt = `You are analyzing the visible content of a webpage after a wait period. ${reasonContext}
+
+Provide a concise summary of what's currently visible in the viewport, paying special attention to elements related to the wait reason.
+
+Focus on:
+- Main content elements (headings, buttons, forms, text)
+- Loading indicators or spinners  
+- Error messages or notifications
+- Whether the page appears fully loaded or still loading
+- Any animations or transitions in progress
+- Elements specifically related to the wait reason (if provided)
+
+Keep the summary to 2-3 sentences maximum.`;
+
+        const userPrompt = `Analyze this viewport content and provide a brief summary${waitReason ? `, focusing on elements related to: ${waitReason}` : ''}:
+${treeResult.simplified}`;
+
+        const response = await llm.call({
+          provider,
+          model,
+          messages: [{ role: 'user', content: userPrompt }],
+          systemPrompt,
+          temperature: 0.1,
+        });
+
+        viewportSummary = response.text?.trim();
+      }
+    } catch (error) {
+      // Non-critical error - just log and continue
+      logger.warn('Failed to generate viewport summary:', error);
+    }
+
+    return {
+      waited: waitTime,
+      reason: waitReason || 'Waiting for page to settle',
+      completed: true,
+      viewportSummary
+    };
+  }
+
+  schema = {
+    type: 'object',
+    properties: {
+      seconds: {
+        type: 'number',
+        description: 'Number of seconds to wait (minimum 0.1, maximum 300)',
+        minimum: 0.1,
+        maximum: 300
+      },
+      duration: {
+        type: 'number',
+        description: 'Alternative to seconds - number of seconds to wait (minimum 0.1, maximum 300)',
+        minimum: 0.1,
+        maximum: 300
+      },
+      reasoning: {
+        type: 'string',
+        description: 'Optional reasoning for waiting (e.g., "for animation to complete", "for content to load")'
+      },
+      reason: {
+        type: 'string',
+        description: 'Alternative to reasoning - optional reason for waiting'
+      }
+    },
+  };
+}
+
+/**
  * Tool for taking screenshots of the page
  */
 export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, ScreenshotResult|ErrorResult> {
   name = 'take_screenshot';
-  description = 'Takes a screenshot of the current page view or the entire page. The image will be provided to the LLM for analysis.';
+  description = 'Takes a screenshot of the current page view or the entire page. The image can be used for analyzing the page layout, content, and visual elements. Always specify whether to capture the full page or just the viewport and the reasoning behind it.';
 
   async execute(args: {fullPage?: boolean}): Promise<ScreenshotResult|ErrorResult> {
     const fullPage = args.fullPage || false;
@@ -1441,6 +1564,10 @@ export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, Screenshot
         type: 'boolean',
         description: 'Whether to capture the entire page or just the viewport (default: false)',
       },
+      reasioning: {
+        type: 'string',
+        description: 'Optional reasoning for taking the screenshot (e.g., "for visual analysis", "to capture layout")'
+      }
     },
   };
 }
@@ -2988,7 +3115,7 @@ export class SchemaBasedDataExtractionTool implements Tool<{
   maxRetries?: number,
 }, SchemaBasedDataExtractionResult | ErrorResult> {
   name = 'schema_based_extraction';
-  description = 'Extracts structured data from the page according to a provided schema and objective, returning results in JSON format that resembles HTML structure. Uses an efficient NodeID-based extraction approach where accessibility NodeIDs are first identified then resolved to content. The output preserves document hierarchy with proper parent-child relationships between elements. Particularly useful for extracting content while maintaining its original structure and relationships.';
+  description = 'Extracts structured data from the page according to a provided schema and objective, returning results in JSON format that resembles JSON structure. Particularly useful for extracting content while maintaining its original structure and relationships. ALWAYS provide a JSON Schema definition that describes the structure of data to extract.';
 
   // Create system prompt for SchemaBasedDataExtractionTool
   private getSystemPrompt(): string {
@@ -3949,7 +4076,9 @@ export function getTools(): Array<(
   Tool<{ answer: string }, FinalizeWithCritiqueResult> |
   Tool<{ domain: string }, VisitHistoryDomainResult | ErrorResult> |
   Tool<{ keyword: string }, VisitHistoryKeywordResult | ErrorResult> |
-  Tool<{ domain?: string, keyword?: string, daysAgo?: number, limit?: number }, VisitHistorySearchResult | ErrorResult>
+  Tool<{ domain?: string, keyword?: string, daysAgo?: number, limit?: number }, VisitHistorySearchResult | ErrorResult> |
+  Tool<{ seconds: number, reason?: string }, WaitResult | ErrorResult> |
+  Tool<SequentialThinkingArgs, SequentialThinkingResult | ErrorResult>
 )> {
   return [
     new ExecuteJavaScriptTool(),
@@ -3971,6 +4100,11 @@ export function getTools(): Array<(
     new FinalizeWithCritiqueTool(),
     new GetVisitsByDomainTool(),
     new GetVisitsByKeywordTool(),
-    new SearchVisitHistoryTool()
+    new SearchVisitHistoryTool(),
+    new WaitTool(),
+    new SequentialThinkingTool()
   ];
 }
+
+// Export the SequentialThinkingTool
+export { SequentialThinkingTool } from './SequentialThinkingTool.js';

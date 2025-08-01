@@ -621,6 +621,7 @@ grd_files_bundled_sources = [
   "front_end/panels/ai_chat/core/GraphHelpers.js",
   "front_end/panels/ai_chat/core/StateGraph.js",
   "front_end/panels/ai_chat/core/Logger.js",
+  "front_end/panels/ai_chat/core/AgentErrorHandler.js",
   "front_end/panels/ai_chat/core/Version.js",
   "front_end/panels/ai_chat/core/VersionChecker.js",
   "front_end/panels/ai_chat/LLM/LLMTypes.js",
