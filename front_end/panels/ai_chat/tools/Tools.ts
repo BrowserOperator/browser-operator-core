@@ -2042,6 +2042,9 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number 
       // Visual verification using before/after screenshots and LLM
       let visualCheck: string | undefined;
       try {
+        // Add some delay to allow UI to refresh
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
         // Take after screenshot
         const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
           format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,

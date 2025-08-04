@@ -16,7 +16,8 @@ import {
   ConfigurableAgentTool,
   ToolRegistry, type AgentToolConfig, type ConfigurableAgentArgs
 } from '../ConfigurableAgentTool.js';
-import { WaitTool, SequentialThinkingTool } from '../../tools/Tools.js';
+import { WaitTool } from '../../tools/Tools.js';
+import { ThinkingTool } from '../../tools/ThinkingTool.js';
 import type { Tool } from '../../tools/Tools.js';
 
 /**
@@ -109,7 +110,7 @@ export function initializeConfiguredAgents(): void {
   ToolRegistry.registerToolFactory('html_to_markdown', () => new HTMLToMarkdownTool());
   ToolRegistry.registerToolFactory('scroll_page', () => new ScrollPageTool());
   ToolRegistry.registerToolFactory('wait_for_page_load', () => new WaitTool());
-  ToolRegistry.registerToolFactory('sequential_thinking', () => new SequentialThinkingTool());
+  ToolRegistry.registerToolFactory('thinking', () => new ThinkingTool());
   
   // Register bookmark and document search tools
   ToolRegistry.registerToolFactory('bookmark_store', () => new BookmarkStoreTool());
@@ -1110,19 +1111,19 @@ You automatically receive rich context with each iteration:
 
 ## Enhanced Guidelines
 
-### 0. Sequential Thinking Usage (CRITICAL)
-**ALWAYS use sequential_thinking tool:**
+### 0. Thinking Usage (CRITICAL)
+**ALWAYS use thinking tool:**
 - At the start of any task to create a grounded plan
 - After 3-4 actions to reassess progress
 - When encountering unexpected results or errors
 - Before major decisions (navigation, form submission)
 - When the page changes significantly
 
-**Sequential thinking provides:**
+**Thinking provides:**
 - Visual confirmation of current state
-- Analysis of what worked/failed in past steps
-- Concrete next steps based on what's actually visible
-- Progress percentage toward goal completion
+- High-level list of things to consider or work on
+- Current progress assessment toward the goal
+- Flexible observations about the situation
 
 ### 1. Planning & Site Recognition
 **ANALYZE site patterns first**: Before executing tools, identify:
@@ -1272,7 +1273,7 @@ Remember: **Plan adaptively, execute systematically, validate continuously, and 
       'scroll_page',
       'take_screenshot',
       'wait_for_page_load',
-      'sequential_thinking',
+      'thinking',
     ],
     maxIterations: 15,
     modelName: () => AIChatPanel.instance().getSelectedModel(),
