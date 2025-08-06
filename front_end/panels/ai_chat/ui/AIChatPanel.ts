@@ -1202,9 +1202,19 @@ export class AIChatPanel extends UI.Panel.Panel {
     
     // Remove any existing listeners to prevent duplicates
     this.#agentService.removeEventListener(AgentEvents.MESSAGES_CHANGED, this.#handleMessagesChanged.bind(this));
+    this.#agentService.removeEventListener(AgentEvents.AGENT_SESSION_STARTED, this.#handleAgentSessionStarted.bind(this));
+    this.#agentService.removeEventListener(AgentEvents.AGENT_TOOL_STARTED, this.#handleAgentToolStarted.bind(this));
+    this.#agentService.removeEventListener(AgentEvents.AGENT_TOOL_COMPLETED, this.#handleAgentToolCompleted.bind(this));
+    this.#agentService.removeEventListener(AgentEvents.CHILD_AGENT_STARTED, this.#handleChildAgentStarted.bind(this));
     
     // Register for messages changed events
     this.#agentService.addEventListener(AgentEvents.MESSAGES_CHANGED, this.#handleMessagesChanged.bind(this));
+    
+    // Register for real-time agent events
+    this.#agentService.addEventListener(AgentEvents.AGENT_SESSION_STARTED, this.#handleAgentSessionStarted.bind(this));
+    this.#agentService.addEventListener(AgentEvents.AGENT_TOOL_STARTED, this.#handleAgentToolStarted.bind(this));
+    this.#agentService.addEventListener(AgentEvents.AGENT_TOOL_COMPLETED, this.#handleAgentToolCompleted.bind(this));
+    this.#agentService.addEventListener(AgentEvents.CHILD_AGENT_STARTED, this.#handleChildAgentStarted.bind(this));
     
     // Initialize the agent service
     logger.info('Calling agentService.initialize()...');
@@ -1453,6 +1463,42 @@ export class AIChatPanel extends UI.Panel.Panel {
     // Check if we should exit processing state
     this.#updateProcessingState(messages);
     this.performUpdate();
+  }
+  
+  /**
+   * Handle real-time agent session started event
+   */
+  #handleAgentSessionStarted(event: Common.EventTarget.EventTargetEvent<import('../agent_framework/AgentSessionTypes.js').AgentSession>): void {
+    if (this.#chatView) {
+      this.#chatView.handleAgentSessionStarted(event.data);
+    }
+  }
+  
+  /**
+   * Handle real-time tool started event
+   */
+  #handleAgentToolStarted(event: Common.EventTarget.EventTargetEvent<{session: import('../agent_framework/AgentSessionTypes.js').AgentSession, toolCall: import('../agent_framework/AgentSessionTypes.js').AgentMessage}>): void {
+    if (this.#chatView) {
+      this.#chatView.handleAgentToolStarted(event.data);
+    }
+  }
+  
+  /**
+   * Handle real-time tool completed event
+   */
+  #handleAgentToolCompleted(event: Common.EventTarget.EventTargetEvent<{session: import('../agent_framework/AgentSessionTypes.js').AgentSession, toolResult: import('../agent_framework/AgentSessionTypes.js').AgentMessage}>): void {
+    if (this.#chatView) {
+      this.#chatView.handleAgentToolCompleted(event.data);
+    }
+  }
+  
+  /**
+   * Handle child agent started event
+   */
+  #handleChildAgentStarted(event: Common.EventTarget.EventTargetEvent<{parentSession: import('../agent_framework/AgentSessionTypes.js').AgentSession, childAgentName: string, childSessionId: string}>): void {
+    // Child agent events are handled via the parent agent session in ChatView
+    // This could be used for additional logging or monitoring if needed
+    logger.debug('Child agent started:', event.data);
   }
   
   /**

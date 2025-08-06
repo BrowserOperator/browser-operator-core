@@ -12,6 +12,7 @@ import { createLogger } from '../core/Logger.js';
 import { createTracingProvider, getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { AgentSession, AgentMessage } from './AgentSessionTypes.js';
 import { AgentErrorHandler } from '../core/AgentErrorHandler.js';
+import { AgentRunnerEventBus } from './AgentRunnerEventBus.js';
 
 const logger = createLogger('AgentRunner');
 
@@ -46,24 +47,17 @@ export interface AgentRunnerHooks {
  * Runs the core agent execution loop
  */
 export class AgentRunner {
-  private static currentSession: AgentSession | null = null;
+  private static eventBus: AgentRunnerEventBus | null = null;
   
   /**
-   * Add a message to the current session
+   * Initialize event bus connection
    */
-  private static addSessionMessage(message: Partial<AgentMessage>): void {
-    if (!this.currentSession) {
-      return;
+  static initializeEventBus(): void {
+    if (!this.eventBus) {
+      this.eventBus = AgentRunnerEventBus.getInstance();
     }
-    
-    const fullMessage: AgentMessage = {
-      id: crypto.randomUUID(),
-      timestamp: new Date(),
-      ...message
-    } as AgentMessage;
-    
-    this.currentSession.messages.push(fullMessage);
   }
+  
   /**
    * Helper function to convert ChatMessage[] to LLMMessage[]
    */
@@ -71,6 +65,11 @@ export class AgentRunner {
     const llmMessages: LLMMessage[] = [];
     
     for (const msg of messages) {
+      // Skip AGENT_SESSION messages - they are for UI only
+      if (msg.entity === ChatMessageEntity.AGENT_SESSION) {
+        continue;
+      }
+      
       if (msg.entity === ChatMessageEntity.USER) {
         // User message
         if ('text' in msg) {
@@ -227,6 +226,10 @@ export class AgentRunner {
       // Filter messages: keep user messages, final answers, and only tool calls/results for specified tools
       logger.info(`Filtering messages for handoff to ${targetAgentTool.name} based on includeToolResults.`);
       handoffMessages = currentMessages.filter(message => {
+        // Always exclude AGENT_SESSION messages - they are for UI only
+        if (message.entity === ChatMessageEntity.AGENT_SESSION) {
+          return false;
+        }
         if (message.entity === ChatMessageEntity.USER) {
           return true; // Always include user messages
         }
@@ -246,9 +249,12 @@ export class AgentRunner {
         return false; // Exclude other message types
       });
     } else {
-      // No filter specified: pass the entire message history
-      logger.info(`Passing full message history for handoff to ${targetAgentTool.name}.`);
-      handoffMessages = [...currentMessages];
+      // No filter specified: pass the entire message history (but still exclude AGENT_SESSION messages)
+      logger.info(`Passing filtered message history for handoff to ${targetAgentTool.name}.`);
+      handoffMessages = currentMessages.filter(message => {
+        // Always exclude AGENT_SESSION messages - they are for UI only
+        return message.entity !== ChatMessageEntity.AGENT_SESSION;
+      });
     }
 
     // Enhance the target agent's system prompt with page context
@@ -364,7 +370,58 @@ export class AgentRunner {
       iterationCount: 0
     };
     
-    this.currentSession = agentSession;
+    // Use local session variable instead of static
+    let currentSession = agentSession;
+    
+    // Emit session started event
+    if (this.eventBus) {
+      this.eventBus.emitProgress({
+        type: 'session_started',
+        sessionId: agentSession.sessionId,
+        parentSessionId: agentSession.parentSessionId,
+        agentName,
+        timestamp: new Date(),
+        data: { session: agentSession }
+      });
+    }
+    
+    // Create local function that captures the correct session
+    const addSessionMessage = (message: Partial<AgentMessage>): void => {
+      const fullMessage: AgentMessage = {
+        id: crypto.randomUUID(),
+        timestamp: new Date(),
+        ...message
+      } as AgentMessage;
+      
+      currentSession.messages.push(fullMessage);
+      
+      // Emit progress events based on message type
+      if (AgentRunner.eventBus && fullMessage.type === 'tool_call') {
+        AgentRunner.eventBus.emitProgress({
+          type: 'tool_started',
+          sessionId: currentSession.sessionId,
+          parentSessionId: currentSession.parentSessionId,
+          agentName: currentSession.agentName,
+          timestamp: new Date(),
+          data: { 
+            session: currentSession,
+            toolCall: fullMessage
+          }
+        });
+      } else if (AgentRunner.eventBus && fullMessage.type === 'tool_result') {
+        AgentRunner.eventBus.emitProgress({
+          type: 'tool_completed',
+          sessionId: currentSession.sessionId,
+          parentSessionId: currentSession.parentSessionId,
+          agentName: currentSession.agentName,
+          timestamp: new Date(),
+          data: {
+            session: currentSession,
+            toolResult: fullMessage
+          }
+        });
+      }
+    };
 
     let messages = [...initialMessages];
 
@@ -423,7 +480,7 @@ export class AgentRunner {
     // Capture initial reasoning from args if provided
     if (args.reasoning) {
       const reasoningText = Array.isArray(args.reasoning) ? args.reasoning.join(' ') : args.reasoning;
-      this.addSessionMessage({
+      addSessionMessage({
         type: 'reasoning',
         content: { 
           type: 'reasoning', 
@@ -436,8 +493,8 @@ export class AgentRunner {
 
     for (iteration = 0; iteration < maxIterations; iteration++) {
       // Update session iteration count
-      if (this.currentSession) {
-        this.currentSession.iterationCount = iteration + 1;
+      if (currentSession) {
+        currentSession.iterationCount = iteration + 1;
       }
       logger.info(`${agentName} Iteration ${iteration + 1}/${maxIterations}`);
 
@@ -671,7 +728,7 @@ export class AgentRunner {
           messages.push(newModelMessage);
           
           // Add tool call to current session
-          this.addSessionMessage({
+          addSessionMessage({
             type: 'tool_call',
             content: {
               type: 'tool_call',
@@ -692,7 +749,7 @@ export class AgentRunner {
             if (result.shouldContinue && result.errorMessage) {
               messages.push(result.errorMessage);
               if (result.sessionMessage) {
-                errorHandler.addSessionMessage(result.sessionMessage);
+                addSessionMessage(result.sessionMessage);
               }
               continue; // Continue to next iteration
             }
@@ -720,7 +777,7 @@ export class AgentRunner {
 
               // Add handoff message to current session
               const nestedSessionId = crypto.randomUUID();
-              this.addSessionMessage({
+              addSessionMessage({
                 type: 'handoff',
                 content: {
                   type: 'handoff',
@@ -740,7 +797,7 @@ export class AgentRunner {
                   apiKey, modelName, maxIterations, temperature ?? 0,
                   createSuccessResult, createErrorResult,
                   toolArgs as ConfigurableAgentArgs, // <= Pass LLM's toolArgs explicitly as llmToolArgs
-                  this.currentSession // Pass current session for natural nesting
+                  currentSession // Pass current session for natural nesting
               );
 
               // LLM tool handoff replaces the current agent's execution entirely
@@ -794,9 +851,53 @@ export class AgentRunner {
               }
             }
 
-             try {
+             // Special handling for agent-to-agent tool calls
+            if (toolToExecute instanceof ConfigurableAgentTool) {
+              // This is an agent being called as a tool!
+              
+              // Add placeholder for real-time UI
+              const childPlaceholder: AgentSession = {
+                sessionId: 'pending-' + toolCallId,
+                agentName: toolName,
+                parentSessionId: currentSession.sessionId,
+                status: 'running',
+                startTime: new Date(),
+                messages: [],
+                nestedSessions: [],
+                tools: []
+              };
+              currentSession.nestedSessions.push(childPlaceholder);
+              
+              // Emit child agent starting
+              if (AgentRunner.eventBus) {
+                AgentRunner.eventBus.emitProgress({
+                  type: 'child_agent_started',
+                  sessionId: currentSession.sessionId,
+                  parentSessionId: currentSession.parentSessionId,
+                  agentName: currentSession.agentName,
+                  timestamp: new Date(),
+                  data: {
+                    parentSession: currentSession,
+                    childAgentName: toolName,
+                    childSessionId: childPlaceholder.sessionId
+                  }
+                });
+              }
+            }
+
+            try {
               logger.info(`${agentName} Executing tool: ${toolToExecute.name} with args:`, toolArgs);
               toolResultData = await toolToExecute.execute(toolArgs as any);
+              
+              // If this was an agent tool, replace placeholder with actual session
+              if (toolToExecute instanceof ConfigurableAgentTool && toolResultData?.agentSession) {
+                const index = currentSession.nestedSessions.findIndex(
+                  s => s.sessionId === 'pending-' + toolCallId
+                );
+                if (index !== -1) {
+                  currentSession.nestedSessions[index] = toolResultData.agentSession;
+                }
+              }
               
               // Extract image data if present (before sanitization)
               if (typeof toolResultData === 'object' && toolResultData !== null) {
@@ -918,7 +1019,7 @@ export class AgentRunner {
           messages.push(toolResultMessage);
           
           // Add tool result to current session
-          this.addSessionMessage({
+          addSessionMessage({
             type: 'tool_result',
             content: {
               type: 'tool_result',
@@ -943,7 +1044,7 @@ export class AgentRunner {
           messages.push(newModelMessage);
           
           // Add final answer to current session
-          this.addSessionMessage({
+          addSessionMessage({
             type: 'final_answer',
             content: {
               type: 'final_answer',
@@ -1036,14 +1137,14 @@ export class AgentRunner {
                 apiKey, modelName, maxIterations, temperature ?? 0,
                 createSuccessResult, createErrorResult,
                 undefined, // No llmToolArgs for max iterations handoff
-                this.currentSession // Pass current session for natural nesting
+                currentSession // Pass current session for natural nesting
             );
             // Extract the result and session
             const { agentSession: childSession, ...actualResult } = handoffResult;
             
             // Add child session to current session's nested sessions (natural nesting)
-            if (this.currentSession) {
-              this.currentSession.nestedSessions.push(childSession);
+            if (currentSession) {
+              currentSession.nestedSessions.push(childSession);
             }
             
             // Complete current session and return result with session

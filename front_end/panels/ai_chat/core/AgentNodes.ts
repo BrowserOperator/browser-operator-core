@@ -324,7 +324,7 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
      */
     private convertChatMessagesToLLMMessages(messages: ChatMessage[]): LLMMessage[] {
       const llmMessages: LLMMessage[] = [];
-      
+      logger.info('Converting ChatMessages to LLMMessages. Messages:', messages);
       for (const msg of messages) {
         if (msg.entity === ChatMessageEntity.USER) {
           // User message
@@ -359,9 +359,14 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
         } else if (msg.entity === ChatMessageEntity.TOOL_RESULT) {
           // Tool result message
           if ('toolCallId' in msg && 'resultText' in msg) {
+            const toolResultData = msg.resultText || null; // Use resultText if available
+            if (typeof toolResultData === 'object' && toolResultData !== null) {
+              (toolResultData as Record<string, unknown>)['agentSession'] = undefined; // Sanitize to remove agentSession from ConfigurableAgentTool results
+            }
+
             llmMessages.push({
               role: 'tool',
-              content: String(msg.resultText),
+              content: String(toolResultData),
               tool_call_id: msg.toolCallId,
             });
           }
@@ -559,8 +564,9 @@ export function createToolExecutorNode(state: AgentState): Runnable<AgentState, 
         }
 
         // Special handling for ConfigurableAgentTool results
-        if (selectedTool instanceof ConfigurableAgentTool && result && typeof result === 'object' && 'output' in result) {
-          // For ConfigurableAgentTool, only send the output field to the LLM
+        if (selectedTool instanceof ConfigurableAgentTool && result && typeof result === 'object' && 
+            ('output' in result || 'error' in result || 'success' in result)) {
+          // For ConfigurableAgentTool, only send the output/error fields to the LLM, never intermediateSteps
           const agentResult = result as any; // Cast to any to access ConfigurableAgentResult properties
           resultText = agentResult.output || (agentResult.error ? `Error: ${agentResult.error}` : 'No output');
           console.log(`[AGENT SESSION] Filtered ConfigurableAgentTool result for LLM:`, {

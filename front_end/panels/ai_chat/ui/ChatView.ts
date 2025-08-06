@@ -16,6 +16,7 @@ import { createLogger } from '../core/Logger.js';
 import type { AgentSession, AgentMessage, ToolCallMessage as AgentToolCallMessage, ToolResultMessage as AgentToolResultMessage } from '../agent_framework/AgentSessionTypes.js';
 import { getAgentUIConfig } from '../agent_framework/AgentSessionTypes.js';
 import { VersionChecker, type VersionInfo } from '../core/VersionChecker.js';
+import { LiveAgentSessionComponent } from './LiveAgentSessionComponent.js';
 
 const logger = createLogger('ChatView');
 
@@ -286,6 +287,12 @@ export class ChatView extends HTMLElement {
   // Add state tracking for AI Assistant operations
   #aiAssistantStates = new Map<string, 'pending' | 'opened' | 'failed'>();
   #lastProcessedMessageKey: string | null = null;
+  
+  // Add live agent session tracking
+  #liveAgentSessions = new Map<string, {
+    component: LiveAgentSessionComponent,
+    parentSessionId?: string
+  }>();
 
   // Add model selector state for searchable dropdown
   #isModelDropdownOpen = false;
@@ -332,6 +339,60 @@ export class ChatView extends HTMLElement {
     this.#agentViewMode = mode;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
     this.#lastProcessedMessageKey = null;
+  }
+  
+  /**
+   * Handle real-time agent session started event
+   */
+  handleAgentSessionStarted(session: AgentSession): void {
+    // Create live component
+    const liveComponent = new LiveAgentSessionComponent();
+    liveComponent.setSession(session);
+    
+    // Store with parent info
+    this.#liveAgentSessions.set(session.sessionId, {
+      component: liveComponent,
+      parentSessionId: session.parentSessionId
+    });
+    
+    if (session.parentSessionId) {
+      // This is a nested agent - find parent and add as child
+      const parentEntry = this.#liveAgentSessions.get(session.parentSessionId);
+      if (parentEntry?.component) {
+        parentEntry.component.addChildSession(session.sessionId, liveComponent);
+      }
+    } else {
+      // Top-level session - add to messages
+      const liveMessage: ChatMessage = {
+        entity: ChatMessageEntity.MODEL,
+        action: 'live_session',
+        liveSessionId: session.sessionId,
+        timestamp: new Date()
+      } as any;
+      
+      this.#messages.push(liveMessage);
+      void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
+    }
+  }
+  
+  /**
+   * Handle real-time tool started event
+   */
+  handleAgentToolStarted(data: { session: AgentSession, toolCall: AgentMessage }): void {
+    const entry = this.#liveAgentSessions.get(data.session.sessionId);
+    if (entry?.component) {
+      entry.component.addToolCall(data.toolCall);
+    }
+  }
+  
+  /**
+   * Handle real-time tool completed event
+   */
+  handleAgentToolCompleted(data: { session: AgentSession, toolResult: AgentMessage }): void {
+    const entry = this.#liveAgentSessions.get(data.session.sessionId);
+    if (entry?.component) {
+      entry.component.updateToolResult(data.toolResult);
+    }
   }
 
   /**
@@ -775,6 +836,15 @@ export class ChatView extends HTMLElement {
           }
         case ChatMessageEntity.MODEL:
           {
+            // Handle live sessions as special case first
+            if ((message as any).action === 'live_session') {
+              const liveComponent = this.#liveAgentSessions.get((message as any).liveSessionId);
+              if (liveComponent?.component) {
+                return html`<div class="live-agent-container">${liveComponent.component}</div>`;
+              }
+              return html``;
+            }
+            
             // Cast to the potentially combined type
             const modelMessage = message as (ModelChatMessage & { resultText?: string, isError?: boolean, resultError?: string, combined?: boolean });
 

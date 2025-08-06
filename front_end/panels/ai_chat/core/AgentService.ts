@@ -20,6 +20,9 @@ import type {CompiledGraph} from './Types.js';
 import { LLMClient } from '../LLM/LLMClient.js';
 import { createTracingProvider, getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { TracingProvider, TracingContext } from '../tracing/TracingProvider.js';
+import { AgentRunnerEventBus } from '../agent_framework/AgentRunnerEventBus.js';
+import { AgentRunner } from '../agent_framework/AgentRunner.js';
+import type { AgentSession, AgentMessage } from '../agent_framework/AgentSessionTypes.js';
 
 const logger = createLogger('AgentService');
 
@@ -28,6 +31,11 @@ const logger = createLogger('AgentService');
  */
 export enum Events {
   MESSAGES_CHANGED = 'messages-changed',
+  AGENT_SESSION_STARTED = 'agent-session-started',
+  AGENT_TOOL_STARTED = 'agent-tool-started',
+  AGENT_TOOL_COMPLETED = 'agent-tool-completed',
+  AGENT_SESSION_UPDATED = 'agent-session-updated',
+  CHILD_AGENT_STARTED = 'child-agent-started',
 }
 
 /**
@@ -35,6 +43,11 @@ export enum Events {
  */
 export class AgentService extends Common.ObjectWrapper.ObjectWrapper<{
   [Events.MESSAGES_CHANGED]: ChatMessage[],
+  [Events.AGENT_SESSION_STARTED]: AgentSession,
+  [Events.AGENT_TOOL_STARTED]: { session: AgentSession, toolCall: AgentMessage },
+  [Events.AGENT_TOOL_COMPLETED]: { session: AgentSession, toolResult: AgentMessage },
+  [Events.AGENT_SESSION_UPDATED]: AgentSession,
+  [Events.CHILD_AGENT_STARTED]: { parentSession: AgentSession, childAgentName: string, childSessionId: string },
 }> {
   static instance: AgentService;
 
@@ -45,6 +58,7 @@ export class AgentService extends Common.ObjectWrapper.ObjectWrapper<{
   #runningGraphStatePromise?: AsyncGenerator<AgentState, AgentState, void>;
   #tracingProvider!: TracingProvider;
   #sessionId: string;
+  #activeAgentSessions = new Map<string, AgentSession>();
 
   constructor() {
     super();
@@ -61,6 +75,12 @@ export class AgentService extends Common.ObjectWrapper.ObjectWrapper<{
       answer: i18nString(UIStrings.welcomeMessage),
       isFinalAnswer: true,
     });
+    
+    // Initialize AgentRunner event system
+    AgentRunner.initializeEventBus();
+    
+    // Subscribe to AgentRunner events
+    AgentRunnerEventBus.getInstance().addEventListener('agent-progress', this.#handleAgentProgress.bind(this));
   }
 
   /**
@@ -595,6 +615,54 @@ export class AgentService extends Common.ObjectWrapper.ObjectWrapper<{
       logger.error('Error checking if API key is required:', error);
       // Default to requiring API key in case of errors
       return true;
+    }
+  }
+  
+  /**
+   * Handle progress events from AgentRunner
+   */
+  #handleAgentProgress(event: Common.EventTarget.EventTargetEvent<import('../agent_framework/AgentRunnerEventBus.js').AgentRunnerProgressEvent>): void {
+    const progressEvent = event.data;
+    
+    switch (progressEvent.type) {
+      case 'session_started':
+        this.#activeAgentSessions.set(progressEvent.sessionId, progressEvent.data.session);
+        this.dispatchEventToListeners(Events.AGENT_SESSION_STARTED, progressEvent.data.session);
+        break;
+      case 'tool_started':
+        this.dispatchEventToListeners(Events.AGENT_TOOL_STARTED, progressEvent.data);
+        break;
+      case 'tool_completed':
+        this.dispatchEventToListeners(Events.AGENT_TOOL_COMPLETED, progressEvent.data);
+        // Update session state
+        const session = this.#activeAgentSessions.get(progressEvent.sessionId);
+        if (session) {
+          this.dispatchEventToListeners(Events.AGENT_SESSION_UPDATED, session);
+        }
+        break;
+      case 'child_agent_started':
+        this.dispatchEventToListeners(Events.CHILD_AGENT_STARTED, progressEvent.data);
+        break;
+    }
+  }
+  
+  /**
+   * Get active agent sessions
+   */
+  getActiveAgentSessions(): AgentSession[] {
+    return Array.from(this.#activeAgentSessions.values());
+  }
+  
+  /**
+   * Clean up completed session
+   */
+  #cleanupCompletedSession(sessionId: string): void {
+    const session = this.#activeAgentSessions.get(sessionId);
+    if (session && (session.status === 'completed' || session.status === 'error')) {
+      // Keep for a short time for UI to finish rendering
+      setTimeout(() => {
+        this.#activeAgentSessions.delete(sessionId);
+      }, 5000);
     }
   }
 }
