@@ -318,6 +318,34 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
       this.callCount = 0;
     }
 
+    /**
+     * Sanitizes tool result data for text representation by removing fields
+     * that shouldn't be sent to the LLM (imageData, success, etc.)
+     */
+    private sanitizeToolResultForText(toolResultData: any): any {
+      if (typeof toolResultData !== 'object' || toolResultData === null) {
+        return toolResultData;
+      }
+
+      // Create a shallow copy
+      const sanitized = { ...toolResultData };
+
+      // Remove fields that shouldn't be sent to LLM
+      const fieldsToRemove = [
+        'imageData',    // Prevents token waste from base64 strings
+        'success',      // LLM should infer success from error presence
+        'dataUrl',      // Legacy image field if any
+        'agentSession', // Avoid sending session data to LLM
+      ];
+
+      fieldsToRemove.forEach(field => {
+        if (sanitized.hasOwnProperty(field)) {
+          delete sanitized[field];
+        }
+      });
+
+      return sanitized;
+    }
 
     /**
      * Convert ChatMessage[] to LLMMessage[]
@@ -359,9 +387,27 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
         } else if (msg.entity === ChatMessageEntity.TOOL_RESULT) {
           // Tool result message
           if ('toolCallId' in msg && 'resultText' in msg) {
+            let content = msg.resultText;
+            
+            // Try to parse and sanitize if it's JSON (structured tool result)
+            if (typeof msg.resultText === 'string') {
+              try {
+                const parsed = JSON.parse(msg.resultText);
+                const sanitized = this.sanitizeToolResultForText(parsed);
+                content = JSON.stringify(sanitized);
+              } catch {
+                // Not JSON, use as-is (simple string tool result)
+                content = msg.resultText;
+              }
+            } else if (typeof msg.resultText === 'object' && msg.resultText !== null) {
+              // Already an object, sanitize directly
+              const sanitized = this.sanitizeToolResultForText(msg.resultText);
+              content = JSON.stringify(sanitized);
+            }
+            
             llmMessages.push({
               role: 'tool',
-              content: String(msg.resultText),
+              content: String(content),
               tool_call_id: msg.toolCallId,
             });
           }

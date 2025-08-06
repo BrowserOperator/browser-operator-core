@@ -479,7 +479,8 @@ Only output the JSON object with real data from the accessibility tree.`;
           { role: 'user', content: extractionPrompt }
         ],
         systemPrompt: systemPrompt,
-        temperature: 0.1
+        temperature: 0.1,
+        retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
       });
       const response = llmResponse.text;
       if (!response) { throw new Error('No text response from extraction LLM'); }
@@ -547,7 +548,8 @@ Do not add any conversational text or explanations or thinking tags.`;
           { role: 'user', content: refinePrompt }
         ],
         systemPrompt: systemPrompt,
-        temperature: 0.1
+        temperature: 0.1,
+        retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
       });
       const response = llmResponse.text;
       if (!response) { throw new Error('No text response from refinement LLM'); }
@@ -643,7 +645,8 @@ Return ONLY a valid JSON object conforming to the required metadata schema.`;
           { role: 'user', content: metadataPrompt }
         ],
         systemPrompt: systemPrompt,
-        temperature: 0.0 // Use low temp for objective assessment
+        temperature: 0.0, // Use low temp for objective assessment
+        retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
       });
       const response = llmResponse.text;
       if (!response) { throw new Error('No text response from metadata LLM'); }

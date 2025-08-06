@@ -73,8 +73,14 @@ export class SequentialThinkingTool implements Tool<SequentialThinkingArgs, Sequ
     try {
       logger.info('Sequential thinking initiated', { userRequest: args.userRequest });
 
-      // 1. Capture current visual state
-      const visualContext = await this.captureVisualContext();
+      // Check if current model supports vision
+      const currentModel = AIChatPanel.instance().getSelectedModel();
+      const isVisionCapable = await AIChatPanel.isVisionCapable(currentModel);
+      
+      logger.info(`Model ${currentModel} vision capable: ${isVisionCapable}`);
+
+      // 1. Capture current visual state (screenshot only if vision capable)
+      const visualContext = await this.captureVisualContext(isVisionCapable);
       if ('error' in visualContext) {
         return { error: `Failed to capture visual context: ${visualContext.error}` };
       }
@@ -87,8 +93,8 @@ export class SequentialThinkingTool implements Tool<SequentialThinkingArgs, Sequ
         args.context
       );
 
-      // 3. Get LLM analysis with visual grounding
-      const analysis = await this.getGroundedAnalysis(prompt);
+      // 3. Get LLM analysis with visual grounding (or text-only)
+      const analysis = await this.getGroundedAnalysis(prompt, isVisionCapable);
       if ('error' in analysis) {
         return { error: `Failed to analyze: ${analysis.error}` };
       }
@@ -100,12 +106,19 @@ export class SequentialThinkingTool implements Tool<SequentialThinkingArgs, Sequ
     }
   }
 
-  private async captureVisualContext(): Promise<{ screenshot: string; tree: string; url: string; title: string } | { error: string }> {
+  private async captureVisualContext(includeScreenshot: boolean = true): Promise<{ screenshot: string; tree: string; url: string; title: string } | { error: string }> {
     try {
-      // Take screenshot
-      const screenshotResult = await this.screenshotTool.execute({ fullPage: false });
-      if ('error' in screenshotResult) {
-        return { error: `Screenshot failed: ${screenshotResult.error}` };
+      // Take screenshot only if vision is supported
+      let screenshot = '';
+      if (includeScreenshot) {
+        const screenshotResult = await this.screenshotTool.execute({ fullPage: false });
+        if ('error' in screenshotResult) {
+          return { error: `Screenshot failed: ${screenshotResult.error}` };
+        }
+        screenshot = screenshotResult.imageData || '';
+      } else {
+        logger.info('Skipping screenshot capture - model does not support vision');
+        screenshot = 'no-screenshot-available';
       }
 
       // Get accessibility tree
@@ -128,7 +141,7 @@ export class SequentialThinkingTool implements Tool<SequentialThinkingArgs, Sequ
       const title = titleResult.result?.value || 'Untitled';
 
       return {
-        screenshot: screenshotResult.imageData || '',
+        screenshot: screenshot,
         tree: treeResult.simplified,
         url,
         title
@@ -206,23 +219,23 @@ Based on the screenshot and current state, create a grounded sequential plan for
     };
   }
 
-  private async getGroundedAnalysis(prompt: { systemPrompt: string; userPrompt: string; images: Array<{ type: string; data: string }> }): Promise<SequentialThinkingResult | { error: string }> {
+  private async getGroundedAnalysis(prompt: { systemPrompt: string; userPrompt: string; images: Array<{ type: string; data: string }> }, isVisionCapable: boolean = true): Promise<SequentialThinkingResult | { error: string }> {
     try {
       // Get the selected model and its provider
       const model = AIChatPanel.instance().getSelectedModel();
       const provider = AIChatPanel.getProviderForModel(model);
       const llm = LLMClient.getInstance();
 
-      // Prepare multimodal message
+      // Prepare message based on vision capability
       const messages = [{
         role: 'user' as const,
-        content: [
+        content: isVisionCapable ? [
           { type: 'text' as const, text: prompt.userPrompt },
-          ...prompt.images.map(img => ({
+          ...prompt.images.filter(img => img.data !== 'no-screenshot-available').map(img => ({
             type: 'image_url' as const,
             image_url: { url: img.data }
           }))
-        ]
+        ] : prompt.userPrompt // Text-only for non-vision models
       }];
 
       const response = await llm.call({
@@ -230,7 +243,8 @@ Based on the screenshot and current state, create a grounded sequential plan for
         model,
         messages,
         systemPrompt: prompt.systemPrompt,
-        temperature: 0.2
+        temperature: 0.2,
+        retryConfig: { maxRetries: 3 }
       });
 
       if (!response.text) {

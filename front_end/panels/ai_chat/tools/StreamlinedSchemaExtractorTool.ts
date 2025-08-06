@@ -248,7 +248,8 @@ IMPORTANT: Only extract data that you can see in the accessibility tree above. D
             { role: 'user', content: extractionPrompt }
           ],
           systemPrompt: systemPrompt,
-          temperature: 0.1
+          temperature: 0.1,
+          retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
         });
         const result = llmResponse.text;
         
@@ -374,7 +375,8 @@ CRITICAL: Only use nodeIds that you can actually see in the accessibility tree a
           { role: 'user', content: extractionPrompt }
         ],
         systemPrompt: systemPrompt,
-        temperature: 0.1
+        temperature: 0.1,
+        retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
       });
       const result = llmResponse.text;
       

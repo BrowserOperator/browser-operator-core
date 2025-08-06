@@ -2041,12 +2041,74 @@ export class PerformActionTool implements Tool<{ method: string, nodeId: number 
 
       // Visual verification using before/after screenshots and LLM
       let visualCheck: string | undefined;
-      try {
-        // Add some delay to allow UI to refresh
-        await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Check if current model supports vision
+      const currentModel = AIChatPanel.instance().getSelectedModel();
+      const isVisionCapable = await AIChatPanel.isVisionCapable(currentModel);
+      
+      if (!isVisionCapable) {
+        logger.info(`Model ${currentModel} does not support vision - using DOM-based verification`);
         
-        // Take after screenshot
-        const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
+        // DOM-based verification for non-vision models
+        try {
+          // Get current (after action) content
+          let afterContent = '';
+          try {
+            const afterTreeResult = await Utils.getAccessibilityTree(target);
+            afterContent = afterTreeResult.simplified;
+          } catch (error) {
+            logger.warn('Failed to get after content for DOM verification:', error);
+            afterContent = 'Unable to retrieve page content';
+          }
+          
+          // Use LLM to analyze DOM changes
+          const llmClient = LLMClient.getInstance();
+          const { model, provider } = AIChatPanel.getNanoModelWithProvider();
+          const response = await llmClient.call({
+            provider,
+            model,
+            systemPrompt: 'You are a DOM verification assistant. Analyze page content to determine if actions succeeded.',
+            messages: [
+              {
+                role: 'user',
+                content: `Analyze the page content to determine if this ${method} action succeeded.
+
+ACTION DETAILS:
+- Method: ${method}
+- Target Element XPath: ${xpath}
+- Node ID: ${nodeId}
+- Arguments: ${JSON.stringify(actionArgsArray)}
+- Reasoning: ${reasoning}
+${verificationMessage ? `- Verification status: ${verificationMessage}` : ''}
+
+CURRENT PAGE CONTENT (after action):
+${afterContent}
+
+Based on the page content and action details, please describe:
+- What changes occurred in the page content
+- Whether the action appears to have succeeded
+- Any error messages or unexpected behavior
+- Your overall assessment of the action's success
+
+Provide a clear, concise response about what happened.`
+              }
+            ],
+            temperature: 0
+          });
+          
+          visualCheck = response.text || 'No DOM verification response';
+          logger.info('DOM-based verification result:', visualCheck);
+        } catch (error) {
+          logger.warn('DOM-based verification failed:', error);
+          visualCheck = 'Unable to perform DOM-based verification';
+        }
+      } else {
+        try {
+          // Add some delay to allow UI to refresh
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Take after screenshot
+          const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
           format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
           captureBeyondViewport: false
         });
@@ -2184,9 +2246,10 @@ Provide a clear, descriptive response about what you observe and whether the act
         } else {
           logger.error('Screenshot data is empty or undefined');
         }
-      } catch (error) {
-        logger.warn('Visual verification failed:', error);
-        // Don't fail the action, just log the issue
+        } catch (error) {
+          logger.warn('Visual verification failed:', error);
+          // Don't fail the action, just log the issue
+        }
       }
 
       // Get after-action screenshot data for returning to main LLM
@@ -2204,7 +2267,6 @@ Provide a clear, descriptive response about what you observe and whether the act
       }
 
       return {
-        imageData: afterActionImageData,
         xpath,
         pageChange: treeDiff ? {
           hasChanges: treeDiff.hasChanges,
@@ -2843,7 +2905,8 @@ Important guidelines:
               parameters: performActionTool.schema
             }
           }],
-          temperature: 0.4
+          temperature: 0.4,
+          retryConfig: { maxRetries: 3, baseDelayMs: 2000 }
         });
         
         // Convert LLMResponse to expected format
@@ -3763,7 +3826,8 @@ Extract NodeIDs according to the provided objective and schema, then return a st
             { role: 'user', content: promptExtractData }
           ],
           systemPrompt: this.getSystemPrompt(),
-          temperature: 0.7
+          temperature: 0.7,
+          retryConfig: { maxRetries: 3, baseDelayMs: 1000 }
         });
         const response = llmResponse.text;
         logger.info('SchemaBasedDataExtractionTool: Response:', response);
