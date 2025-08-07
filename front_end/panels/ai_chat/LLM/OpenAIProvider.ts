@@ -54,6 +54,10 @@ export class OpenAIProvider extends LLMBaseProvider {
     if (modelName.startsWith('o')) {
       return ModelFamily.O;
     }
+    // GPT-5 models also don't support temperature parameter, treat them like O-series
+    if (modelName.includes('gpt-5')) {
+      return ModelFamily.O; // Treat GPT-5 like O-series for parameter compatibility
+    }
     // Otherwise, assume it's a GPT model (gpt-3.5-turbo, gpt-4, etc.)
     return ModelFamily.GPT;
   }
@@ -417,7 +421,7 @@ export class OpenAIProvider extends LLMBaseProvider {
     // Return hardcoded OpenAI models with their capabilities
     return [
       {
-        id: 'gpt-4.1-2025-04-14',
+        id: 'gpt-5-2025-04-14',
         name: 'GPT-4.1',
         provider: 'openai',
         capabilities: {
@@ -428,7 +432,7 @@ export class OpenAIProvider extends LLMBaseProvider {
         }
       },
       {
-        id: 'gpt-4.1-mini-2025-04-14',
+        id: 'gpt-5-mini-2025-04-14',
         name: 'GPT-4.1 Mini',
         provider: 'openai',
         capabilities: {
@@ -439,7 +443,7 @@ export class OpenAIProvider extends LLMBaseProvider {
         }
       },
       {
-        id: 'gpt-4.1-nano-2025-04-14',
+        id: 'gpt-5-nano-2025-04-14',
         name: 'GPT-4.1 Nano',
         provider: 'openai',
         capabilities: {
@@ -468,6 +472,39 @@ export class OpenAIProvider extends LLMBaseProvider {
           functionCalling: true,
           reasoning: true,
           vision: false,
+          structured: true
+        }
+      },
+      {
+        id: 'gpt-5-2025-08-07',
+        name: 'GPT-5',
+        provider: 'openai',
+        capabilities: {
+          functionCalling: true,
+          reasoning: true,
+          vision: true,
+          structured: true
+        }
+      },
+      {
+        id: 'gpt-5-mini-2025-08-07',
+        name: 'GPT-5 Mini',
+        provider: 'openai',
+        capabilities: {
+          functionCalling: true,
+          reasoning: true,
+          vision: true,
+          structured: true
+        }
+      },
+      {
+        id: 'gpt-5-nano-2025-08-07',
+        name: 'GPT-5 Nano',
+        provider: 'openai',
+        capabilities: {
+          functionCalling: true,
+          reasoning: true,
+          vision: true,
           structured: true
         }
       }
