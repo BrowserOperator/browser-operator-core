@@ -421,7 +421,7 @@ export class OpenAIProvider extends LLMBaseProvider {
     // Return hardcoded OpenAI models with their capabilities
     return [
       {
-        id: 'gpt-4-2025-04-14',
+        id: 'gpt-4.1-2025-04-14',
         name: 'GPT-4.1',
         provider: 'openai',
         capabilities: {
