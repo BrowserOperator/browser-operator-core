@@ -812,7 +812,7 @@ export const productReviewScrollTest: TestCase<WebTaskAgentArgs> = {
   id: 'web-task-agent-scroll-002',
   name: 'Product Review Scrolling',
   description: 'Test scrolling to load more product reviews on e-commerce sites',
-  url: 'https://www.amazon.com/dp/B08N5WRWNW',  // Echo Dot product page
+  url: 'https://www.amazon.com/Amazon-vibrant-helpful-routines-Charcoal/dp/B09B8V1LZ3/',  // Echo Dot product page
   tool: 'web_task_agent',
   input: {
     task: 'Scroll down to the reviews section and load more reviews by scrolling, then extract review details',

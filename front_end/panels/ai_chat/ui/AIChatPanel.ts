@@ -366,6 +366,14 @@ export class AIChatPanel extends UI.Panel.Panel {
   }
 
   /**
+   * Gets the currently selected provider from localStorage
+   * @returns The currently selected provider
+   */
+  static getCurrentProvider(): 'openai' | 'litellm' | 'groq' | 'openrouter' {
+    return (localStorage.getItem(PROVIDER_SELECTION_KEY) || 'openai') as 'openai' | 'litellm' | 'groq' | 'openrouter';
+  }
+
+  /**
    * Checks if a model supports vision/multimodal capabilities
    * @param modelName The model name to check
    * @returns True if the model supports vision, false otherwise

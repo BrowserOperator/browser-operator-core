@@ -26,6 +26,8 @@ export interface OpenRouterModel {
     modality: string;
     tokenizer: string;
     instruct_type?: string;
+    input_modalities?: string[];
+    output_modalities?: string[];
   };
   top_provider: {
     context_length: number;
@@ -83,10 +85,11 @@ export class OpenRouterProvider extends LLMBaseProvider {
   }
 
   /**
-   * Get the models endpoint URL with vision support filter
+   * Get the models endpoint URL with tool support filter
+   * We'll filter for vision capabilities client-side since OpenRouter uses union logic
    */
   private getVisionModelsEndpoint(): string {
-    return `${OpenRouterProvider.API_BASE_URL}${OpenRouterProvider.MODELS_PATH}?input_modalities=image&supported_parameters=tools`;
+    return `${OpenRouterProvider.API_BASE_URL}${OpenRouterProvider.MODELS_PATH}?supported_parameters=tools`;
   }
 
   /**
@@ -445,9 +448,24 @@ export class OpenRouterProvider extends LLMBaseProvider {
       try {
         logger.debug('Refreshing vision models cache from API...');
         const visionModels = await this.fetchVisionModels();
-        this.visionModelsCache = new Set(visionModels.map(m => m.id));
+        
+        // Filter models client-side to ensure they actually support image input
+        // OpenRouter's API uses union logic, so we need to validate each model
+        const actualVisionModels = visionModels.filter(model => {
+          // Check if model actually supports image input in its architecture
+          const hasImageInput = model.architecture?.input_modalities?.includes('image');
+          
+          if (!hasImageInput) {
+            logger.debug(`Filtering out non-vision model: ${model.id} (input_modalities: ${JSON.stringify(model.architecture?.input_modalities)})`);
+            return false;
+          }
+          
+          return true;
+        });
+        
+        this.visionModelsCache = new Set(actualVisionModels.map(m => m.id));
         this.visionModelsCacheExpiry = now + OpenRouterProvider.CACHE_DURATION_MS;
-        logger.info(`Cached ${this.visionModelsCache.size} vision models`);
+        logger.info(`Cached ${this.visionModelsCache.size} actual vision models (filtered from ${visionModels.length} returned by API)`);
       } catch (error) {
         logger.warn('Failed to fetch vision models, using fallback detection:', error);
         // Fallback to keyword-based detection

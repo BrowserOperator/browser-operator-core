@@ -352,7 +352,9 @@ Remember: You gather data, content_writer_agent writes the report. Always hand o
       // For the action agent, we use the objective as the primary input, not the query field
       return [{
         entity: ChatMessageEntity.USER,
-        text: `Task: ${args.query}\n
+        text: `Task: ${args.query? `${args.query}` : ''} 
+        ${args.task? `${args.task}` : ''} 
+        ${args.objective? `${args.objective}` : ''} 
 ${args.context ? `Context: ${args.context}` : ''}
 ${args.scope ? `The scope of research expected: ${args.scope}` : ''}
 `,
@@ -1119,6 +1121,9 @@ You automatically receive rich context with each iteration:
 - Before major decisions (navigation, form submission)
 - When the page changes significantly
 
+**SKIP thinking tool when:**
+- On Chrome internal pages (chrome://*) - immediately navigate to a real website instead
+
 **Thinking provides:**
 - Visual confirmation of current state
 - High-level list of things to consider or work on
@@ -1162,6 +1167,7 @@ You automatically receive rich context with each iteration:
 - **Content Blocking**: Geo-restrictions, bot detection, CAPTCHA challenges
 - **Technical Issues**: 5xx errors, network timeouts, JavaScript errors
 - **Layout Issues**: Overlays, modals, cookie banners blocking content
+- **Chrome Internal Pages**: action_agent cannot interact with any Chrome internal pages (chrome://*) including new tab, settings, extensions, etc. - navigate to a real website first
 
 **IMPLEMENT RECOVERY STRATEGIES**:
 - **Rate Limits**: Use wait_for_page_load with exponential backoff (2s, 4s, 8s, 16s), then retry
@@ -1169,6 +1175,7 @@ You automatically receive rich context with each iteration:
 - **Authentication**: Attempt to identify login requirements and notify user
 - **Overlays**: Advanced blocking element detection and removal via action_agent
 - **Network Issues**: Retry with different strategies or connection attempts
+- **Chrome Internal Pages**: If detected (URL starts with chrome://), immediately navigate to a real website using navigate_url
 
 ### 4. State & Context Management
 **PRESERVE CRITICAL STATE**:
@@ -1299,7 +1306,9 @@ Remember: **Plan adaptively, execute systematically, validate continuously, and 
     prepareMessages: (args: ConfigurableAgentArgs): ChatMessage[] => {
       return [{
         entity: ChatMessageEntity.USER,
-        text: `Task: ${args.task}
+        text: `Task: ${args.query? `${args.query}` : ''} 
+        ${args.task? `${args.task}` : ''} 
+        ${args.objective? `${args.objective}` : ''} 
 ${args.extraction_schema ? `\nExtraction Schema: ${JSON.stringify(args.extraction_schema)}` : ''}
 
 Execute this web task autonomously`,
