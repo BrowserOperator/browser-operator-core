@@ -1564,7 +1564,7 @@ export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, Screenshot
         type: 'boolean',
         description: 'Whether to capture the entire page or just the viewport (default: false)',
       },
-      reasioning: {
+      reasoning: {
         type: 'string',
         description: 'Optional reasoning for taking the screenshot (e.g., "for visual analysis", "to capture layout")'
       }
