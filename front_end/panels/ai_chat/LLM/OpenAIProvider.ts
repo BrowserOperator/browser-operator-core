@@ -421,7 +421,7 @@ export class OpenAIProvider extends LLMBaseProvider {
     // Return hardcoded OpenAI models with their capabilities
     return [
       {
-        id: 'gpt-5-2025-04-14',
+        id: 'gpt-4-2025-04-14',
         name: 'GPT-4.1',
         provider: 'openai',
         capabilities: {
@@ -432,7 +432,7 @@ export class OpenAIProvider extends LLMBaseProvider {
         }
       },
       {
-        id: 'gpt-5-mini-2025-04-14',
+        id: 'gpt-4.1-mini-2025-04-14',
         name: 'GPT-4.1 Mini',
         provider: 'openai',
         capabilities: {
@@ -443,7 +443,7 @@ export class OpenAIProvider extends LLMBaseProvider {
         }
       },
       {
-        id: 'gpt-5-nano-2025-04-14',
+        id: 'gpt-4.1-nano-2025-04-14',
         name: 'GPT-4.1 Nano',
         provider: 'openai',
         capabilities: {
