@@ -13,6 +13,7 @@ import { createSystemPromptAsync, getAgentToolsFromState } from './GraphHelpers.
 import { createLogger } from './Logger.js';
 import type { AgentState } from './State.js';
 import type { Runnable } from './Types.js';
+import { AgentErrorHandler } from './AgentErrorHandler.js';
 import { createTracingProvider, withTracingContext } from '../tracing/TracingConfig.js';
 import type { TracingProvider } from '../tracing/TracingProvider.js';
 
@@ -151,25 +152,56 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
         // Convert ChatMessage[] to LLMMessage[]
         const llmMessages = this.convertChatMessagesToLLMMessages(state.messages);
         
-        // Call LLM with the new API
-        const response = await llm.call({
-          provider,
-          model: this.modelName,
-          messages: llmMessages,
-          systemPrompt,
-          tools: tools.map(tool => ({
-            type: 'function',
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.schema,
-            }
-          })),
-          temperature: this.temperature,
+        // Create error handler for retry logic
+        const errorHandler = AgentErrorHandler.createErrorHandler({
+          continueOnError: true,
+          agentName: `AgentNode-${this.modelName}`,
+          availableTools: tools.map(t => t.name)
         });
-
-        // Parse the response
-        const parsedAction = llm.parseResponse(response);
+        
+        // Execute LLM call with retry logic
+        const retryResult = await errorHandler.executeWithRetry(
+          async () => {
+            // Call LLM
+            const response = await llm.call({
+              provider,
+              model: this.modelName,
+              messages: llmMessages,
+              systemPrompt,
+              tools: tools.map(tool => ({
+                type: 'function',
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.schema,
+                }
+              })),
+              temperature: this.temperature,
+            });
+            
+            // Parse the response
+            const parsed = llm.parseResponse(response);
+            
+            // Return both response and parsed action
+            return { response, parsedAction: parsed };
+          },
+          // Validation function - check if parsing was successful
+          (result) => result.parsedAction.type !== 'error',
+          // Retry configuration
+          {
+            maxRetries: 5,
+            baseDelayMs: 1000,
+            maxDelayMs: 5000,
+            backoffMultiplier: 2
+          }
+        );
+        
+        // Handle retry result
+        if (!retryResult.success) {
+          throw new Error(`Failed after ${retryResult.attemptsMade} attempts: ${retryResult.error}`);
+        }
+        
+        const { response, parsedAction } = retryResult.result!;
 
         // Update generation observation with output
         if (generationId && tracingContext?.traceId) {
@@ -286,6 +318,34 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
       this.callCount = 0;
     }
 
+    /**
+     * Sanitizes tool result data for text representation by removing fields
+     * that shouldn't be sent to the LLM (imageData, success, etc.)
+     */
+    private sanitizeToolResultForText(toolResultData: any): any {
+      if (typeof toolResultData !== 'object' || toolResultData === null) {
+        return toolResultData;
+      }
+
+      // Create a shallow copy
+      const sanitized = { ...toolResultData };
+
+      // Remove fields that shouldn't be sent to LLM
+      const fieldsToRemove = [
+        'imageData',    // Prevents token waste from base64 strings
+        'success',      // LLM should infer success from error presence
+        'dataUrl',      // Legacy image field if any
+        'agentSession', // Avoid sending session data to LLM
+      ];
+
+      fieldsToRemove.forEach(field => {
+        if (sanitized.hasOwnProperty(field)) {
+          delete sanitized[field];
+        }
+      });
+
+      return sanitized;
+    }
 
     /**
      * Convert ChatMessage[] to LLMMessage[]
@@ -327,9 +387,27 @@ export function createAgentNode(modelName: string, temperature: number): Runnabl
         } else if (msg.entity === ChatMessageEntity.TOOL_RESULT) {
           // Tool result message
           if ('toolCallId' in msg && 'resultText' in msg) {
+            let content = msg.resultText;
+            
+            // Try to parse and sanitize if it's JSON (structured tool result)
+            if (typeof msg.resultText === 'string') {
+              try {
+                const parsed = JSON.parse(msg.resultText);
+                const sanitized = this.sanitizeToolResultForText(parsed);
+                content = JSON.stringify(sanitized);
+              } catch {
+                // Not JSON, use as-is (simple string tool result)
+                content = msg.resultText;
+              }
+            } else if (typeof msg.resultText === 'object' && msg.resultText !== null) {
+              // Already an object, sanitize directly
+              const sanitized = this.sanitizeToolResultForText(msg.resultText);
+              content = JSON.stringify(sanitized);
+            }
+            
             llmMessages.push({
               role: 'tool',
-              content: String(msg.resultText),
+              content: String(content),
               tool_call_id: msg.toolCallId,
             });
           }
@@ -477,7 +555,37 @@ export function createToolExecutorNode(state: AgentState): Runnable<AgentState, 
 
         // Check if result contains agentSession (ConfigurableAgentTool result)
         if (selectedTool instanceof ConfigurableAgentTool && result && typeof result === 'object' && 'agentSession' in result) {
-          console.log(`[AGENT SESSION] Captured agent session from ${toolName}:`, result.agentSession);
+          const agentSession = result.agentSession as any;
+          console.log(`[AGENT SESSION] Captured agent session from ${toolName}:`, agentSession);
+          
+          // Log detailed session information
+          console.log(`[AGENT SESSION] Session Details:`, {
+            sessionId: agentSession.sessionId,
+            agentName: agentSession.agentName,
+            status: agentSession.status,
+            messageCount: agentSession.messages?.length || 0,
+            messages: agentSession.messages,
+            nestedSessionCount: agentSession.nestedSessions?.length || 0,
+            nestedSessions: agentSession.nestedSessions,
+            tools: agentSession.tools,
+            iterationCount: agentSession.iterationCount,
+            maxIterations: agentSession.maxIterations,
+            terminationReason: agentSession.terminationReason
+          });
+          
+          // Log tool calls specifically
+          if (agentSession.messages) {
+            const toolCalls = agentSession.messages.filter((msg: any) => msg.type === 'tool_call');
+            const toolResults = agentSession.messages.filter((msg: any) => msg.type === 'tool_result');
+            console.log(`[AGENT SESSION] Tool Analysis:`, {
+              totalMessages: agentSession.messages.length,
+              toolCallCount: toolCalls.length,
+              toolResultCount: toolResults.length,
+              toolCalls: toolCalls,
+              toolResults: toolResults,
+              messageTypes: agentSession.messages.map((msg: any) => ({ type: msg.type, id: msg.id }))
+            });
+          }
           
           // Create AgentSessionMessage for UI rendering
           const agentSessionMessage: AgentSessionMessage = {

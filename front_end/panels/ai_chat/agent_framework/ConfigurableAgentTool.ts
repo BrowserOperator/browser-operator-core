@@ -260,6 +260,21 @@ export interface ConfigurableAgentResult {
    * Termination reason for the agent run
    */
   terminationReason: AgentRunTerminationReason;
+
+  /**
+   * Structured summary of agent execution
+   */
+  summary?: {
+    /**
+     * Type of completion
+     */
+    type: 'completion' | 'error' | 'timeout';
+    
+    /**
+     * Formatted summary text
+     */
+    content: string;
+  };
 }
 
 /**

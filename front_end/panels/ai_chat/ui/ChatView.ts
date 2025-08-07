@@ -178,6 +178,10 @@ export interface ToolResultMessage extends BaseChatMessage {
     toolCallId?: string;
     // Mark if this is from a ConfigurableAgentTool
     isFromConfigurableAgent?: boolean;
+    // Base64 image data URL for multimodal LLM responses
+    imageData?: string;
+    // Optional summary for agent tool completions
+    summary?: string;
 }
 
 // Represents an agent session execution

@@ -11,6 +11,7 @@ import { ChatMessageEntity, type ChatMessage, type ModelChatMessage, type ToolRe
 import { createLogger } from '../core/Logger.js';
 import { createTracingProvider, getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { AgentSession, AgentMessage } from './AgentSessionTypes.js';
+import { AgentErrorHandler } from '../core/AgentErrorHandler.js';
 
 const logger = createLogger('AgentRunner');
 
@@ -46,7 +47,7 @@ export interface AgentRunnerHooks {
  */
 export class AgentRunner {
   private static currentSession: AgentSession | null = null;
-  
+
   /**
    * Add a message to the current session
    */
@@ -54,13 +55,13 @@ export class AgentRunner {
     if (!this.currentSession) {
       return;
     }
-    
+
     const fullMessage: AgentMessage = {
       id: crypto.randomUUID(),
       timestamp: new Date(),
       ...message
     } as AgentMessage;
-    
+
     this.currentSession.messages.push(fullMessage);
   }
   /**
@@ -68,7 +69,7 @@ export class AgentRunner {
    */
   private static convertToLLMMessages(messages: ChatMessage[]): LLMMessage[] {
     const llmMessages: LLMMessage[] = [];
-    
+
     for (const msg of messages) {
       if (msg.entity === ChatMessageEntity.USER) {
         // User message
@@ -105,18 +106,79 @@ export class AgentRunner {
         // Tool result message
         const toolResult = msg as ToolResultMessage;
         if (toolResult.toolCallId && toolResult.resultText) {
-          llmMessages.push({
-            role: 'tool',
-            content: toolResult.resultText,
-            tool_call_id: toolResult.toolCallId,
-          });
+
+          // Check if tool result includes image data
+          const hasImageData = toolResult.imageData && typeof toolResult.imageData === 'string';
+
+          if (hasImageData) {
+            // Create multimodal content (text + image)
+            llmMessages.push({
+              role: 'tool',
+              content: [
+                {
+                  type: 'text',
+                  text: toolResult.resultText
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: toolResult.imageData!,  // Safe to use ! since we checked hasImageData
+                    detail: 'high' // Use high detail for tool-generated images
+                  }
+                }
+              ],
+              tool_call_id: toolResult.toolCallId,
+            });
+          } else {
+            // Text-only behavior for tools without images
+            let content = toolResult.resultText;
+
+            // Append summary if present
+            if (toolResult.summary) {
+              content = content + '\n\n' + toolResult.summary;
+            }
+
+            llmMessages.push({
+              role: 'tool',
+              content: content,
+              tool_call_id: toolResult.toolCallId,
+            });
+          }
         }
       }
     }
-    
+
     return llmMessages;
   }
 
+  /**
+   * Sanitizes tool result data for text representation by removing fields
+   * that shouldn't be sent to the LLM (imageData, success, etc.)
+   */
+  private static sanitizeToolResultForText(toolResultData: any): any {
+    if (typeof toolResultData !== 'object' || toolResultData === null) {
+      return toolResultData;
+    }
+
+    // Create a shallow copy
+    const sanitized = { ...toolResultData };
+
+    // Remove fields that shouldn't be sent to LLM
+    const fieldsToRemove = [
+      'imageData',    // Prevents token waste from base64 strings
+      'success',      // LLM should infer success from error presence
+      'dataUrl',      // Legacy image field if any
+      'agentSession', // Avoid sending session data to LLM
+    ];
+
+    fieldsToRemove.forEach(field => {
+      if (sanitized.hasOwnProperty(field)) {
+        delete sanitized[field];
+      }
+    });
+
+    return sanitized;
+  }
 
   // Helper function to execute the handoff logic (to avoid duplication)
   private static async executeHandoff(
@@ -227,10 +289,10 @@ export class AgentRunner {
         targetAgentTool, // Target agent is now the executing agent
         parentSession // Pass parent session for natural nesting
     );
-    
+
     // Extract the result and session
     const { agentSession: childSession, ...actualResult } = handoffResult;
-    
+
     // Add child session to parent's nested sessions (natural nesting)
     if (parentSession) {
       parentSession.nestedSessions.push(childSession);
@@ -301,7 +363,7 @@ export class AgentRunner {
       modelUsed: modelName,
       iterationCount: 0
     };
-    
+
     this.currentSession = agentSession;
 
     let messages = [...initialMessages];
@@ -320,6 +382,14 @@ export class AgentRunner {
         parameters: tool.schema
       }
     }));
+
+    // Create centralized error handler
+    const errorHandler = AgentErrorHandler.createErrorHandler({
+      continueOnError: true,
+      agentName,
+      availableTools: Array.from(toolMap.keys()),
+      session: agentSession
+    });
 
     // Add handoff tools based on the executing agent's config
     if (executingAgent?.config.handoffs) {
@@ -355,9 +425,9 @@ export class AgentRunner {
       const reasoningText = Array.isArray(args.reasoning) ? args.reasoning.join(' ') : args.reasoning;
       this.addSessionMessage({
         type: 'reasoning',
-        content: { 
-          type: 'reasoning', 
-          text: reasoningText 
+        content: {
+          type: 'reasoning',
+          text: reasoningText
         }
       });
     }
@@ -383,7 +453,7 @@ export class AgentRunner {
 
       let llmResponse: LLMResponse;
       let generationId: string | undefined; // Declare in iteration scope for tool call access
-      
+
       try {
         logger.info(`${agentName} Calling LLM with ${messages.length} messages`);
 
@@ -430,7 +500,7 @@ export class AgentRunner {
               phase: 'llm_generation'
             }
           }, tracingContext.traceId);
-          
+
           console.log(`[HIERARCHICAL_TRACING] AgentRunner: Created LLM generation:`, {
             generationId,
             agentName,
@@ -444,7 +514,7 @@ export class AgentRunner {
         const llm = LLMClient.getInstance();
         const provider = AIChatPanel.getProviderForModel(modelName);
         const llmMessages = AgentRunner.convertToLLMMessages(messages);
-        
+
         llmResponse = await llm.call({
           provider,
           model: modelName,
@@ -481,7 +551,7 @@ export class AgentRunner {
               duration: Date.now() - generationStartTime.getTime()
             }
           });
-          
+
           console.log(`[HIERARCHICAL_TRACING] AgentRunner: Completed LLM generation:`, {
             generationId,
             agentName,
@@ -492,7 +562,7 @@ export class AgentRunner {
       } catch (error: any) {
         logger.error(`${agentName} LLM call failed:`, error);
         const errorMsg = `LLM call failed: ${error.message || String(error)}`;
-        
+
         // Complete generation observation with error
         const tracingContext = getCurrentTracingContext();
         const tracingProvider = createTracingProvider();
@@ -509,7 +579,7 @@ export class AgentRunner {
             }
           });
         }
-        
+
         // Add system error message to history
         const systemErrorMessage: ToolResultMessage = {
             entity: ChatMessageEntity.TOOL_RESULT,
@@ -519,14 +589,22 @@ export class AgentRunner {
             error: errorMsg,
         };
         messages.push(systemErrorMessage);
-        
+
+        // Generate summary of error scenario
+        const errorSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'error');
+
         // Complete session with error
         agentSession.status = 'error';
         agentSession.endTime = new Date();
         agentSession.terminationReason = 'error';
-        
-        // Use error hook with 'error' reason
-        return { ...createErrorResult(errorMsg, messages, 'error'), agentSession };
+
+        // Use error hook with structured summary
+        const result = createErrorResult(errorMsg, messages, 'error');
+        result.summary = {
+          type: 'error',
+          content: errorSummary
+        };
+        return { ...result, agentSession };
       }
 
       // Parse LLM response
@@ -541,11 +619,11 @@ export class AgentRunner {
         if (parsedAction.type === 'tool_call') {
           const { name: toolName, args: toolArgs } = parsedAction;
           const toolCallId = crypto.randomUUID(); // Generate unique ID for OpenAI format
-          
+
           // Create tool call decision event for AgentRunner
           const tracingContext = getCurrentTracingContext();
           const tracingProvider = createTracingProvider();
-          
+
           if (tracingContext?.traceId) {
             toolCallObservationId = `tool-call-agentrunner-${toolName}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
             await tracingProvider.createObservation({
@@ -569,7 +647,7 @@ export class AgentRunner {
                 phase: 'tool_call_decision'
               }
             }, tracingContext.traceId);
-            
+
             console.log(`[HIERARCHICAL_TRACING] AgentRunner: Created tool call decision:`, {
               toolCallObservationId,
               toolName,
@@ -577,10 +655,10 @@ export class AgentRunner {
               iteration: iteration + 1,
               parentObservationId: generationId || tracingContext.currentAgentSpanId || tracingContext.parentObservationId
             });
-            
+
             logger.info(`${agentName} Created AgentRunner tool call decision: ${toolCallObservationId} for ${toolName}`);
           }
-          
+
           newModelMessage = {
             entity: ChatMessageEntity.MODEL,
             action: 'tool',
@@ -591,7 +669,7 @@ export class AgentRunner {
             reasoning: llmResponse.reasoning?.summary,
           };
           messages.push(newModelMessage);
-          
+
           // Add tool call to current session
           this.addSessionMessage({
             type: 'tool_call',
@@ -600,8 +678,8 @@ export class AgentRunner {
               toolName,
               toolArgs,
               toolCallId,
-              reasoning: Array.isArray(llmResponse.reasoning?.summary) 
-                ? llmResponse.reasoning.summary.join(' ') 
+              reasoning: Array.isArray(llmResponse.reasoning?.summary)
+                ? llmResponse.reasoning.summary.join(' ')
                 : (llmResponse.reasoning?.summary || undefined)
             }
           });
@@ -610,12 +688,22 @@ export class AgentRunner {
           // Execute tool
           const toolToExecute = toolMap.get(toolName);
           if (!toolToExecute) {
-            throw new Error(`Agent requested unknown tool: ${toolName}`);
+            const result = errorHandler.handleUnknownTool(toolName, toolCallId);
+            if (result.shouldContinue && result.errorMessage) {
+              messages.push(result.errorMessage);
+              if (result.sessionMessage) {
+                errorHandler.addSessionMessage(result.sessionMessage);
+              }
+              continue; // Continue to next iteration
+            }
+            // If not continuing, this would throw an error (but our config sets continueOnError: true)
+            continue; // Ensure we don't proceed with undefined tool
           }
 
-          let toolResultText: string;
+          let toolResultText: string = '';
           let toolIsError = false;
           let toolResultData: any = null;
+          let imageData: string | undefined;
 
           // *** Check if it's an LLM-triggered handoff tool call ***
           if (toolName.startsWith('handoff_to_') && toolToExecute instanceof ConfigurableAgentTool) {
@@ -660,15 +748,12 @@ export class AgentRunner {
               agentSession.status = 'completed';
               agentSession.endTime = new Date();
               agentSession.terminationReason = 'handed_off';
-              
+
               return { ...handoffResult, agentSession };
 
-          }
-          if (!toolToExecute) { // Regular tool, but not found
-              throw new Error(`Agent requested unknown tool: ${toolName}`);
-          } else {
+          } else if (toolToExecute) {
             // *** Regular tool execution ***
-            
+
             // Create tool execution span
             const tracingContext = getCurrentTracingContext();
             const tracingProvider = createTracingProvider();
@@ -712,7 +797,26 @@ export class AgentRunner {
              try {
               logger.info(`${agentName} Executing tool: ${toolToExecute.name} with args:`, toolArgs);
               toolResultData = await toolToExecute.execute(toolArgs as any);
-              toolResultText = typeof toolResultData === 'string' ? toolResultData : JSON.stringify(toolResultData, null, 2);
+
+              // Extract image data if present (before sanitization)
+              if (typeof toolResultData === 'object' && toolResultData !== null) {
+                imageData = toolResultData.imageData;
+              }
+
+              // Create sanitized data for text representation (exclude imageData to avoid token waste)
+              const sanitizedData = this.sanitizeToolResultForText(toolResultData);
+
+              // Special handling for ConfigurableAgentResult
+              if (typeof toolResultData === 'object' && toolResultData !== null &&
+                  'success' in toolResultData && ('output' in toolResultData || 'error' in toolResultData)) {
+                // This is a ConfigurableAgentResult from another agent
+                toolResultText = toolResultData.success
+                  ? (toolResultData.output || 'Agent completed successfully')
+                  : (toolResultData.error || 'Agent failed');
+              } else {
+                // Regular tool result
+                toolResultText = typeof toolResultData === 'string' ? toolResultData : JSON.stringify(sanitizedData, null, 2);
+              }
 
               // Check if the result object indicates an error explicitly
               if (typeof toolResultData === 'object' && toolResultData !== null) {
@@ -800,10 +904,19 @@ export class AgentRunner {
             isError: toolIsError,
             toolCallId, // Link back to the tool call for OpenAI format
             ...(toolIsError && { error: toolResultText }), // Include raw error message if error occurred
-            ...(toolResultData && { resultData: toolResultData }) // Include structured result data
+            ...(toolResultData && { resultData: toolResultData }), // Include structured result data
+            ...(imageData && { imageData: imageData }) // Include image data for multimodal LLM responses
           };
+
+          // Extract structured summary if this is from a ConfigurableAgentResult
+          if (typeof toolResultData === 'object' && toolResultData !== null &&
+              'success' in toolResultData && toolResultData.summary) {
+            // Use the structured summary directly
+            toolResultMessage.summary = toolResultData.summary.content;
+          }
+
           messages.push(toolResultMessage);
-          
+
           // Add tool result to current session
           this.addSessionMessage({
             type: 'tool_result',
@@ -828,30 +941,49 @@ export class AgentRunner {
             reasoning: llmResponse.reasoning?.summary,
           };
           messages.push(newModelMessage);
-          
+
           // Add final answer to current session
           this.addSessionMessage({
             type: 'final_answer',
             content: {
               type: 'final_answer',
               answer,
-              summary: Array.isArray(llmResponse.reasoning?.summary) 
-                ? llmResponse.reasoning.summary.join(' ') 
+              summary: Array.isArray(llmResponse.reasoning?.summary)
+                ? llmResponse.reasoning.summary.join(' ')
                 : (llmResponse.reasoning?.summary || undefined)
             }
           });
 
           logger.info(`${agentName} LLM provided final answer.`);
+
+          // Generate summary of successful completion
+          const completionSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'final_answer');
+
           // Complete session naturally
           agentSession.status = 'completed';
           agentSession.endTime = new Date();
           agentSession.terminationReason = 'final_answer';
-          
-          // Exit loop and return success with 'final_answer' reason
-          return { ...createSuccessResult(answer, messages, 'final_answer'), agentSession };
 
+          // Exit loop and return success with structured summary
+          const result = createSuccessResult(answer, messages, 'final_answer');
+          result.summary = {
+            type: 'completion',
+            content: completionSummary
+          };
+          return { ...result, agentSession };
+
+        } else if (parsedAction.type === 'error') {
+          const result = errorHandler.handleParsingError(parsedAction.error);
+          if (result.shouldContinue && result.errorMessage) {
+            messages.push(result.errorMessage);
+            if (result.sessionMessage) {
+              errorHandler.addSessionMessage(result.sessionMessage);
+            }
+            continue; // Continue to next iteration so the LLM can try again
+          }
         } else {
-          throw new Error(parsedAction.error);
+          // Unknown parsed action type
+          throw new Error(`Unknown parsed action type: ${(parsedAction as any).type}`);
         }
 
       } catch (error: any) {
@@ -866,14 +998,22 @@ export class AgentRunner {
             error: errorMsg,
         };
         messages.push(systemErrorMessage);
-        
+
+        // Generate summary of error scenario
+        const errorSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'error');
+
         // Complete session with error
         agentSession.status = 'error';
         agentSession.endTime = new Date();
         agentSession.terminationReason = 'error';
-        
-        // Use error hook with 'error' reason
-        return { ...createErrorResult(errorMsg, messages, 'error'), agentSession };
+
+        // Use error hook with structured summary
+        const result = createErrorResult(errorMsg, messages, 'error');
+        result.summary = {
+          type: 'error',
+          content: errorSummary
+        };
+        return { ...result, agentSession };
       }
     }
 
@@ -900,29 +1040,128 @@ export class AgentRunner {
             );
             // Extract the result and session
             const { agentSession: childSession, ...actualResult } = handoffResult;
-            
+
             // Add child session to current session's nested sessions (natural nesting)
             if (this.currentSession) {
               this.currentSession.nestedSessions.push(childSession);
             }
-            
+
             // Complete current session and return result with session
             agentSession.status = 'completed';
             agentSession.endTime = new Date();
             agentSession.terminationReason = 'handed_off';
-            
+
             return { ...actualResult, agentSession }; // Return the result from the handoff target
         }
     }
 
     // If no max_iterations handoff is configured, return the standard error
     logger.warn(`${agentName} No 'max_iterations' handoff configured. Returning error.`);
-    
+
     // Complete session with max iterations error
     agentSession.status = 'error';
     agentSession.endTime = new Date();
     agentSession.terminationReason = 'max_iterations';
-    
-    return { ...createErrorResult(`Agent reached maximum iterations (${maxIterations})`, messages, 'max_iterations'), agentSession };
+
+    // Generate summary of agent progress instead of generic error message
+    const progressSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName);
+    const result = createErrorResult('Agent reached maximum iterations', messages, 'max_iterations');
+    result.summary = {
+      type: 'timeout',
+      content: progressSummary
+    };
+    return { ...result, agentSession };
+  }
+
+  /**
+   * Uses LLM to generate a meaningful summary when agent completes execution.
+   * Leverages KV-cache by sending all existing messages plus a summary request.
+   */
+  private static async summarizeAgentProgress(
+    messages: ChatMessage[],
+    maxIterations: number,
+    agentName: string,
+    modelName: string,
+    completionType: 'final_answer' | 'max_iterations' | 'error' = 'max_iterations'
+  ): Promise<string> {
+    logger.info(`Generating summary for agent "${agentName}" with completion type: ${completionType}`);
+    try {
+      // Use existing convertToLLMMessages method for consistency
+      const llmMessages = this.convertToLLMMessages(messages);
+
+      // Add system message at the beginning for better context
+      llmMessages.unshift({
+        role: 'system',
+        content: `You are an expert AI agent analyzer specializing in understanding multi-agent workflows and execution patterns. Your task is to analyze agent conversations that have reached their iteration limits and generate actionable summaries.
+
+Key guidelines:
+- Focus on extracting the core user intent and what the agent was trying to accomplish
+- Identify patterns of progress, loops, or stuck behaviors
+- Highlight key decisions the agent made and tools it used
+- Assess whether the agent was making meaningful progress toward the goal
+- Provide specific, actionable insights that would help a calling agent decide next steps
+- Be concise but comprehensive in your analysis
+- Consider the context of web automation, data extraction, and multi-agent coordination`
+      });
+
+      // Generate completion-specific summary prompt
+      let summaryPrompt: string;
+      switch (completionType) {
+        case 'final_answer':
+          summaryPrompt = `Please analyze the entire conversation above and provide a concise summary that includes:
+
+1. **User Request**: What the user originally asked for
+2. **Agent Decisions**: Key decisions and actions the agent took to accomplish the task
+3. **Final Outcome**: What the agent accomplished`;
+          break;
+
+        case 'error':
+          summaryPrompt = `1. **User Request**: What the user originally asked for
+2. **Agent Decisions**: Key decisions and actions the agent took before the error
+3. **Error Context**: What the agent was attempting when the error occurred`;
+          break;
+
+        case 'max_iterations':
+        default:
+          summaryPrompt = `The agent "${agentName}" has reached its maximum iteration limit of ${maxIterations}.
+
+Please analyze the entire conversation above and provide a concise summary that includes:
+
+1. **User Request**: What the user originally asked for
+2. **Agent Decisions**: Key decisions and actions the agent took
+3. **Final State**: What the agent was doing when it timed out
+4. **Progress Assessment**: Whether the agent was making progress or stuck
+
+Format your response as a clear, informative summary that would help a calling agent understand what happened and decide next steps.`;
+          break;
+      }
+
+      // Add final user message requesting summary
+      llmMessages.push({
+        role: 'user',
+        content: summaryPrompt
+      });
+
+      // Use existing LLM infrastructure
+      const llm = LLMClient.getInstance();
+      const provider = AIChatPanel.getProviderForModel(modelName);
+
+      const response = await llm.call({
+        provider,
+        model: modelName,
+        messages: llmMessages,
+        systemPrompt: '', // Empty string instead of undefined
+        // Omit tools parameter entirely to avoid tool_choice conflicts
+        temperature: 0.1 // Lower temperature for more consistent summaries
+      });
+
+      logger.info(`Generated summary for agent "${agentName}":`, response.text || 'No summary generated.');
+      return response.text || 'No summary generated.';
+
+    } catch (error) {
+      logger.error('Failed to generate agent progress summary:', error);
+      // Fallback to simple message if LLM summary fails
+      return `Agent ${agentName} reached maximum iterations (${maxIterations}). Summary generation failed.`;
+    }
   }
 }
