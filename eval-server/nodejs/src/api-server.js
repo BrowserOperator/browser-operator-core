@@ -10,7 +10,7 @@ import yaml from 'js-yaml';
 import { v4 as uuidv4 } from 'uuid';
 
 import logger from './logger.js';
-import { EvaluationServer } from './server.js';
+// No need to import EvaluationServer - it's passed as constructor parameter
 
 class APIServer {
   constructor(evaluationServer, port = 8081) {
