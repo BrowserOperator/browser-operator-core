@@ -14,7 +14,7 @@ import { createLogger } from './Logger.js';
 import type { AgentState } from './State.js';
 import type { Runnable } from './Types.js';
 import { AgentErrorHandler } from './AgentErrorHandler.js';
-import { createTracingProvider, withTracingContext } from '../tracing/TracingConfig.js';
+import { createTracingProvider, withTracingContext, getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { TracingProvider } from '../tracing/TracingProvider.js';
 
 const logger = createLogger('AgentNodes');
@@ -512,11 +512,6 @@ export function createToolExecutorNode(state: AgentState): Runnable<AgentState, 
 
         // Execute the tool with tracing context, casting toolArgs to any to satisfy the specific tool signature
         logger.info(`Executing tool ${toolName} with tracing context:`, { 
-          hasTracingContext: !!tracingContext, 
-          traceId: tracingContext?.traceId,
-          toolName 
-        });
-        console.log(`[TRACING DEBUG] Executing tool ${toolName} with tracing context:`, { 
           hasTracingContext: !!tracingContext, 
           traceId: tracingContext?.traceId,
           toolName 

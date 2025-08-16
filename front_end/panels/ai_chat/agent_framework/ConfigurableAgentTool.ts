@@ -7,8 +7,8 @@ import type { Tool } from '../tools/Tools.js';
 import { AIChatPanel } from '../ui/AIChatPanel.js';
 import { ChatMessageEntity, type ChatMessage } from '../ui/ChatView.js';
 import { createLogger } from '../core/Logger.js';
-import { getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import type { AgentSession } from './AgentSessionTypes.js';
+import { getCurrentTracingContext, createTracingProvider } from '../tracing/TracingConfig.js';
 
 const logger = createLogger('ConfigurableAgentTool');
 
@@ -275,6 +275,11 @@ export interface ConfigurableAgentResult {
      */
     content: string;
   };
+
+  /**
+   * Agent session information
+   */
+  agentSession?: AgentSession;
 }
 
 /**
@@ -383,11 +388,10 @@ export class ConfigurableAgentTool implements Tool<ConfigurableAgentArgs, Config
   /**
    * Execute the agent
    */
-  async execute(args: ConfigurableAgentArgs): Promise<ConfigurableAgentResult & { agentSession: AgentSession }> {
+  async execute(args: ConfigurableAgentArgs): Promise<ConfigurableAgentResult> {
     logger.info(`Executing ${this.name} via AgentRunner with args:`, args);
 
     // Get current tracing context for debugging
-    const tracingContext = getCurrentTracingContext();
     const agentService = AgentService.getInstance();
     const apiKey = agentService.getApiKey();
 
@@ -443,13 +447,25 @@ export class ConfigurableAgentTool implements Tool<ConfigurableAgentArgs, Config
         : (err, steps, reason) => this.createErrorResult(err, steps, reason),
     };
 
-    // Run the agent
+    // Get tracing context
+    let tracingContext = getCurrentTracingContext();
+    
+    // If no tracing context found, create emergency context for specialized agents
+    if (!tracingContext?.traceId && (this.name === 'web_task_agent' || this.name === 'direct_url_navigator_agent')) {
+      tracingContext = {
+        traceId: `emergency-${this.name}-${Date.now()}`,
+        sessionId: `emergency-session-${Date.now()}`,
+        parentObservationId: undefined
+      };
+    }
+    
     const result = await AgentRunner.run(
       internalMessages,
       args,
       runnerConfig,
       runnerHooks,
-      this // Pass the current agent instance as executingAgent
+      this, // Pass the current agent instance as executingAgent
+      tracingContext // Pass tracing context explicitly
     );
 
     // Return the direct result from the runner (including agentSession)

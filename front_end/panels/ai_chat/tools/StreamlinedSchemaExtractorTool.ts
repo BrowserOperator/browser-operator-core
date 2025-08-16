@@ -10,6 +10,7 @@ import { AgentService } from '../core/AgentService.js';
 import { createLogger } from '../core/Logger.js';
 import { LLMClient } from '../LLM/LLMClient.js';
 import { AIChatPanel } from '../ui/AIChatPanel.js';
+import { tracedLLMCall } from '../tracing/TracingConfig.js';
 
 import type { Tool } from './Tools.js';
 
@@ -240,17 +241,34 @@ IMPORTANT: Only extract data that you can see in the accessibility tree above. D
 
         const { model, provider } = AIChatPanel.getMiniModelWithProvider();
         const llm = LLMClient.getInstance();
-        const llmResponse = await llm.call({
-          provider,
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: extractionPrompt }
-          ],
-          systemPrompt: systemPrompt,
-          temperature: 0.1,
-          retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
-        });
+        const llmResponse = await tracedLLMCall(
+          () => llm.call({
+            provider,
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: extractionPrompt }
+            ],
+            systemPrompt: systemPrompt,
+            temperature: 0.1,
+            retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
+          }),
+          {
+            toolName: this.name,
+            model,
+            provider,
+            temperature: 0.1,
+            input: {
+              systemPrompt: systemPrompt.substring(0, 500) + '...',
+              extractionPrompt: extractionPrompt.substring(0, 500) + '...',
+              attempt
+            },
+            metadata: {
+              phase: 'data_extraction',
+              attempt
+            }
+          }
+        );
         const result = llmResponse.text;
         
         logger.debug(`JSON extraction successful on attempt ${attempt}`);
@@ -367,17 +385,34 @@ CRITICAL: Only use nodeIds that you can actually see in the accessibility tree a
     try {
       const { model, provider } = AIChatPanel.getMiniModelWithProvider();
       const llm = LLMClient.getInstance();
-      const llmResponse = await llm.call({
-        provider,
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: extractionPrompt }
-        ],
-        systemPrompt: systemPrompt,
-        temperature: 0.1,
-        retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
-      });
+      const llmResponse = await tracedLLMCall(
+        () => llm.call({
+          provider,
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: extractionPrompt }
+          ],
+          systemPrompt: systemPrompt,
+          temperature: 0.1,
+          retryConfig: { maxRetries: 3, baseDelayMs: 1500 }
+        }),
+        {
+          toolName: this.name,
+          model,
+          provider,
+          temperature: 0.1,
+          input: {
+            systemPrompt: systemPrompt.substring(0, 500) + '...',
+            extractionPrompt: extractionPrompt.substring(0, 500) + '...',
+            unresolvedNodeIds
+          },
+          metadata: {
+            phase: 'url_resolution',
+            unresolvedNodeIdsCount: unresolvedNodeIds.length
+          }
+        }
+      );
       const result = llmResponse.text;
       
       return result;

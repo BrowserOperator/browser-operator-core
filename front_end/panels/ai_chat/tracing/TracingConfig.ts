@@ -235,10 +235,11 @@ export async function refreshTracingProvider(): Promise<void> {
 
 /**
  * Thread-local tracing context for passing context to nested tool executions
+ * Uses a context stack to properly handle nested async operations
  */
 class TracingContextManager {
   private static instance: TracingContextManager;
-  private currentContext: TracingContext | null = null;
+  private contextStack: any[] = [];
 
   private constructor() {}
 
@@ -249,45 +250,46 @@ class TracingContextManager {
     return TracingContextManager.instance;
   }
 
-  setContext(context: TracingContext | null): void {
-    this.currentContext = context;
+  setContext(context: any): void {
+    this.contextStack.push(context);
   }
 
-  getContext(): TracingContext | null {
-    return this.currentContext;
+  getContext(): any {
+    return this.contextStack.length > 0 ? this.contextStack[this.contextStack.length - 1] : null;
   }
 
   clearContext(): void {
-    this.currentContext = null;
+    this.contextStack = [];
+  }
+
+  private popContext(): any {
+    return this.contextStack.pop();
   }
 
   /**
    * Execute a function with a specific tracing context
    */
-  async withContext<T>(context: TracingContext | null, fn: () => Promise<T>): Promise<T> {
-    const previousContext = this.currentContext;
+  async withContext<T>(context: any, fn: () => Promise<T>): Promise<T> {
+    const previousStackSize = this.contextStack.length;
     contextLogger.info('Setting tracing context:', { 
       hasContext: !!context, 
       traceId: context?.traceId,
-      previousContext: !!previousContext 
+      stackSize: previousStackSize
     });
-    console.log(`[HIERARCHICAL_TRACING] TracingContextManager: Setting tracing context:`, { 
-      hasContext: !!context, 
-      traceId: context?.traceId,
-      currentAgentSpanId: context?.currentAgentSpanId,
-      executionLevel: context?.executionLevel,
-      agentName: context?.agentContext?.agentName,
-      previousContext: !!previousContext 
-    });
+    
     this.setContext(context);
     try {
       return await fn();
     } finally {
-      this.setContext(previousContext);
-      contextLogger.info('Restored previous tracing context:', { hasPrevious: !!previousContext });
-      console.log(`[HIERARCHICAL_TRACING] TracingContextManager: Restored previous tracing context:`, { 
-        hasPrevious: !!previousContext,
-        restoredExecutionLevel: previousContext?.executionLevel
+      // Restore the stack to the previous size
+      while (this.contextStack.length > previousStackSize) {
+        this.popContext();
+      }
+      const currentContext = this.getContext();
+      contextLogger.info('Restored tracing context stack:', { 
+        stackSize: this.contextStack.length,
+        hasCurrentContext: !!currentContext,
+        currentTraceId: currentContext?.traceId
       });
     }
   }
@@ -338,6 +340,103 @@ declare global {
     isTracingEnabled?: typeof isTracingEnabled;
     refreshTracingProvider?: typeof refreshTracingProvider;
     resetTracingProvider?: () => void;
+  }
+}
+
+/**
+ * Utility function to wrap LLM calls with tracing for tools
+ * This provides consistent tracing for all tool LLM calls
+ */
+export async function tracedLLMCall(
+  llmCallFunction: () => Promise<any>,
+  options: {
+    toolName: string;
+    model: string;
+    provider: string;
+    temperature?: number;
+    input?: any;
+    metadata?: Record<string, any>;
+  }
+): Promise<any> {
+  const tracingContext = getCurrentTracingContext();
+  let generationId: string | undefined;
+  const generationStartTime = new Date();
+
+  if (tracingContext?.traceId && isTracingEnabled()) {
+    const tracingProvider = createTracingProvider();
+    generationId = `gen-tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    
+    try {
+      await tracingProvider.createObservation({
+        id: generationId,
+        name: `LLM Generation (Tool): ${options.toolName}`,
+        type: 'generation',
+        startTime: generationStartTime,
+        parentObservationId: tracingContext.parentObservationId,
+        model: options.model,
+        modelParameters: {
+          temperature: options.temperature ?? 0,
+          provider: options.provider
+        },
+        input: options.input || {},
+        metadata: {
+          executingTool: options.toolName,
+          phase: 'tool_llm_call',
+          source: 'TracingWrapper',
+          ...options.metadata
+        }
+      }, tracingContext.traceId);
+    } catch (error) {
+      logger.warn('Failed to create tool LLM generation start observation:', error);
+    }
+  }
+
+  try {
+    // Execute the actual LLM call
+    const result = await llmCallFunction();
+
+    // Update generation observation with output
+    if (generationId && tracingContext?.traceId && isTracingEnabled()) {
+      const tracingProvider = createTracingProvider();
+      try {
+        await tracingProvider.createObservation({
+          id: generationId,
+          name: `LLM Generation (Tool): ${options.toolName}`,
+          type: 'generation',
+          endTime: new Date(),
+          output: {
+            response: typeof result === 'string' ? result : JSON.stringify(result),
+            success: true
+          }
+        }, tracingContext.traceId);
+      } catch (error) {
+        logger.warn('Failed to update tool LLM generation observation:', error);
+      }
+    }
+
+    return result;
+  } catch (error) {
+    // Update generation observation with error
+    if (generationId && tracingContext?.traceId && isTracingEnabled()) {
+      const tracingProvider = createTracingProvider();
+      try {
+        await tracingProvider.createObservation({
+          id: generationId,
+          name: `LLM Generation (Tool): ${options.toolName}`,
+          type: 'generation',
+          endTime: new Date(),
+          output: {
+            error: error instanceof Error ? error.message : String(error),
+            success: false
+          },
+          error: error instanceof Error ? error.message : String(error)
+        }, tracingContext.traceId);
+      } catch (tracingError) {
+        logger.warn('Failed to update tool LLM generation error observation:', tracingError);
+      }
+    }
+    
+    throw error; // Re-throw the original error
   }
 }
 
