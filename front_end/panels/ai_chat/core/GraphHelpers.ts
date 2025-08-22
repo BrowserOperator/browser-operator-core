@@ -7,14 +7,14 @@ import { ChatMessageEntity, type ChatMessage } from '../ui/ChatView.js';
 
 import * as BaseOrchestratorAgent from './BaseOrchestratorAgent.js';
 import { createLogger } from './Logger.js';
-import { enhancePromptWithPageContext } from './PageInfoManager.js';
+import { getStaticSystemPrompt } from './PageInfoManager.js';
 import type { AgentState } from './State.js';
 import { NodeType } from './Types.js';
 
 const logger = createLogger('GraphHelpers');
 
 
-// Replace createSystemPrompt with this version
+// Create static system prompt optimized for caching
 export function createSystemPrompt(state: AgentState): string {
   const { selectedAgentType } = state;
 
@@ -23,21 +23,14 @@ export function createSystemPrompt(state: AgentState): string {
     BaseOrchestratorAgent.getSystemPrompt(selectedAgentType) :
     BaseOrchestratorAgent.getSystemPrompt('default');
 
-  // Use the enhancePromptWithPageContext function to add page info
-  return basePrompt; // Just return the base prompt initially, we'll update with page context asynchronously
+  // Return static system prompt (page context will be appended to messages)
+  return getStaticSystemPrompt(basePrompt);
 }
 
-// Add a new async version that will be used instead
+// Legacy async version - now returns static prompt
+// @deprecated Use createSystemPrompt() for better caching performance
 export async function createSystemPromptAsync(state: AgentState): Promise<string> {
-  const { selectedAgentType } = state;
-
-  // Get base prompt
-  const basePrompt = selectedAgentType ?
-    BaseOrchestratorAgent.getSystemPrompt(selectedAgentType) :
-    BaseOrchestratorAgent.getSystemPrompt('default');
-
-  // Use the enhancePromptWithPageContext function to add page info
-  return await enhancePromptWithPageContext(basePrompt);
+  return createSystemPrompt(state); // Just return the static version
 }
 
 // Create the appropriate tools for the agent based on agent type

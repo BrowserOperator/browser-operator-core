@@ -176,7 +176,79 @@ export class PageInfoManager {
 PageInfoManager.getInstance();
 
 /**
+ * Creates a user message containing current page context information
+ * This is optimized for prompt caching - can be appended to message arrays
+ * @returns LLMMessage with page context as user message, or null if no context available
+ */
+export async function getPageContextAsUserMessage(): Promise<import('../LLM/LLMTypes.js').LLMMessage | null> {
+  // Fetch the latest accessibility tree before generating the context
+  await PageInfoManager.getInstance().updatePageInfoWithFullTree();
+
+  // Get current page info from the manager
+  const pageInfo = PageInfoManager.getInstance().getCurrentInfo();
+  const accessibilityTree = PageInfoManager.getInstance().getAccessibilityTree();
+  const iframeContent = PageInfoManager.getInstance().getIframeContent();
+
+  // If no page info is available, return null
+  if (!pageInfo) {
+    return null;
+  }
+
+  return {
+    role: 'user',
+    content: `[PAGE_CONTEXT] Current page information:
+
+URL: ${pageInfo.url}
+Title: ${pageInfo.title}
+
+Visible Elements:
+${accessibilityTree || 'No accessibility data available'}
+
+${iframeContent?.length ? `Iframes:
+${iframeContent.map((iframe, i) => 
+  `${i+1}. ${iframe.role}${iframe.name ? ` (${iframe.name})` : ''}:
+${iframe.contentSimplified}`
+).join('\n\n')}` : ''}`
+  };
+}
+
+/**
+ * Legacy alias for backward compatibility
+ * @deprecated Use getPageContextAsUserMessage() instead
+ */
+export async function getPageContextAsSystemMessage(): Promise<import('../LLM/LLMTypes.js').LLMMessage | null> {
+  const userMessage = await getPageContextAsUserMessage();
+  if (!userMessage) return null;
+  
+  // Convert to system message for legacy compatibility
+  return {
+    ...userMessage,
+    role: 'system'
+  };
+}
+
+/**
+ * Returns a static system prompt without dynamic page context
+ * This version is optimized for prompt caching
+ * @param basePrompt The original system prompt to enhance with static instructions
+ * @returns Static system prompt that can be cached
+ */
+export function getStaticSystemPrompt(basePrompt: string): string {
+  return `${basePrompt}
+
+Instructions:
+- The user is viewing a web page (current context will be provided separately)
+- Use page title, URL, and accessibility tree from context to inform your answers
+- The accessibility tree provided represents only the section of the page currently visible to the user (the viewport), not the entire page
+- If you need the full page accessibility tree to answer the user's query, you have the ability to request it at any time
+- If you need to extract any data from the entire page, you must always use the extract_schema_data tool to do so. Do not attempt to extract data from the full page by any other means
+- If information is missing, answer based on what is available, or request the full page accessibility tree if necessary
+- Always be concise, accurate, and helpful`;
+}
+
+/**
  * Enhances a system prompt with current page context information
+ * @deprecated Use getPageContextAsSystemMessage() + getStaticSystemPrompt() for better caching
  * @param basePrompt The original system prompt to enhance
  * @returns The enhanced system prompt with page context information if available
  */

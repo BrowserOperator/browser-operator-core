@@ -19,6 +19,7 @@ import * as Utils from '../common/utils.js';
 import { getXPathByBackendNodeId } from '../common/utils.js';
 import { AgentService } from '../core/AgentService.js';
 import type { DevToolsContext } from '../core/State.js';
+import { getPageContextAsUserMessage } from '../core/PageInfoManager.js';
 import { LLMClient } from '../LLM/LLMClient.js';
 import { AIChatPanel } from '../ui/AIChatPanel.js';
 import { ChatMessageEntity } from '../ui/ChatView.js';
@@ -1458,8 +1459,18 @@ Focus on:
 
 Keep the summary to 2-3 sentences maximum.`;
 
-        const userPrompt = `Analyze this viewport content and provide a brief summary${waitReason ? `, focusing on elements related to: ${waitReason}` : ''}:
+        let userPrompt = `Analyze this viewport content and provide a brief summary${waitReason ? `, focusing on elements related to: ${waitReason}` : ''}:
 ${treeResult.simplified}`;
+
+        // Get page context and append to user prompt
+        try {
+          const pageContext = await getPageContextAsUserMessage();
+          if (pageContext && pageContext.content) {
+            userPrompt += `\n\n${pageContext.content}`;
+          }
+        } catch (error) {
+          logger.warn('Failed to get page context for WaitTool:', error);
+        }
 
         const response = await llm.call({
           provider,

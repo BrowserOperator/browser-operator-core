@@ -6,6 +6,7 @@ import * as SDK from '../../../core/sdk/sdk.js';
 import type { Tool } from './Tools.js';
 import { TakeScreenshotTool, GetAccessibilityTreeTool } from './Tools.js';
 import { createLogger } from '../core/Logger.js';
+import { getPageContextAsUserMessage } from '../core/PageInfoManager.js';
 import { LLMClient } from '../LLM/LLMClient.js';
 import { AIChatPanel } from '../ui/AIChatPanel.js';
 
@@ -67,8 +68,8 @@ export class ThinkingTool implements Tool<ThinkingArgs, ThinkingResult | { error
 
       // 3. Build thinking prompt based on model type
       const prompt = isVisionModel 
-        ? this.buildVisualThinkingPrompt(args.userRequest, args.context, contextData)
-        : this.buildTextThinkingPrompt(args.userRequest, args.context, contextData);
+        ? await this.buildVisualThinkingPrompt(args.userRequest, args.context, contextData)
+        : await this.buildTextThinkingPrompt(args.userRequest, args.context, contextData);
 
       // 4. Get thinking analysis
       const analysis = await this.getThinkingAnalysis(prompt, isVisionModel);
@@ -145,12 +146,16 @@ export class ThinkingTool implements Tool<ThinkingArgs, ThinkingResult | { error
     }
   }
 
-  private buildVisualThinkingPrompt(
+  private async buildVisualThinkingPrompt(
     userRequest: string,
     context: string | undefined,
     visualContext: { screenshot: string; url: string; title: string }
-  ): { systemPrompt: string; userPrompt: string; images: Array<{ type: string; data: string }> } {
+  ): Promise<{ systemPrompt: string; userPrompt: string; images: Array<{ type: string; data: string }> }> {
     const systemPrompt = `You are a thinking tool that helps with high-level planning and visual analysis. Your job is to look at the current state and think through what needs to be done in a flexible, unstructured way, always staying focused on the user's original request.
+
+IMPORTANT CONSTRAINTS:
+- Pages with google:// URLs (like new tab pages, chrome://newtab, etc.) cannot be interacted with - no clicking, typing, or other actions are possible on these pages
+- If the current page is a google:// URL, recommend navigating to a different website first before attempting any actions
 
 APPROACH:
 1. Describe what you see in the screenshot in a brief, useful way
@@ -170,13 +175,23 @@ Keep it conversational and flexible. Don't make it overly structured or rigid. A
 
     const contextSection = context ? `\nADDITIONAL CONTEXT: ${context}` : '';
 
-    const userPrompt = `USER REQUEST: ${userRequest}
+    let userPrompt = `USER REQUEST: ${userRequest}
 
 CONTEXT: ${contextSection}
 
 CURRENT PAGE: ${visualContext.title}
 
 Look at the screenshot and think through what needs to be done to accomplish the user's request. Create a high-level visual summary and a flexible list of things to consider or work on.`;
+
+    // Add page context if available
+    try {
+      const pageContext = await getPageContextAsUserMessage();
+      if (pageContext && pageContext.content) {
+        userPrompt += `\n\n${pageContext.content}`;
+      }
+    } catch (error) {
+      logger.warn('Failed to get page context for visual thinking:', error);
+    }
 
     return {
       systemPrompt,
@@ -188,12 +203,16 @@ Look at the screenshot and think through what needs to be done to accomplish the
     };
   }
 
-  private buildTextThinkingPrompt(
+  private async buildTextThinkingPrompt(
     userRequest: string,
     context: string | undefined,
     accessibilityContext: { accessibilityTree: string; url: string; title: string }
-  ): { systemPrompt: string; userPrompt: string; images: Array<{ type: string; data: string }> } {
+  ): Promise<{ systemPrompt: string; userPrompt: string; images: Array<{ type: string; data: string }> }> {
     const systemPrompt = `You are a thinking tool that helps with high-level planning and analysis based on the page's accessibility structure. Your job is to understand the current state through the accessibility tree and think through what needs to be done in a flexible, unstructured way, always staying focused on the user's original request.
+
+IMPORTANT CONSTRAINTS:
+- Pages with google:// URLs (like new tab pages, chrome://newtab, etc.) cannot be interacted with - no clicking, typing, or other actions are possible on these pages
+- If the current page is a google:// URL, recommend navigating to a different website first before attempting any actions
 
 APPROACH:
 1. Analyze the accessibility tree to understand the page structure and available elements
@@ -213,7 +232,7 @@ Keep it conversational and flexible. Don't make it overly structured or rigid. A
 
     const contextSection = context ? `\nADDITIONAL CONTEXT: ${context}` : '';
 
-    const userPrompt = `USER REQUEST: ${userRequest}
+    let userPrompt = `USER REQUEST: ${userRequest}
 
 CONTEXT: ${contextSection}
 
@@ -223,6 +242,16 @@ ACCESSIBILITY TREE:
 ${accessibilityContext.accessibilityTree}
 
 Based on the accessibility tree structure above, think through what needs to be done to accomplish the user's request. Create a high-level summary of the page and a flexible list of things to consider or work on. Focus on the elements and structure that are relevant to the user's goal.`;
+
+    // Add page context if available
+    try {
+      const pageContext = await getPageContextAsUserMessage();
+      if (pageContext && pageContext.content) {
+        userPrompt += `\n\n${pageContext.content}`;
+      }
+    } catch (error) {
+      logger.warn('Failed to get page context for text thinking:', error);
+    }
 
     return {
       systemPrompt,

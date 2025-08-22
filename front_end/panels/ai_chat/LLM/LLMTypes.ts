@@ -200,6 +200,16 @@ export interface LLMCallOptions {
 }
 
 /**
+ * Cache usage statistics from LLM provider
+ */
+export interface CacheUsage {
+  cachedTokens: number;        // Number of tokens read from cache
+  totalInputTokens: number;    // Total input tokens in the request
+  cacheHitRate: number;        // Cache hit rate as percentage (0-100)
+  cacheWrites?: number;        // Number of tokens written to cache (if available)
+}
+
+/**
  * Unified LLM response format
  */
 export interface LLMResponse {
@@ -213,6 +223,7 @@ export interface LLMResponse {
     summary?: string[] | null;
     effort?: string;
   };
+  cacheUsage?: CacheUsage;
 }
 
 /**

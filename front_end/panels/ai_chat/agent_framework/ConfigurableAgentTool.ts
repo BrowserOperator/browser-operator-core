@@ -158,6 +158,13 @@ export interface AgentToolConfig {
    * (both success and error results). Defaults to false (steps are omitted).
    */
   includeIntermediateStepsOnReturn?: boolean;
+
+  /**
+   * Whether to always use external summarization for this agent.
+   * Useful for action agents that need consistent, detailed summaries.
+   * @default false
+   */
+  alwaysUseSummaryAgent?: boolean;
 }
 
 /**

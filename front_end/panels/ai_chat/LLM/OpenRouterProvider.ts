@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import type { LLMMessage, LLMResponse, LLMCallOptions, LLMProvider, ModelInfo } from './LLMTypes.js';
+import type { LLMMessage, LLMResponse, LLMCallOptions, LLMProvider, ModelInfo, CacheUsage } from './LLMTypes.js';
 import { LLMBaseProvider } from './LLMProvider.js';
 import { LLMRetryManager } from './LLMErrorHandler.js';
 import { LLMResponseParser } from './LLMResponseParser.js';
@@ -87,13 +87,6 @@ export class OpenRouterProvider extends LLMBaseProvider {
   }
 
   /**
-   * Get the models endpoint URL
-   */
-  private getModelsEndpoint(): string {
-    return `${OpenRouterProvider.API_BASE_URL}${OpenRouterProvider.MODELS_PATH}`;
-  }
-
-  /**
    * Get the models endpoint URL with tool support filter
    */
   private getToolSupportingModelsEndpoint(): string {
@@ -109,10 +102,25 @@ export class OpenRouterProvider extends LLMBaseProvider {
   }
 
   /**
-   * Converts LLMMessage format to OpenRouter/OpenAI format
+   * Converts LLMMessage format to OpenRouter/OpenAI format with cache control support
    */
-  private convertMessagesToOpenRouter(messages: LLMMessage[]): any[] {
-    return messages.map(msg => {
+  private convertMessagesToOpenRouter(messages: LLMMessage[], modelName?: string): any[] {
+    // Detect provider from model name
+    const getProvider = (model: string): string => {
+      const lowerModel = model.toLowerCase();
+      if (lowerModel.startsWith('anthropic/')) return 'anthropic';
+      if (lowerModel.startsWith('google/')) return 'google';
+      if (lowerModel.startsWith('openai/')) return 'openai';
+      return 'unknown';
+    };
+    
+    const provider = modelName ? getProvider(modelName) : 'unknown';
+    
+    // Track cache count for Anthropic's 4-block limit
+    let anthropicCacheCount = 0;
+    const maxAnthropicCacheBlocks = 4;
+    
+    return messages.map((msg, index) => {
       const baseMessage: any = {
         role: msg.role,
         content: msg.content
@@ -127,6 +135,52 @@ export class OpenRouterProvider extends LLMBaseProvider {
       }
       if (msg.name) {
         baseMessage.name = msg.name;
+      }
+
+      // Add cache control for models that support it
+      if (msg.content && typeof msg.content === 'string') {
+        const contentLength = msg.content.length;
+        const isLastMessage = index === messages.length - 1;
+        const isPageContext = msg.role === 'user' && msg.content.includes('[PAGE_CONTEXT]');
+        
+        // Cache all substantial messages except:
+        // 1. The last user message if it contains page context (dynamic)
+        // 2. Very short messages (< 500 chars)
+        const shouldCache = contentLength > 500 && !(isLastMessage && isPageContext);
+        
+        if (shouldCache) {
+          if (provider === 'anthropic' && anthropicCacheCount < maxAnthropicCacheBlocks) {
+            // Anthropic: message-level cache control (limited to 4 blocks)
+            baseMessage.cache_control = {
+              type: 'ephemeral'
+            };
+            anthropicCacheCount++;
+          } else if (provider === 'google') {
+            // Gemini: content-part level cache control (no known limit)
+            baseMessage.content = [
+              {
+                type: 'text',
+                text: msg.content,
+                cache_control: {
+                  type: 'ephemeral'
+                }
+              }
+            ];
+          }
+          
+          if (provider === 'anthropic' || provider === 'google') {
+            logger.info('Added cache control to message', {
+              messageIndex: index,
+              role: msg.role,
+              contentLength,
+              isLastMessage,
+              isPageContext,
+              provider,
+              model: modelName,
+              anthropicCacheCount: provider === 'anthropic' ? anthropicCacheCount : undefined
+            });
+          }
+        }
       }
 
       return baseMessage;
@@ -182,9 +236,50 @@ export class OpenRouterProvider extends LLMBaseProvider {
   }
 
   /**
+   * Extract cache usage statistics from API response
+   */
+  private extractCacheUsage(data: any): CacheUsage | undefined {
+    if (!data.usage) {
+      return undefined;
+    }
+
+    const usage = data.usage;
+    
+    // Try common cache token field names across providers
+    const cachedTokens = usage.cached_tokens || 
+                        usage.cached_content_token_count || // Gemini
+                        usage.cache_creation_input_tokens || // Anthropic
+                        usage.prompt_tokens_details?.cached_tokens || // OpenAI detailed
+                        usage.cached_prompt_tokens || 
+                        usage.cache_hit_tokens || 0;
+    
+    const totalInputTokens = usage.prompt_tokens || usage.input_tokens || 0;
+    const cacheDiscount = usage.cache_discount || 0;
+
+    if (cachedTokens === 0 && cacheDiscount === 0) {
+      return undefined;
+    }
+
+    const cacheHitRate = totalInputTokens > 0 ? (cachedTokens / totalInputTokens) * 100 : 0;
+
+    const cacheUsage: CacheUsage = {
+      cachedTokens,
+      totalInputTokens,
+      cacheHitRate: Math.round(cacheHitRate * 100) / 100,
+    };
+
+    // Add cache writes if available
+    if (usage.cache_creation_input_tokens) {
+      cacheUsage.cacheWrites = usage.cache_creation_input_tokens;
+    }
+
+    return cacheUsage;
+  }
+
+  /**
    * Processes the OpenRouter response and converts to LLMResponse format
    */
-  private processOpenRouterResponse(data: any): LLMResponse {
+  private processOpenRouterResponse(data: any, modelName?: string): LLMResponse {
     const result: LLMResponse = {
       rawResponse: data
     };
@@ -192,6 +287,18 @@ export class OpenRouterProvider extends LLMBaseProvider {
     // Ensure usage data is available for tracing
     if (data.usage && data.rawResponse) {
       data.rawResponse.usage = data.usage;
+    }
+
+    // Extract cache usage statistics
+    const cacheUsage = this.extractCacheUsage(data);
+    if (cacheUsage) {
+      result.cacheUsage = cacheUsage;
+
+      // Enhanced log cache performance with provider info
+      logger.info(`[OpenRouterProvider] Cache Usage - Cached: ${cacheUsage.cachedTokens}/${cacheUsage.totalInputTokens} tokens (${cacheUsage.cacheHitRate}%)`);
+    } else {
+      // Debug log when no cache usage detected
+      logger.debug('[OpenRouterProvider] No cache usage detected in response for model:', modelName);
     }
 
     if (!data?.choices || data.choices.length === 0) {
@@ -244,7 +351,11 @@ export class OpenRouterProvider extends LLMBaseProvider {
       // Construct payload body in OpenAI Chat Completions format
       const payloadBody: any = {
         model: modelName,
-        messages: this.convertMessagesToOpenRouter(messages),
+        messages: this.convertMessagesToOpenRouter(messages, modelName),
+        // Enable usage tracking for cache monitoring
+        usage: {
+          include: true
+        }
       };
 
       // Add temperature if provided and model supports it
@@ -277,7 +388,7 @@ export class OpenRouterProvider extends LLMBaseProvider {
       logger.info('Request payload:', payloadBody);
 
       const data = await this.makeAPIRequest(this.getChatEndpoint(), payloadBody);
-      return this.processOpenRouterResponse(data);
+      return this.processOpenRouterResponse(data, modelName);
     }, options?.retryConfig);
   }
 

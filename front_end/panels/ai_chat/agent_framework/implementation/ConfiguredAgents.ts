@@ -67,7 +67,21 @@ Always check
 - The presence of key content elements
 If the page does not match the expected content, retry with a different URL pattern.
 
-Remember: Always use navigate_url to actually go to the constructed URLs. Return easy-to-read markdown reports.`,
+Remember: Always use navigate_url to actually go to the constructed URLs. Return easy-to-read markdown reports.
+
+## Task Completion Protocol
+
+When you successfully complete your task and are ready to provide your final answer, structure your response as follows:
+
+**Navigation Summary:**
+- URLs Attempted: [List of URLs tried]
+- Success/Failure: [Which URLs worked/failed]
+- Final Destination: [Where user ended up]
+
+**Navigation Result:**
+[Easy-to-read markdown report]
+
+This ensures proper handoff context and execution tracking.`,
     tools: ['navigate_url', 'get_page_content'],
     maxIterations: 5,
     modelName: () => AIChatPanel.instance().getSelectedModel(),
@@ -171,6 +185,11 @@ export function initializeConfiguredAgents(): void {
   const ecommerceProductInfoAgentConfig = createEcommerceProductInfoAgentConfig();
   const ecommerceProductInfoAgent = new ConfigurableAgentTool(ecommerceProductInfoAgentConfig);
   ToolRegistry.registerToolFactory('ecommerce_product_info_fetcher_tool', () => ecommerceProductInfoAgent);
+  
+  // Create and register Schema Extraction Agent
+  const schemaExtractionAgentConfig = createSchemaExtractionAgentConfig();
+  const schemaExtractionAgent = new ConfigurableAgentTool(schemaExtractionAgentConfig);
+  ToolRegistry.registerToolFactory('schema_extraction_agent', () => schemaExtractionAgent);
 
 }
 
@@ -219,7 +238,10 @@ First, think through the task thoroughly:
 ### 2. Tool Selection Strategy
 Choose tools based on task requirements:
 - **navigate_url** + **fetcher_tool**: Core research loop - navigate to search engines, then fetch complete content
-- **schema_based_extractor**: Extract structured data from search results (URLs, titles, snippets)
+- **schema_extraction_agent**: Intelligent agent that extracts structured data automatically
+  * Handles page content retrieval, extraction, and URL resolution in a single call
+  * Required parameters: {extraction_schema: object, instruction: string, reasoning: string}
+  * Example: {"extraction_schema": {"type": "object", "properties": {"urls": {"type": "array", "items": {"type": "string", "format": "url"}}}}, "instruction": "Extract all URLs from search results", "reasoning": "Need URLs to fetch full content"}
 - **fetcher_tool**: BATCH PROCESS multiple URLs at once - accepts an array of URLs to save tool calls
 - **document_search**: Search within documents for specific information
 - **bookmark_store**: Save important sources for reference
@@ -240,7 +262,7 @@ Execute an excellent Observe-Orient-Decide-Act loop:
 
 **Efficient Research Workflow**:
 1. Use navigate_url to search for your topic
-2. Use schema_based_extractor to collect ALL URLs from search results
+2. Use schema_extraction_agent to collect ALL URLs from search results
 3. Call fetcher_tool ONCE with the array of all extracted URLs
 4. Analyze the batch results and determine if more searches are needed
 5. Repeat with different search queries if necessary
@@ -311,12 +333,26 @@ When your research is complete:
 3. The handoff tool expects: {query: "research topic", reasoning: "explanation for user"}
 4. The content_writer_agent will create the final report from your research data
 
-Remember: You gather data, content_writer_agent writes the report. Always hand off when research is complete.`,
+Remember: You gather data, content_writer_agent writes the report. Always hand off when research is complete.
+
+## Task Completion Protocol
+
+When you successfully complete your task and are ready to provide your final answer, structure your response as follows:
+
+**Research Summary:**
+- Sources Analyzed: [Number and types of sources]
+- Key Findings: [Bullet points of main discoveries]
+- Data Collected: [Types of information gathered]
+
+**Research Results:**
+[Detailed findings]
+
+This ensures proper handoff context and execution tracking.`,
     tools: [
       'navigate_url',
       'navigate_back',
       'fetcher_tool',
-      'schema_based_extractor',
+      'schema_extraction_agent',
       'node_ids_to_urls',
       'bookmark_store',
       'document_search'
@@ -364,12 +400,12 @@ ${args.scope ? `The scope of research expected: ${args.scope}` : ''}
       {
         targetAgentName: 'content_writer_agent',
         trigger: 'llm_tool_call',
-        includeToolResults: ['fetcher_tool', 'schema_based_extractor']
+        includeToolResults: ['fetcher_tool', 'schema_extraction_agent']
       },
       {
         targetAgentName: 'content_writer_agent',
         trigger: 'max_iterations',
-        includeToolResults: ['fetcher_tool', 'schema_based_extractor']
+        includeToolResults: ['fetcher_tool', 'schema_extraction_agent']
       }
     ],
   };
@@ -420,7 +456,21 @@ Your process should follow these steps:
 9. **Conclusion**: Summary of key points and final thoughts
 10. **References**: Properly formatted citations for all sources used
 
-The final output should be in markdown format, and it should be lengthy and detailed. Aim for 5-10 pages of content, at least 1000 words.`,
+The final output should be in markdown format, and it should be lengthy and detailed. Aim for 5-10 pages of content, at least 1000 words.
+
+## Task Completion Protocol
+
+When you successfully complete your task and are ready to provide your final answer, structure your response as follows:
+
+**Writing Summary:**
+- Report Length: [Number of words/pages written]
+- Sections Created: [List of main sections]
+- Sources Cited: [Number of research sources used]
+
+**Final Report:**
+[Complete markdown report]
+
+This ensures proper handoff context and execution tracking.`,
     tools: [],
     maxIterations: 3,
     modelName: () => AIChatPanel.getMiniModel(),
@@ -465,18 +515,28 @@ When analyzing page structure, you have access to:
 - URL mappings for direct link destinations
 - Clean accessibility tree with reduced noise for better focus
 
+## Available Page Context
+You automatically receive current page context (accessibility tree, title, URL) as part of your input - **you do not need to call get_page_content unless**:
+- You need the most up-to-date page state after a previous action
+- You want enhanced accessibility information (XPath, HTML tags, URL mappings)
+- The automatic page context seems outdated or insufficient
+
 ## Process Flow
-1. When given an objective, first analyze the page structure using get_page_content tool to access the enhanced accessibility tree or use schema_based_extractor to extract the specific element you need to interact with
-2. Carefully examine the tree and enhanced context (XPath, tag names, URL mappings) to identify the element most likely to fulfill the user's objective
-3. Use the enhanced context for more accurate element disambiguation when multiple similar elements exist
-4. Determine the appropriate action method based on the element type and objective:
+1. When given an objective, first review the automatically provided page context
+2. If you need more detailed or updated page information, use get_page_content tool to access the enhanced accessibility tree
+3. Use schema_extraction_agent to extract structured data from the current page
+   * This agent automatically handles page content retrieval and URL resolution
+   * Required parameters: {extraction_schema, instruction, reasoning}
+4. Carefully examine the tree and enhanced context (XPath, tag names, URL mappings) to identify the element most likely to fulfill the user's objective
+5. Use the enhanced context for more accurate element disambiguation when multiple similar elements exist
+6. Determine the appropriate action method based on the element type and objective:
    - For links, buttons: use 'click'
    - For checkboxes: use 'check' (to check), 'uncheck' (to uncheck), or 'setChecked' (to set to specific state)
    - For radio buttons: use 'click' 
    - For input fields: use 'fill' with appropriate text
    - For dropdown/select elements: use 'selectOption' with the option value or text
-5. Execute the action using perform_action tool
-6. **CRITICAL: Analyze the pageChange evidence to determine action effectiveness**
+7. Execute the action using perform_action tool
+8. **CRITICAL: Analyze the pageChange evidence to determine action effectiveness**
 
 ## EVALUATING ACTION EFFECTIVENESS
 After executing an action, the perform_action tool returns objective evidence in pageChange:
@@ -525,7 +585,7 @@ Conclusion: Fix the args format and retry with proper syntax: { "method": "fill"
     tools: [
       'get_page_content',
       'perform_action',
-      'schema_based_extractor',
+      'schema_extraction_agent',
       'node_ids_to_urls',
       'scroll_page',
       'take_screenshot',
@@ -573,6 +633,7 @@ ${args.input_data ? `Input Data: ${args.input_data}` : ''}
         includeToolResults: ['perform_action', 'get_page_content']
       }
     ],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -621,7 +682,10 @@ Based on the action type, use different verification strategies:
 - search_content: Look for specific text indicating success/failure
 - inspect_element: Check properties of specific elements
 - get_console_logs: Check for errors or success messages in the console
-- schema_based_extractor: Extract structured data to verify expected outcomes
+- schema_extraction_agent: Extract structured data to verify expected outcomes automatically
+  * Handles page content retrieval and data extraction in a single call
+  * Required parameters: {extraction_schema: object, instruction: string, reasoning: string}
+  * Example: {"extraction_schema": {"type": "object", "properties": {"status": {"type": "string"}}}, "instruction": "Extract success indicators", "reasoning": "Verify action completion"}
 
 ## Output Format
 Provide a clear verification report with:
@@ -636,7 +700,7 @@ Remember that verification is time-sensitive - the page state might change durin
       'search_content',
       'inspect_element',
       'get_console_logs',
-      'schema_based_extractor',
+      'schema_extraction_agent',
       'take_screenshot'
     ],
     maxIterations: 3,
@@ -677,6 +741,7 @@ Please verify if the action was successfully completed and achieved its intended
       }];
     },
     handoffs: [],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -721,7 +786,7 @@ When selecting an element to click, prioritize:
     tools: [
       'get_page_content',
       'perform_action',
-      'schema_based_extractor',
+      'schema_extraction_agent',
       'node_ids_to_urls',
     ],
     maxIterations: 5,
@@ -755,6 +820,7 @@ ${args.hint ? `Hint: ${args.hint}` : ''}
       }];
     },
     handoffs: [],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -802,7 +868,7 @@ When selecting a form field to fill, prioritize:
     tools: [
       'get_page_content',
       'perform_action',
-      'schema_based_extractor',
+      'schema_extraction_agent',
     ],
     maxIterations: 5,
     modelName: () => AIChatPanel.getMiniModel(),
@@ -835,6 +901,7 @@ ${args.hint ? `Hint: ${args.hint}` : ''}
       }];
     },
     handoffs: [],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -878,7 +945,7 @@ When selecting an element for keyboard input, prioritize:
     tools: [
       'get_page_content',
       'perform_action',
-      'schema_based_extractor',
+      'schema_extraction_agent',
     ],
     maxIterations: 5,
     modelName: () => AIChatPanel.getMiniModel(),
@@ -916,6 +983,7 @@ ${args.hint ? `Hint: ${args.hint}` : ''}
       }];
     },
     handoffs: [],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -963,7 +1031,7 @@ When selecting an element to hover over, prioritize:
     tools: [
       'get_page_content',
       'perform_action',
-      'schema_based_extractor',
+      'schema_extraction_agent',
     ],
     maxIterations: 5,
     modelName: () => AIChatPanel.getMiniModel(),
@@ -996,6 +1064,7 @@ ${args.hint ? `Hint: ${args.hint}` : ''}
       }];
     },
     handoffs: [],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -1045,7 +1114,7 @@ The accessibility tree includes information about scrollable containers. Look fo
     tools: [
       'get_page_content',
       'perform_action',
-      'schema_based_extractor',
+      'schema_extraction_agent',
     ],
     maxIterations: 5,
     modelName: () => AIChatPanel.getMiniModel(),
@@ -1078,6 +1147,7 @@ ${args.hint ? `Hint: ${args.hint}` : ''}
       }];
     },
     handoffs: [],
+    alwaysUseSummaryAgent: true,
   };
 }
 
@@ -1108,7 +1178,9 @@ You automatically receive rich context with each iteration:
 
 **Important distinctions:**
 - **Accessibility tree**: Shows only viewport elements (what's currently visible)
-- **Schema extraction**: Can access the entire page content, not just the viewport
+- **Schema extraction agent**: Automatically retrieves full page content and extracts structured data
+  * Handles page content, extraction, URL resolution, and validation automatically
+  * Required parameters: {extraction_schema, instruction, reasoning}
 - **Dynamic content**: May require wait strategies and loading detection
 
 ## Enhanced Guidelines
@@ -1146,11 +1218,11 @@ You automatically receive rich context with each iteration:
 ### 2. Enhanced Execution Strategy
 **TAKE INITIAL SCREENSHOT**: Always take a screenshot at the beginning (iteration 1) and document the starting state
 
-**USE SMART WAITING**: After navigation or actions, intelligently wait for:
-- Network idle states (no pending requests)
-- Dynamic content loading completion
-- JavaScript framework initialization
-- Animation/transition completion
+**USE CONTENT-FIRST APPROACH**: Before waiting, always check current page state:
+- Use get_page_content or take_screenshot to see what's already available
+- Identify specific missing content needed for your objective  
+- Only wait if required content is provably missing AND there are loading indicators
+- When waiting IS needed, be specific about what content you're waiting for
 
 **IMPLEMENT PROGRESSIVE LOADING DETECTION**:
 - Look for skeleton loaders, loading spinners, or placeholder content
@@ -1170,7 +1242,7 @@ You automatically receive rich context with each iteration:
 - **Chrome Internal Pages**: action_agent cannot interact with any Chrome internal pages (chrome://*) including new tab, settings, extensions, etc. - navigate to a real website first
 
 **IMPLEMENT RECOVERY STRATEGIES**:
-- **Rate Limits**: Use wait_for_page_load with exponential backoff (2s, 4s, 8s, 16s), then retry
+- **Rate Limits**: First check if rate limit message is present, then wait with escalating delays (2s, 4s, 8s) only if still blocked
 - **CAPTCHAs**: Detect and inform user, provide clear guidance for manual resolution
 - **Authentication**: Attempt to identify login requirements and notify user
 - **Overlays**: Advanced blocking element detection and removal via action_agent
@@ -1209,7 +1281,8 @@ You automatically receive rich context with each iteration:
 - Avoid redundant tool calls through smart caching
 
 **MANAGE LARGE CONTENT**:
-- For large pages, extract in targeted chunks using schema_based_extractor
+- For large pages, use schema_extraction_agent which automatically handles content retrieval
+  * Single call replaces multiple manual extraction steps
 - Use CSS selectors to limit extraction scope when possible
 - Implement pagination handling for multi-page datasets
 
@@ -1250,16 +1323,17 @@ You automatically receive rich context with each iteration:
 ### Smart Navigation Strategy
 1. Try direct_url_navigator_agent for known URL patterns
 2. Use navigate_url for standard navigation
-3. Implement wait_for_page_load for dynamic content
-4. Apply scroll_page strategically for infinite scroll
-5. Use take_screenshot for understanding the web page state
+3. Check current page content immediately after navigation
+4. Only use wait_for_page_load if needed content is missing AND loading is evident
+5. Apply scroll_page strategically for infinite scroll
+6. Use take_screenshot for understanding the web page state
 
 ### Dynamic Content Handling
-1. After navigation, use wait_for_page_load (2-3 seconds) for initial load
-2. Check for loading indicators or skeleton content
-3. Use wait_for_page_load until content stabilizes
-4. Re-extract content and compare with previous state
-5. Repeat until content stabilizes
+1. After navigation, immediately check current page content for needed elements
+2. If required content is missing, look for loading indicators or skeleton content
+3. Only use wait_for_page_load if content is missing AND loading indicators are present
+4. Always specify exactly what content you're waiting for in the wait reason
+5. Use wait tool's viewport summary to determine if additional waiting is needed
 
 ### Error Recovery Workflow
 1. Detect error type through page analysis
@@ -1269,12 +1343,47 @@ You automatically receive rich context with each iteration:
 5. Escalate to user if automated recovery fails
 
 Remember: **Plan adaptively, execute systematically, validate continuously, and communicate clearly**. Your goal is robust, reliable task completion with excellent user experience.
+
+## Task Completion Protocol
+
+When you successfully complete your task and are ready to provide your final answer, structure your response as follows:
+
+**Task Execution Summary:**
+- Pages Visited: [URLs navigated]
+- Actions Completed: [List of successful actions]
+- Final State: [Where the user ended up]
+
+**Task Result:**
+[Outcome description]
+
+This ensures proper handoff context and execution tracking.
+
+## Wait Strategy Examples
+**GOOD - Content-First Approach:**
+1. Navigate to search page → Check if search box is present → If yes, proceed immediately
+2. Submit form → Check for success message or error → Wait only if neither appears and loading indicator is visible  
+3. Click "Load More" → Check if new items appeared → Wait only if button shows "Loading..." state
+
+**BAD - Preemptive Waiting:**
+❌ Navigate to page → Wait 3 seconds → Then check content
+❌ Submit form → Wait 2 seconds → Then check for response
+❌ Click button → Always wait regardless of immediate feedback
+
+**When to Wait:**
+- Search results container is empty AND "Searching..." indicator is visible
+- Form shows "Processing..." after submission but no success/error message yet
+- Product list ends with "Loading more items..." placeholder
+
+**When NOT to Wait:**
+- Content you need is already visible on the page
+- No loading indicators are present
+- Previous actions show immediate results
 `,
     tools: [
       'navigate_url',
       'navigate_back',
       'action_agent',
-      'schema_based_extractor',
+      'schema_extraction_agent',
       'node_ids_to_urls',
       'direct_url_navigator_agent',
       'scroll_page',
@@ -1411,12 +1520,26 @@ If a product URL is provided, first use the navigate_url tool to go to that page
 ## Process Flow:
 1. If a URL is provided, use navigate_url tool to go to that page first
 2. Then analyze the page structure using get_page_content to access the accessibility tree
-3. Use schema_based_extractor to extract structured product information when possible
+3. Use schema_extraction_agent to extract structured product information automatically
 4. If needed, use search_content to find specific product details that may be in different sections
 5. Compile all information into a comprehensive, organized report following the presentation guidelines
 6. Present the information in a structured format that makes it easy for shoppers to understand all aspects of the item
 
-Remember to adapt your analysis based on the product category - different attributes will be more important for electronics versus clothing versus home goods.`,
+Remember to adapt your analysis based on the product category - different attributes will be more important for electronics versus clothing versus home goods.
+
+## Task Completion Protocol
+
+When you successfully complete your task and are ready to provide your final answer, structure your response as follows:
+
+**Product Analysis Summary:**
+- Product Category: [Type of product analyzed]
+- Information Completeness: [Complete/Partial/Missing data]
+- Key Attributes Found: [List of main product details discovered]
+
+**Product Information Report:**
+[Structured product information with clear sections]
+
+This ensures proper handoff context and execution tracking.`,
     tools: [
       'navigate_url',
       'get_page_content',
@@ -1447,5 +1570,92 @@ Only return the product information, no other text. DO NOT HALLUCINATE`,
       }];
     },
     handoffs: [],
+  };
+}
+
+/**
+ * Configuration for the Schema Extraction Agent
+ */
+function createSchemaExtractionAgentConfig(): AgentToolConfig {
+  return {
+    name: 'schema_extraction_agent',
+    description: 'Intelligent agent that automatically extracts structured data from web pages based on a JSON schema. Handles page content retrieval, data extraction, URL resolution, and validation in a single call. Returns clean, structured JSON without requiring manual page content management.',
+    systemPrompt: `You are a specialized data extraction agent that automatically extracts structured data from web pages.
+
+## Your Workflow
+1. **Get Current Page Content**: Use get_page_content to retrieve the accessibility tree
+2. **Extract Structured Data**: Parse the content according to the provided schema
+3. **Resolve URLs**: Convert accessibility node IDs to actual URLs using node_ids_to_urls
+4. **Validate & Return**: Ensure completeness and return clean JSON
+
+## Extraction Rules
+- **No Hallucination**: Only extract data that actually exists on the page
+- **Schema Compliance**: Returned JSON must exactly match the provided schema structure
+- **URL Handling**: For URL fields in schema, initially extract as accessibility node IDs, then resolve to actual URLs
+- **Null Values**: Use null/empty for required fields when data isn't found; omit optional fields
+- **Quality Focus**: Aim for accurate, complete extraction over partial/guessed data
+
+## Process Flow
+1. Call get_page_content to get accessibility tree
+2. Extract data matching the provided schema (URLs as node IDs initially)
+3. If node IDs were extracted for URLs, call node_ids_to_urls to resolve them
+4. Validate extraction completeness and format
+5. Return the final structured JSON result
+
+Your goal is to provide a single, clean JSON response that perfectly matches the requested schema with accurate data from the current page.
+
+## Task Completion Protocol
+
+When you successfully complete your task and are ready to provide your final answer, structure your response as follows:
+
+**Extraction Summary:**
+- Data Extracted: [Number of items/fields extracted]
+- Schema Compliance: [Yes/No with any issues]  
+- Data Quality: [Complete/Partial/Missing fields]
+
+**Extracted Data:**
+[JSON response]
+
+This ensures proper handoff context and execution tracking.`,
+    tools: ['get_page_content', 'node_ids_to_urls'],
+    maxIterations: 5,
+    modelName: () => AIChatPanel.getMiniModel(),
+    temperature: 0.1,
+    schema: {
+      type: 'object',
+      properties: {
+        extraction_schema: {
+          type: 'object',
+          description: 'JSON Schema definition describing the structure of data to extract from the page'
+        },
+        instruction: {
+          type: 'string',
+          description: 'Natural language instruction describing what specific data to extract and any special requirements'
+        },
+        reasoning: {
+          type: 'string',
+          description: 'Explanation of why this data extraction is needed and what it will be used for'
+        }
+      },
+      required: ['extraction_schema', 'instruction', 'reasoning']
+    },
+    prepareMessages: (args: ConfigurableAgentArgs): ChatMessage[] => {
+      return [{
+        entity: ChatMessageEntity.USER,
+        text: `Extract structured data from the current web page:
+
+**Extraction Schema:**
+\`\`\`json
+${JSON.stringify(args.extraction_schema, null, 2)}
+\`\`\`
+
+**Instruction:** ${args.instruction}
+
+**Reasoning:** ${args.reasoning}
+
+Follow your workflow to extract this data automatically and return clean JSON matching the schema.`,
+      }];
+    },
+    handoffs: []
   };
 }

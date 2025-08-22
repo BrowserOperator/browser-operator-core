@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { enhancePromptWithPageContext } from '../core/PageInfoManager.js';
+import { getPageContextAsUserMessage } from '../core/PageInfoManager.js';
 import { LLMClient } from '../LLM/LLMClient.js';
 import type { LLMResponse, LLMMessage } from '../LLM/LLMTypes.js';
 import type { Tool } from '../tools/Tools.js';
@@ -251,8 +251,8 @@ export class AgentRunner {
       handoffMessages = [...currentMessages];
     }
 
-    // Enhance the target agent's system prompt with page context
-    const enhancedSystemPrompt = await enhancePromptWithPageContext(targetConfig.systemPrompt);
+    // Use static system prompt (page context will be appended to messages)
+    const staticSystemPrompt = targetConfig.systemPrompt;
 
     // Construct Runner Config & Hooks for the target agent
     const targetRunnerConfig: AgentRunnerConfig = {
@@ -260,7 +260,7 @@ export class AgentRunner {
       modelName: typeof targetConfig.modelName === 'function'
         ? targetConfig.modelName()
         : (targetConfig.modelName || defaultModelName),
-      systemPrompt: enhancedSystemPrompt,
+      systemPrompt: staticSystemPrompt,
       tools: targetConfig.tools
               .map(toolName => ToolRegistry.getRegisteredTool(toolName))
               .filter((tool): tool is Tool<any, any> => tool !== null),
@@ -447,9 +447,8 @@ export class AgentRunner {
 - You are currently on step ${iteration + 1} of ${maxIterations} maximum steps.
 - Focus on making meaningful progress with each step.`;
 
-      // Enhance system prompt with iteration info and page context
-      // This includes updating the accessibility tree inside enhancePromptWithPageContext
-      const currentSystemPrompt = await enhancePromptWithPageContext(systemPrompt + iterationInfo);
+      // Use static system prompt with iteration info (page context will be appended to messages)
+      const currentSystemPrompt = systemPrompt;
 
       let llmResponse: LLMResponse;
       let generationId: string | undefined; // Declare in iteration scope for tool call access
@@ -514,6 +513,38 @@ export class AgentRunner {
         const llm = LLMClient.getInstance();
         const provider = AIChatPanel.getProviderForModel(modelName);
         const llmMessages = AgentRunner.convertToLLMMessages(messages);
+        
+        // Only append page context for action-related agents that need to interact with the current page
+        const actionAgents = new Set([
+          'action_agent',
+          'click_action_agent', 
+          'form_fill_action_agent',
+          'keyboard_input_action_agent',
+          'hover_action_agent',
+          'scroll_action_agent',
+          'action_verification_agent'
+        ]);
+        
+        // Skip page context if last tool was get_page_content or thinking
+        const lastMessage = messages[messages.length - 1];
+        const skipPageContext = lastMessage?.entity === ChatMessageEntity.TOOL_RESULT && 
+          ['get_page_content', 'thinking'].includes((lastMessage as ToolResultMessage).toolName);
+        
+        if (actionAgents.has(agentName) && !skipPageContext) {
+          const pageContext = await getPageContextAsUserMessage();
+          if (pageContext && pageContext.content) {
+            // Find the last user message and append page content to it
+            const lastUserMessageIndex = llmMessages.findLastIndex(msg => msg.role === 'user');
+            if (lastUserMessageIndex >= 0) {
+              // Append page context to the last user message
+              const originalContent = llmMessages[lastUserMessageIndex].content;
+              llmMessages[lastUserMessageIndex].content = `${originalContent}\n\n${pageContext.content}`;
+            } else {
+              // Fallback: if no user message found, add as separate message (shouldn't happen in normal flow)
+              llmMessages.push(pageContext);
+            }
+          }
+        }
 
         llmResponse = await llm.call({
           provider,
@@ -956,8 +987,20 @@ export class AgentRunner {
 
           logger.info(`${agentName} LLM provided final answer.`);
 
-          // Generate summary of successful completion
-          const completionSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'final_answer');
+          // Check if agent requires external summarization
+          const requiresExternalSummary = executingAgent?.config?.alwaysUseSummaryAgent === true;
+
+          let completionSummary: string;
+
+          if (requiresExternalSummary) {
+            // Action agents: Use external summarization for detailed tracking
+            logger.info(`${agentName} Using external summarization (alwaysUseSummaryAgent=true)`);
+            completionSummary = await this.summarizeAgentProgress(messages, maxIterations, agentName, modelName, 'final_answer');
+          } else {
+            // Non-action agents: Their answer IS their summary
+            logger.info(`${agentName} Using self-summary from agent answer`);
+            completionSummary = answer;
+          }
 
           // Complete session naturally
           agentSession.status = 'completed';
