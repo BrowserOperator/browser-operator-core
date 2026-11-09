@@ -4,7 +4,7 @@
 
 import("./config/gni/devtools_grd_files.gni")
 
-if (is_mac) {
+if (is_mac && build_with_chromium) {
   group("browser_operator_update_qualification") {
     testonly = true
     deps = [ "scripts/updater/native:browser_operator_update_verify" ]

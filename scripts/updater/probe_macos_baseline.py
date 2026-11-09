@@ -19,7 +19,7 @@ parser.add_argument('--launch-via-services', action='store_true',
 options = parser.parse_args()
 if Path(options.stage).name != options.stage or options.stage in ('.', '..'):
     parser.error('stage must be a single directory name')
-root = Path('/Users/tyson/chromium/updater-test')
+root = Path.home() / 'chromium/updater-test'
 app = root / 'install/Browser Operator.app'
 profile = root / 'profile'
 artifacts = root / options.stage

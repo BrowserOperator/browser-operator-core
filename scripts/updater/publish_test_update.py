@@ -27,8 +27,8 @@ def main():
     release = json.loads((a.release / 'release-manifest.json').read_text())
     candidate = json.loads((a.candidate / 'update-manifest.json').read_text())
     catalog = json.loads((a.candidate / 'catalog-candidate.json').read_text())
-    if release.get('update_channel') not in ('local-test', 'cloud-test') or release['notarization'] != 'accepted and stapled' or release['gatekeeper'] != 'accepted':
-        p.error('Only a verified, notarized isolated test release can be published here')
+    if release.get('update_channel') != 'cloud-test' or release['notarization'] != 'accepted and stapled' or release['gatekeeper'] != 'accepted':
+        p.error('Only a verified, notarized HTTPS cloud-test release can be published here')
     if (candidate['version'] != release['version'] or candidate['source_release_sha256'] != release['sha256'] or len(catalog['apps']) != 1):
         p.error('Candidate does not match the verified release')
     package = catalog['apps'][0]['crx']
