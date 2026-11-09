@@ -15,7 +15,7 @@ idle disposable controller to simulate a due check, then kickstarted its own
 wake job. Do not use utility exit 0 as proof of update success. The test script
 now exercises the actual scheduled path. Details and failed evidence below.
 
-Cloud qualification is in progress on an authorized e2-micro in
+Cloud 158-to-159 scheduled native update qualification PASSED on an authorized e2-micro in
 browseroperator-1746729957294, billed to the explicitly selected account ending
 B70C99. The VM has IAP-only SSH, no service account, trusted HTTPS, and automatic
 deletion after four hours. A separate CUP private key was generated ON the VM;
@@ -27,8 +27,18 @@ overrides are intentionally not available and were not enabled.
 
 Private service repository: https://github.com/BrowserOperator/omaha. The user
 also authorized pushing browser and CircleCI work to their existing remotes.
-GitHub update payload prereleases and cloud end-to-end qualification are still
-pending. Never publish loopback builds as production releases. Only ARM64 is
+The signed cloud payload was published as a GitHub prerelease and all four
+uploaded asset hashes/sizes were verified. The native scheduled updater fetched
+173,996,709 bytes directly from GitHub, verified CUP/CRX, installed genuine 159,
+retained the bookmark, and passed strict signatures/ticket/Gatekeeper. About
+returned up to date. Cloud report:
+/Users/tyson/chromium/updater-test/cloud-158-to-159-qualification/qualification-report.json.
+Test release:
+https://github.com/BrowserOperator/browser-operator-releases/releases/tag/autoupdate-test-159.0.8144.0-macos-arm64-20261109.
+The VM is temporary and automatically deletes after four hours; this endpoint
+and key are not a production feed. Current draft reviews:
+https://github.com/BrowserOperator/browser-operator-core/pull/101 and
+https://github.com/tysonthomas9/test-github-pipeline/pull/7. Never publish loopback builds as production releases. Only ARM64 is
 qualified; x86, universal, Windows, Linux, updater self-update and production
 rollout remain separate work. The original /Applications app is unchanged.
 
@@ -410,3 +420,47 @@ native client configuration. Official updater constants_prod does NOT load
 developer overrides.json; do not weaken its localhost-only test override guard.
 For cloud, use a separately built HTTPS updater configuration (same test keys),
 not certificate bypasses or disabled CUP. Need GitHub release hosting as selected.
+
+## Completed real cloud qualification (2026-11-09)
+
+The private Omaha service at commit 104ed61 was deployed behind nginx with a
+trusted IP certificate. Actual Chromium CUP validation passed through HTTPS
+(including a 4,907-byte proof header). A separate VM-generated CUP key was
+compiled into the native HTTPS updater; local package-signing CRX keys stayed
+on the Mac. Native official updater developer URL guards were not weakened.
+
+Both HTTPS test DMGs were independently signed/notarized/stapled and passed
+mounted functional, signature and Gatekeeper tests:
+
+- Baseline 158 DMG SHA256:
+  e7a73526e29e94c453632039cfd7e176769f587b5d8d436d25f78ea7f259c01c.
+  This is a genuine frozen 158 engine with the separately built 159 HTTPS helper;
+  its composition manifest records both build origins without relabeling 158.
+- Target 159 DMG SHA256:
+  d3e231ade2e06fd8fec39900e504670e2afb39feea3f9ff5426747f4266fc999.
+- Cloud update CRX SHA256:
+  6b49d4b9dce7eeab06d45a9ee660c7b272ca9c8f771651b681748c39f9d9e3dc.
+  Download size 173996709 bytes; native download metrics recorded success in
+  9078 ms, pinned CRX verification passed, rsyncs completed, and native 159
+  relaunch retained bookmark UUID ad12f6ed-eb20-52e8-ab9a-52c2549b9721.
+
+The fresh 158 setup used normal Launch Services and installed helper CDHash
+62b171343bf083a0b40aab2e227515d665667257 with a healthy wake launch agent. With
+the cloud feed activated, the native periodic launchd job updated 158 to 159;
+the service observed both the 158 offer and the subsequent 159 noupdate check.
+Strict signatures, Apple's ticket and Gatekeeper passed after installation.
+The original /Applications app executable and Info.plist hashes were rechecked
+unchanged. No personal profile or macOS privacy settings changed.
+
+The actual GitHub publishing run found that draft releases may not yet have a
+resolvable tag. The script now retrieves the draft by release ID, resumes only
+explicit unchanged drafts, refuses to clobber assets, and verifies every asset's
+remote SHA256/size before publishing a prerelease. This recovery path PASSED
+against GitHub. Publication and cloud catalog activation remained separate.
+
+Local evidence: cloud-158-to-159-qualification (before/after, cloud service log,
+periodic native updater log and report), cloud-baseline-verification, and
+cloud-post-upgrade-verification, all under /Users/tyson/chromium/updater-test.
+Production promotion, updater self-update, remote CircleCI execution and other
+architectures/platforms remain unqualified. Review guide:
+docs/chromium-change-review.md.

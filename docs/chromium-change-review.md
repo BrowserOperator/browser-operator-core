@@ -104,8 +104,13 @@ installed bytes/version/signatures, not the utility's misleading exit zero.
 Only disposable-controller timestamps were adjusted to simulate a due check;
 no macOS privacy permissions changed.
 
-Still pending at this review checkpoint: cloud end-to-end update, final cloud
-payload notarization/publication, a remote CircleCI execution/schema check,
+Also PASSED: the real GCP HTTPS Omaha scheduled 158-to-159 update, with a
+173996709-byte GitHub Releases download, native CUP/CRX verification, actual
+159 relaunch, preserved bookmark, updated About status and platform trust.
+Both cloud DMGs are signed/notarized; the test prerelease and uploaded asset
+hashes were verified. Draft publication recovery was exercised against GitHub.
+
+Still pending at this review checkpoint: a remote CircleCI execution/schema check,
 production rollout and updater self-update. x86/universal, Windows and Linux
 are not qualified. LLM provider conversations were not tested without keys.
 
