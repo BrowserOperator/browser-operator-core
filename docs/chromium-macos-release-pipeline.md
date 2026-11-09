@@ -1,6 +1,19 @@
 # macOS shipping workflow and CircleCI review
 
-Reviewed 2026-11-07 (America/Los_Angeles).
+Current review (2026-11-09): changes are pushed in draft PR
+https://github.com/tysonthomas9/test-github-pipeline/pull/7. It also includes
+opt-in native updater packaging and test-prerelease publishing, disabled by
+default. Select enable_test_updater=true, an updater-enabled release_gn_config,
+and publish_test_update=true plus a unique update_test_tag for a test upload.
+The prepared signing runner needs local CRX_PRIVATE_KEY/CRX_PUBLIC_KEY paths and
+GitHub repo authorization. HTTPS cloud test configuration must be generated on
+the runner first; it is ephemeral and not committed. Publication never
+activates Omaha. Bash 3.2 syntax/empty-array and YAML parsing checks passed;
+CircleCI server validation/remote execution are still pending. Commits use
+[skip ci] to avoid launching the existing expensive default jobs for review.
+
+The original audit below was recorded 2026-11-07 (America/Los_Angeles); references
+to local/unpushed changes describe that historical checkpoint.
 
 ## Existing workflow inspected
 

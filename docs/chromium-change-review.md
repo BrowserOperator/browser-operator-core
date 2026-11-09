@@ -7,10 +7,14 @@ private Omaha test server and the opt-in CircleCI release path.
 ## Review locations
 
 - Browser/frontend/build scripts: BrowserOperator/browser-operator-core,
-  branch `codex/browser-operator-macos-updates`, based on `fix/simplification`.
+  [draft PR #101](https://github.com/BrowserOperator/browser-operator-core/pull/101),
+  branch `codex/browser-operator-macos-updates`. The review base preserves the
+  original `fix/simplification` snapshot; that remote branch was removed.
+  Current main has diverged and has not been integrated into this draft.
 - Private Omaha service: https://github.com/BrowserOperator/omaha (initial commit
   contains the whole service, tests and deployment tooling).
 - CircleCI integration: tysonthomas9/test-github-pipeline,
+  [draft PR #7](https://github.com/tysonthomas9/test-github-pipeline/pull/7),
   branch `codex/macos-updater-release`, based on `feature/mac-sign-notarize`.
 
 Nothing is merged by this work. Existing unrelated tracked node_modules
