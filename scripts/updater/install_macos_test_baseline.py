@@ -29,12 +29,15 @@ def main():
                         help='Retain a normally bootstrapped controller for a repeated upgrade test')
     parser.add_argument('--restore-profile', type=Path,
                         help='Restore a closed baseline profile from this test namespace')
+    parser.add_argument('--stage', default='corrected-baseline-verification')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('macOS required')
     root = Path.home() / 'chromium/updater-test'
     if Path(args.backup_name).name != args.backup_name or args.backup_name in ('.', '..'):
         parser.error('backup-name must be a single directory name')
+    if Path(args.stage).name != args.stage or args.stage in ('.', '..'):
+        parser.error('stage must be a single directory name')
     if args.restore_profile:
         profile_source = args.restore_profile.resolve()
         if not profile_source.is_relative_to(root.resolve()) or not (profile_source / 'Local State').is_file():
@@ -43,7 +46,7 @@ def main():
         raise RuntimeError('Empty the isolated test catalog before resetting the baseline')
     release = args.release.resolve()
     manifest = json.loads((release / 'release-manifest.json').read_text())
-    if (manifest['update_channel'] != 'local-test' or manifest['architecture'] != 'arm64' or
+    if (manifest['update_channel'] not in ('local-test', 'cloud-test') or manifest['architecture'] != 'arm64' or
             manifest['notarization'] != 'accepted and stapled' or manifest['gatekeeper'] != 'accepted'):
         raise RuntimeError('Use a verified, notarized isolated ARM64 test release')
     dmg = release / 'artifacts' / manifest['dmg']
@@ -98,7 +101,7 @@ def main():
     subprocess.run([sys.executable, str(Path(__file__).with_name('probe_macos_baseline.py')),
                     '--version', manifest['version'], '--profile-sentinel', 'check',
                     '--launch-via-services',
-                    '--stage', 'corrected-baseline-verification'], check=True)
+                    '--stage', args.stage], check=True)
     # This check must pass without manually clearing quarantine or bootstrapping.
     label = 'com.browseroperator.autoupdate-test.Updater.wake'
     agent = Path.home() / 'Library/LaunchAgents' / (label + '.plist')
@@ -106,7 +109,7 @@ def main():
     if not agent.is_file() or 'com.apple.quarantine' in attributes:
         raise RuntimeError('Fresh wake agent is absent or still quarantined')
     state = subprocess.check_output(['launchctl', 'print', f'gui/{os.getuid()}/{label}'], text=True)
-    (root / 'corrected-baseline-verification/launch-agent.txt').write_text(state)
+    (root / args.stage / 'launch-agent.txt').write_text(state)
     installed = current / 'BrowserOperatorUpdaterTest.app'
     embedded = app / 'Contents/Frameworks/Browser Operator Framework.framework/Versions/Current/Helpers/BrowserOperatorUpdaterTest.app'
     expected = code_hash(embedded)
@@ -120,7 +123,7 @@ def main():
               'installed_helper_cdhash': expected, 'native_about_check': 'passed',
               'fresh_launch_agent': 'passed', 'manual_quarantine_repair': False,
               'registered_browser_path': str(app)}
-    (root / 'fresh-baseline-install.json').write_text(json.dumps(report, indent=2) + '\n')
+    (root / (args.stage + '-install.json')).write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
 
 
