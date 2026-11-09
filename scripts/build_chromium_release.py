@@ -22,6 +22,8 @@ def show_progress(log):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chromium-src', type=Path, required=True)
+    parser.add_argument('--build-dir', type=Path, default=Path('out/Release'))
+    parser.add_argument('--target-cpu', choices=('arm64', 'x64'), default='arm64')
     parser.add_argument('--jobs', type=int, default=6)
     parser.add_argument('--min-free-gib', type=float, default=5)
     parser.add_argument('--log', type=Path, required=True)
@@ -31,6 +33,11 @@ def main():
     if args.jobs < 1 or args.min_free_gib <= 0:
         parser.error('jobs and min-free-gib must be positive')
     source = args.chromium_src.expanduser().resolve()
+    build = (source / args.build_dir).resolve()
+    if args.build_dir.is_absolute() or not build.is_relative_to(source / 'out'):
+        parser.error('build-dir must be a directory under the Chromium out tree')
+    if not args.gn_config.startswith('//') or any(c in args.gn_config for c in ('"', '\n', '\r')):
+        parser.error('gn-config must be a GN source-root path')
     if not (source / 'chrome/VERSION').is_file():
         raise RuntimeError('chromium-src must point to a Chromium source checkout')
     minimum = args.min_free_gib * 1024**3
@@ -44,7 +51,7 @@ def main():
     # the external DevTools frontend symlink or guessing a profile filename.
     subprocess.run([
         sys.executable, str(source / 'tools/update_pgo_profiles.py'),
-        '--target=mac-arm', 'update',
+        '--target=' + ('mac-arm' if args.target_cpu == 'arm64' else 'mac'), 'update',
         '--gs-url-base=chromium-optimization-profiles/pgo_profiles',
     ], cwd=source, env=environment, check=True)
     subprocess.run([
@@ -52,26 +59,26 @@ def main():
         'download', '--depot-tools', str(source / 'third_party/depot_tools'),
         '--check-v8-revision', '--quiet',
     ], cwd=source, env=environment, check=True)
-    if not args.gn_config.startswith('//') or any(c in args.gn_config for c in ('"', '\n', '\r')):
-        parser.error('gn-config must be a GN source-root path')
     gn_args = f'import("{args.gn_config}")'
-    subprocess.run([str(source / 'buildtools/mac/gn'), 'gen', 'out/Release', '--args=' + gn_args],
+    subprocess.run([str(source / 'buildtools/mac/gn'), 'gen', str(build), '--args=' + gn_args],
                    cwd=source, env=environment, check=True)
     # GN inspection rewrites gn_logs.txt, an input of the license generator.
     # Capture settings before Ninja so packaging can read them without making
     # an otherwise completed build stale again.
     from package_chromium_release import capture_shipping_settings
-    capture_shipping_settings(source, source / 'out/Release')
+    settings = capture_shipping_settings(source, build)
+    if settings['target_cpu'] != '"' + args.target_cpu + '"':
+        raise RuntimeError('GN configuration target_cpu differs from the requested architecture')
     log = args.log.expanduser().resolve()
     log.parent.mkdir(parents=True, exist_ok=True)
-    print(f'Release build: {source / "out/Release"}\nLog: {log}\n'
+    print(f'Release build: {build}\nLog: {log}\n'
           f'Stopping if free space falls below {args.min_free_gib:g} GiB', flush=True)
     if Path('/usr/bin/caffeinate').exists():
         # This assertion expires with the runner, including error exits.
         subprocess.Popen(['/usr/bin/caffeinate', '-i', '-w', str(os.getpid())])
     with log.open('a') as output:
         process = subprocess.Popen(
-            [str(source / 'third_party/ninja/ninja'), '-C', 'out/Release',
+            [str(source / 'third_party/ninja/ninja'), '-C', str(build),
              'chrome', 'chrome/installer/mac', *args.extra_target, '-j', str(args.jobs)],
             cwd=source, env=environment, stdout=output, stderr=subprocess.STDOUT,
             start_new_session=True)

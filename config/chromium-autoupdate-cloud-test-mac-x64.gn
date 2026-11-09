@@ -1,0 +1,5 @@
+# Intel slice of the same isolated native-updater test build. Both slices
+# share endpoint, public keys, frontend resources, and official optimizations.
+import(
+    "//third_party/devtools-frontend/src/config/chromium-autoupdate-cloud-test-mac-arm64.gn")
+target_cpu = "x64"
