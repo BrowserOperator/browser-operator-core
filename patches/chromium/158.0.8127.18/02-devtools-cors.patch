@@ -1,0 +1,103 @@
+diff --git a/chrome/browser/ui/webui/devtools/devtools_ui.cc b/chrome/browser/ui/webui/devtools/devtools_ui.cc
+--- a/chrome/browser/ui/webui/devtools/devtools_ui.cc
++++ b/chrome/browser/ui/webui/devtools/devtools_ui.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/webui/devtools/devtools_ui.h"
+ 
+ #include "base/command_line.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/strings/string_util.h"
+ #include "build/util/chromium_git_revision.h"
+ #include "chrome/browser/devtools/devtools_availability_checker.h"
+@@ -14,12 +15,16 @@
+ #include "chrome/common/chrome_switches.h"
+ #include "chrome/common/url_constants.h"
+ #include "content/public/browser/browser_context.h"
++#include "content/public/browser/cors_origin_pattern_setter.h"
+ #include "content/public/browser/storage_partition.h"
+ #include "content/public/browser/url_data_source.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_ui.h"
+ #include "content/public/common/bindings_policy.h"
++#include "services/network/public/mojom/cors_origin_pattern.mojom.h"
+ #include "third_party/abseil-cpp/absl/strings/str_format.h"
++#include "url/gurl.h"
++#include "url/origin.h"
+ 
+ // static
+ GURL DevToolsUI::GetProxyURL(const std::string& frontend_url) {
+@@ -84,6 +89,74 @@
+         std::make_unique<DevToolsDataSource>(
+             std::move(factory), chrome::kChromeUIDevToolsRemoteHost));
+   }
++  // Allow DevTools UI (devtools://devtools) to make CORS requests to
++  // all HTTPS hosts, localhost (HTTP/HTTPS), and loopback addresses.
++  {
++    const url::Origin source =
++        url::Origin::Create(GURL("devtools://devtools"));
++    std::vector<network::mojom::CorsOriginPatternPtr> allow_patterns;
++
++    // Allow all hosts for https on any port.
++    constexpr uint16_t kAnyPort = 0;
++    allow_patterns.push_back(network::mojom::CorsOriginPattern::New(
++        /*protocol=*/"https",
++        /*domain=*/"",
++        /*port=*/kAnyPort,
++        network::mojom::CorsDomainMatchMode::kAllowSubdomains,
++        network::mojom::CorsPortMatchMode::kAllowAnyPort,
++        network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
++
++    // mcp.atlassian.com:443 (HTTPS)
++    allow_patterns.push_back(network::mojom::CorsOriginPattern::New(
++        /*protocol=*/"https",
++        /*domain=*/"mcp.atlassian.com",
++        /*port=*/443,
++        network::mojom::CorsDomainMatchMode::kDisallowSubdomains,
++        network::mojom::CorsPortMatchMode::kAllowOnlySpecifiedPort,
++        network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
++
++    // localhost (any port) — HTTP
++    allow_patterns.push_back(network::mojom::CorsOriginPattern::New(
++        /*protocol=*/"http",
++        /*domain=*/"localhost",
++        /*port=*/kAnyPort,
++        network::mojom::CorsDomainMatchMode::kAllowSubdomains,
++        network::mojom::CorsPortMatchMode::kAllowAnyPort,
++        network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
++
++    // localhost (any port) — HTTPS
++    allow_patterns.push_back(network::mojom::CorsOriginPattern::New(
++        /*protocol=*/"https",
++        /*domain=*/"localhost",
++        /*port=*/kAnyPort,
++        network::mojom::CorsDomainMatchMode::kAllowSubdomains,
++        network::mojom::CorsPortMatchMode::kAllowAnyPort,
++        network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
++
++    // 127.0.0.1 (any port) — HTTPS only
++    allow_patterns.push_back(network::mojom::CorsOriginPattern::New(
++        /*protocol=*/"https",
++        /*domain=*/"127.0.0.1",
++        /*port=*/kAnyPort,
++        network::mojom::CorsDomainMatchMode::kDisallowSubdomains,
++        network::mojom::CorsPortMatchMode::kAllowAnyPort,
++        network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
++
++    // ::1 (any port) — HTTPS only
++    allow_patterns.push_back(network::mojom::CorsOriginPattern::New(
++        /*protocol=*/"https",
++        /*domain=*/"::1",
++        /*port=*/kAnyPort,
++        network::mojom::CorsDomainMatchMode::kDisallowSubdomains,
++        network::mojom::CorsPortMatchMode::kAllowAnyPort,
++        network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
++
++    std::vector<network::mojom::CorsOriginPatternPtr> block_patterns;
++    content::CorsOriginPatternSetter::Set(browser_context, source,
++                                          std::move(allow_patterns),
++                                          std::move(block_patterns),
++                                          base::DoNothing());
++  }
+ }
+ 
+ DevToolsUI::~DevToolsUI() = default;

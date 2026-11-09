@@ -2,6 +2,45 @@
 
 This panel is a Multi-Agent Framework that allows a user to connect an existing LLM with the chromium browser.
 
+### Develop with a local Chromium fork (macOS)
+
+With a synced Chromium checkout at `~/chromium/src`, install frontend dependencies
+and start the development browser from the repository root:
+
+```sh
+npm install --legacy-peer-deps --package-lock=false --registry=https://registry.npmjs.org
+npm run chromium:dev
+```
+
+The launcher reuses Chromium's local GN, Ninja, Node, and esbuild tools. It builds
+the unbundled frontend, serves it at `http://127.0.0.1:8000/`, and opens DevTools
+in a separate development profile at `out/browser-operator-profile`. Select the
+**AI Assistant** panel and configure your model provider in its settings.
+
+Compiled Browser Operator or Chromium apps under `~/chromium/src/out/{BrowserOperator,Default,Release,Debug}`
+are preferred. If none exists, the launcher uses an installed Browser Operator,
+Chromium, or Chrome app and prints the chosen executable. It does not compile
+the Chromium browser itself or replace the fork's bundled DevTools source.
+
+```sh
+# Use a specific compiled fork and checkout.
+npm run chromium:dev -- --chromium-src /path/to/chromium/src \
+  --browser '/path/to/Chromium.app/Contents/MacOS/Chromium'
+
+# Reopen the existing frontend build; rebuild after changing source files.
+npm run chromium:dev -- --skip-build
+
+# Build without opening a browser, optionally with full TypeScript checking.
+npm run chromium:dev -- --build-only
+npm run chromium:dev -- --build-only --typecheck
+```
+
+The default development build transpiles with esbuild and skips TypeScript
+checking, matching Chromium's development default. Resource manifest checks
+still run. Use `--port` and `--debug-port` to avoid local port conflicts.
+Remote debugging binds to loopback. Stop the launcher with Ctrl+C to close its
+browser and server. A first launch may show a macOS Keychain prompt.
+
 ### Docker
 ```sh
 # assuming you are running from the root "browser-operator-core" directory
@@ -32,7 +71,6 @@ fetch devtools-frontend
 # Build steps
 cd devtools-frontend
 gclient sync
-cd devtools-frontend
 npm run build
 ```
 
