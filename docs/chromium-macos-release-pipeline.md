@@ -5,6 +5,9 @@ https://github.com/tysonthomas9/test-github-pipeline/pull/7. It also includes
 opt-in native updater packaging and test-prerelease publishing, disabled by
 default. Select enable_test_updater=true, an updater-enabled release_gn_config,
 and publish_test_update=true plus a unique update_test_tag for a test upload.
+Publication specifically requires chromium-autoupdate-cloud-test-mac-arm64.gn;
+loopback configurations, unreadable keys and invalid Git tag refs are rejected
+before build/signing. Direct publication also rejects loopback manifests.
 The prepared signing runner needs local CRX_PRIVATE_KEY/CRX_PUBLIC_KEY paths and
 GitHub repo authorization. HTTPS cloud test configuration must be generated on
 the runner first; it is ephemeral and not committed. Publication never
