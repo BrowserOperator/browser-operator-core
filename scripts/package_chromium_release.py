@@ -69,11 +69,14 @@ def shipping_args(source, build, updater_enabled=False):
 
 
 def validate_shipping_settings(values, updater_enabled=False):
+    cpu = values.get('target_cpu')
+    if cpu not in ('"arm64"', '"x64"'):
+        raise RuntimeError('Shipping macOS build must target arm64 or x64')
     expected = {
         'is_official_build': 'true', 'is_debug': 'false',
         'is_component_build': 'false', 'dcheck_always_on': 'false',
         'chrome_pgo_phase': '2', 'devtools_bundle': 'true',
-        'devtools_skip_typecheck': 'false', 'target_cpu': '"arm64"',
+        'devtools_skip_typecheck': 'false', 'target_cpu': cpu,
         'is_chrome_branded': 'false', 'enable_updater': 'true' if updater_enabled else 'false',
     }
     for key, value in expected.items():
@@ -269,6 +272,8 @@ def main():
         settings = shipping_args(source, build, updater_enabled=args.updater_enabled)
         from chromium_build_input import require_current_build
         require_current_build(source, build, ['chrome', 'chrome/installer/mac'])
+    if settings['target_cpu'] != '"arm64"':
+        raise RuntimeError('Direct DMG packaging currently requires ARM64 inputs; Intel inputs must be merged and architecture-verified by the universal release runner first')
     identity, team = find_identity(args.identity)
     packaging = build / 'Browser Operator Packaging'
     if not (packaging / 'sign_chrome.py').is_file():
