@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 
 def code_hash(app):
@@ -30,7 +31,11 @@ def main():
     parser.add_argument('--restore-profile', type=Path,
                         help='Restore a closed baseline profile from this test namespace')
     parser.add_argument('--stage', default='corrected-baseline-verification')
+    parser.add_argument('--prepare-only', action='store_true',
+                        help='Prepare a repeat test without opening About or triggering an update check')
     args = parser.parse_args()
+    if args.prepare_only and not args.preserve_controller:
+        parser.error('prepare-only requires an already installed test controller')
     if sys.platform != 'darwin':
         parser.error('macOS required')
     root = Path.home() / 'chromium/updater-test'
@@ -98,10 +103,13 @@ def main():
     code_hash(app)
     subprocess.run(['xcrun', 'stapler', 'validate', str(app)], check=True)
     subprocess.run(['spctl', '--assess', '--type', 'execute', str(app)], check=True)
-    subprocess.run([sys.executable, str(Path(__file__).with_name('probe_macos_baseline.py')),
-                    '--version', manifest['version'], '--profile-sentinel', 'check',
-                    '--launch-via-services',
-                    '--stage', args.stage], check=True)
+    if args.prepare_only:
+        (root / args.stage).mkdir(exist_ok=True)
+    else:
+        subprocess.run([sys.executable, str(Path(__file__).with_name('probe_macos_baseline.py')),
+                        '--version', manifest['version'], '--profile-sentinel', 'check',
+                        '--launch-via-services',
+                        '--stage', args.stage], check=True)
     # This check must pass without manually clearing quarantine or bootstrapping.
     label = 'com.browseroperator.autoupdate-test.Updater.wake'
     agent = Path.home() / 'Library/LaunchAgents' / (label + '.plist')
@@ -115,12 +123,18 @@ def main():
     expected = code_hash(embedded)
     if code_hash(installed) != expected:
         raise RuntimeError('Installed helper differs from the corrected notarized helper')
-    prefs = json.loads((controller / 'prefs.json').read_text())
-    registration = prefs['updateclientdata']['apps']['com.browseroperator.browseroperator']
-    if Path(registration['ecp']) != app or registration['pv'] != manifest['version']:
+    # Register's RPC can return before its asynchronous prefs commit reaches disk.
+    for _ in range(40):
+        prefs = json.loads((controller / 'prefs.json').read_text())
+        registration = prefs['updateclientdata']['apps']['com.browseroperator.browseroperator']
+        if Path(registration['ecp']) == app and registration['pv'] == manifest['version']:
+            break
+        time.sleep(.25)
+    else:
         raise RuntimeError('Test browser registration has wrong path or version')
     report = {'version': manifest['version'], 'release_sha256': manifest['sha256'],
-              'installed_helper_cdhash': expected, 'native_about_check': 'passed',
+              'installed_helper_cdhash': expected,
+              'native_about_check': 'pending interactive check' if args.prepare_only else 'passed',
               'fresh_launch_agent': 'passed', 'manual_quarantine_repair': False,
               'registered_browser_path': str(app)}
     (root / (args.stage + '-install.json')).write_text(json.dumps(report, indent=2) + '\n')

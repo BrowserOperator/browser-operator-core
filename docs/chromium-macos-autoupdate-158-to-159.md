@@ -473,3 +473,32 @@ cloud-post-upgrade-verification, all under /Users/tyson/chromium/updater-test.
 Production promotion, updater self-update, remote CircleCI execution and other
 architectures/platforms remain unqualified. Review guide:
 docs/chromium-change-review.md.
+
+## Interactive repeat-test reset (2026-11-09)
+
+A running 158 instance from /Volumes/Browser Operator was sharing the test app
+ID with the already-upgraded 159 installation. The own-scope updater remained
+registered to /Users/tyson/chromium/updater-test/install/Browser Operator.app at
+159.0.8144.0; the cloud therefore correctly received 159 and returned noupdate,
+while the disk-image browser window still showed 158. This does not demonstrate
+a failed cloud version offer. Avoid testing updates from a read-only DMG or
+using an old copy against a previously upgraded shared registration.
+
+Closed the DMG instance via the native app menu, preserved the 159 fixture and
+profile under before-interactive-158.noindex, restored the signed/notarized
+cloud 158 baseline and its saved test profile, and re-registered only the owned
+test controller to version 158 at that install path. The cloud feed was briefly
+paused for reset, then restored. Signature/ticket/Gatekeeper, helper identity,
+launch agent and registration checks passed. UI update remains for the user to
+trigger; do not claim that interactive check passed until observed.
+
+The repeat installer now has --prepare-only (requires --preserve-controller),
+which skips opening About and explicitly records native_about_check as pending.
+It also waits for Register's asynchronous prefs commit before comparing the
+persisted version/path; the RPC may finish before that file is updated. Report:
+/Users/tyson/chromium/updater-test/interactive-158-baseline-install.json.
+
+The guarded qualification group in the frontend BUILD.gn must appear AFTER
+vars.gni imports define build_with_chromium. Actual native Intel GN generation
+caught the earlier undefined-variable ordering error; moving the group after
+imports passes both standalone and native generation.
