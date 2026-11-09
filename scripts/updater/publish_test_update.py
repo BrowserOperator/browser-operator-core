@@ -24,6 +24,9 @@ def main():
     a = p.parse_args()
     if not re.fullmatch(r'autoupdate-test-[A-Za-z0-9._-]+', a.tag):
         p.error('Use an explicit autoupdate-test-* prerelease tag')
+    if subprocess.run(['git', 'check-ref-format', 'refs/tags/' + a.tag],
+                      capture_output=True).returncode:
+        p.error('Test tag must be a valid Git reference')
     release = json.loads((a.release / 'release-manifest.json').read_text())
     candidate = json.loads((a.candidate / 'update-manifest.json').read_text())
     catalog = json.loads((a.candidate / 'catalog-candidate.json').read_text())
