@@ -60,3 +60,6 @@ test/perf/.generated
 # Dependencies
 node_modules/
 **/.idea/
+
+# Python build and verification caches
+**/__pycache__/
