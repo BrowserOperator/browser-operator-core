@@ -3,6 +3,13 @@
 # found in the LICENSE file.
 
 import("./config/gni/devtools_grd_files.gni")
+
+if (is_mac) {
+  group("browser_operator_update_qualification") {
+    testonly = true
+    deps = [ "scripts/updater/native:browser_operator_update_verify" ]
+  }
+}
 import("./config/gni/devtools_image_files.gni")
 import("./front_end/emulated_devices/optimized/optimized_images.gni")
 import("./scripts/build/ninja/copy.gni")

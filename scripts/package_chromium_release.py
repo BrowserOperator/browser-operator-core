@@ -42,7 +42,7 @@ def capture_shipping_settings(source, build):
         [str(source / 'buildtools/mac/gn'), 'args', str(build), '--list', '--short'],
         cwd=source, text=True)
     values = dict(line.split(' = ', 1) for line in output.splitlines() if ' = ' in line)
-    selected = validate_shipping_settings(values)
+    selected = validate_shipping_settings(values, values.get('enable_updater') == 'true')
     metadata = {
         'source_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip(),
         'gn_args_sha256': hashlib.sha256((build / 'args.gn').read_bytes()).hexdigest(),
@@ -53,7 +53,7 @@ def capture_shipping_settings(source, build):
     return selected
 
 
-def shipping_args(source, build):
+def shipping_args(source, build, updater_enabled=False):
     cache = build / 'browser-operator-build-settings.json'
     if cache.exists():
         metadata = json.loads(cache.read_text())
@@ -65,22 +65,23 @@ def shipping_args(source, build):
         values = metadata['settings']
     else:
         values = capture_shipping_settings(source, build)
-    return validate_shipping_settings(values)
+    return validate_shipping_settings(values, updater_enabled)
 
 
-def validate_shipping_settings(values):
+def validate_shipping_settings(values, updater_enabled=False):
     expected = {
         'is_official_build': 'true', 'is_debug': 'false',
         'is_component_build': 'false', 'dcheck_always_on': 'false',
         'chrome_pgo_phase': '2', 'devtools_bundle': 'true',
         'devtools_skip_typecheck': 'false', 'target_cpu': '"arm64"',
-        'is_chrome_branded': 'false', 'enable_updater': 'false',
+        'is_chrome_branded': 'false', 'enable_updater': 'true' if updater_enabled else 'false',
     }
     for key, value in expected.items():
         if values.get(key) != value:
             raise RuntimeError(f'Refusing to package non-shipping settings: {key}={values.get(key)}')
     return {**{key: values[key] for key in expected},
-            'use_thin_lto': values.get('use_thin_lto')}
+            'use_thin_lto': values.get('use_thin_lto'),
+            'browser_operator_updater_config': values.get('browser_operator_updater_config', '""')}
 
 
 def find_identity(requested):
@@ -127,7 +128,7 @@ def validate_mounted_app(app, team, evidence):
     return details
 
 
-def smoke_test(app, artifacts, node):
+def smoke_test(app, artifacts, node, updater_enabled=False):
     with socket.socket() as server:
         server.bind(('127.0.0.1', 0))
         port = server.getsockname()[1]
@@ -156,7 +157,8 @@ def smoke_test(app, artifacts, node):
                         time.sleep(0.25)
                 version = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
                 run([node, scripts / 'verify_chromium_release.mjs', endpoint, version, artifacts])
-                run([node, scripts / 'verify_chromium_about.mjs', endpoint, artifacts])
+                if not updater_enabled:
+                    run([node, scripts / 'verify_chromium_about.mjs', endpoint, artifacts])
             finally:
                 if process.poll() is None:
                     process.terminate()
@@ -194,7 +196,14 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
             raise RuntimeError(f'Unexpected DMG architecture: {architecture}')
         tests = output / 'verification'
         tests.mkdir(exist_ok=True)
-        smoke_test(mounted_app, tests, node)
+        updater_enabled = settings['enable_updater'] == 'true'
+        if updater_enabled:
+            helpers = mounted_app / 'Contents/Frameworks/Browser Operator Framework.framework/Versions/Current/Helpers'
+            updater_apps = [p for p in helpers.glob('*Updater*.app') if p.is_dir()]
+            if len(updater_apps) != 1:
+                raise RuntimeError('Expected exactly one embedded updater')
+            validate_mounted_app(updater_apps[0], team, output / 'gatekeeper-updater.txt')
+        smoke_test(mounted_app, tests, node, updater_enabled=updater_enabled)
     finally:
         run(['hdiutil', 'detach', volume])
     with dmg.open('rb') as stream:
@@ -208,7 +217,13 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 'dmg': dmg.name, 'sha256': digest, 'build_settings': settings,
                 'notarization': 'accepted and stapled', 'gatekeeper': 'accepted',
                 'mounted_app_functional_tests': 'passed'}
-    manifest['update_channel'] = 'manual'
+    manifest['native_updater_upgrade_test'] = 'pending' if settings['enable_updater'] == 'true' else 'not enabled'
+    updater_config = settings['browser_operator_updater_config'].strip('"')
+    manifest['update_channel'] = ('cloud-test' if updater_config.endswith('/macos-cloud-test.generated.gni')
+                                  else 'local-test' if updater_config.endswith('/macos-local-test.gni')
+                                  else 'manual' if settings['enable_updater'] == 'false' else 'configured')
+    if provenance and provenance.get('updater_composition'):
+        manifest['updater_composition'] = provenance['updater_composition']
     (output / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2), flush=True)
 
@@ -221,6 +236,8 @@ def main():
     parser.add_argument('--identity', default=os.environ.get('SIGNING_IDENTITY'))
     parser.add_argument('--keychain-profile', default=os.environ.get('KEYCHAIN_PROFILE', 'tthoma9'))
     parser.add_argument('--node', default=shutil.which('node'))
+    parser.add_argument('--updater-enabled', action='store_true',
+                        help='Package and sign an updater-enabled build; upgrade qualification is a separate test')
     parser.add_argument('--frozen-input', type=Path,
                         help='Use hash-verified signing inputs captured from a completed native build')
     parser.add_argument('--verify-existing', action='store_true',
@@ -247,9 +264,9 @@ def main():
     if args.frozen_input:
         from chromium_build_input import load
         provenance = load(build)
-        settings = validate_shipping_settings(provenance['build_settings'])
+        settings = validate_shipping_settings(provenance['build_settings'], args.updater_enabled)
     else:
-        settings = shipping_args(source, build)
+        settings = shipping_args(source, build, updater_enabled=args.updater_enabled)
         from chromium_build_input import require_current_build
         require_current_build(source, build, ['chrome', 'chrome/installer/mac'])
     identity, team = find_identity(args.identity)
@@ -269,15 +286,22 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     (output / 'notary-preflight.json').write_text(
         json.dumps({'authentication': 'verified'}, indent=2) + '\n')
-    pre_sign_tests = output / 'pre-sign-verification'
-    pre_sign_tests.mkdir()
-    smoke_test(app, pre_sign_tests, args.node)
+    # A pre-sign updater-enabled browser can try to register its unsigned
+    # helper. Test that build only after all nested code is properly signed.
+    if not args.updater_enabled:
+        pre_sign_tests = output / 'pre-sign-verification'
+        pre_sign_tests.mkdir()
+        smoke_test(app, pre_sign_tests, args.node)
     artifacts = output / 'artifacts'
     artifacts.mkdir()
     with tempfile.TemporaryDirectory(prefix='signing-input-', dir=output) as temp:
         staging = Path(temp)
         # APFS copy-on-write clone preserves the input app and bounds disk use.
         run(['cp', '-cR', app, staging / app.name])
+        if args.updater_enabled:
+            from updater.sign_embedded_updater import sign_embedded_updater
+            sign_embedded_updater(build, staging, staging / app.name, identity,
+                                  args.keychain_profile, output / 'sign-updater.log')
         staged_packaging = staging / packaging.name
         shutil.copytree(packaging, staged_packaging)
         # Gatekeeper cannot approve a freshly signed app before Apple has
@@ -287,6 +311,8 @@ def main():
         if config.exists():
             raise RuntimeError('Unexpected existing custom signing configuration')
         suffix = '-arm64'
+        if settings['browser_operator_updater_config'].strip('"').endswith(('/macos-local-test.gni', '/macos-cloud-test.generated.gni')):
+            suffix += '-updater-test'
         config.write_text(
             'from .chromium_config import ChromiumCodeSignConfig\n'
             'class InternalCodeSignConfig(ChromiumCodeSignConfig):\n'
