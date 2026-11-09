@@ -60,3 +60,6 @@ test/perf/.generated
 # Dependencies
 node_modules/
 **/.idea/
+# Ephemeral public endpoint/key; regenerate for each temporary cloud test.
+/config/updater/macos-cloud-test.generated.gni
+**/__pycache__/
