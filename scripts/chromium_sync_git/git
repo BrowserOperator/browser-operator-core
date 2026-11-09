@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Process-local Git wrapper that keeps Chromium dependency fetches shallow."""
+
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+executable = os.environ.get('BROWSER_OPERATOR_REAL_GIT', '/usr/bin/git')
+if Path(executable).resolve() == Path(__file__).resolve():
+    raise SystemExit('BROWSER_OPERATOR_REAL_GIT must point to the real Git executable')
+
+arguments = sys.argv[1:]
+index = 0
+while index < len(arguments):
+    argument = arguments[index]
+    if argument in ('-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env'):
+        index += 2
+    elif argument.startswith('-'):
+        index += 1
+    else:
+        break
+if index < len(arguments) and arguments[index] == 'fetch':
+    if '--unshallow' in arguments:
+        raise SystemExit('Chromium shallow sync refuses --unshallow')
+    if not any(argument == '--depth' or argument.startswith('--depth=') for argument in arguments):
+        arguments.insert(index + 1, '--depth=1')
+    # Older depot_tools first fetches every remote branch before looking for
+    # the DEPS revision. Prefer the source checkout's exact gitlink revision.
+    fetch_arguments = arguments[index + 1:]
+    positional = [argument for argument in fetch_arguments if not argument.startswith('-')]
+    if positional == ['origin'] and '--all' not in fetch_arguments and '--multiple' not in fetch_arguments:
+        current = Path.cwd().resolve()
+        for root in (current, *current.parents):
+            if (root / 'chrome/VERSION').is_file() and (root / 'DEPS').is_file():
+                relative = current.relative_to(root)
+                if str(relative) != '.':
+                    result = subprocess.run(
+                        [executable, '-C', str(root), 'ls-tree', 'HEAD', '--', str(relative)],
+                        capture_output=True, text=True, check=False)
+                    match = re.fullmatch(r'160000 commit ([0-9a-f]{40})\t[^\n]+\n?', result.stdout)
+                    if result.returncode == 0 and match:
+                        arguments.append(match.group(1))
+                break
+
+os.execv(executable, [executable, *arguments])
