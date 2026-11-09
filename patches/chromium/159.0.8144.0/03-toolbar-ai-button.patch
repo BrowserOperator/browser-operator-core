@@ -1,0 +1,74 @@
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -24,6 +24,7 @@
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/actor/ui/actor_ui_metrics.h"
+ #include "chrome/browser/command_updater.h"
++#include "chrome/browser/devtools/devtools_window.h"
+ #include "chrome/browser/glic/browser_ui/activity_list_bubble/glic_activity_list_bubble.h"
+ #include "chrome/browser/glic/browser_ui/activity_list_bubble/glic_activity_list_bubble_controller.h"
+ #include "chrome/browser/glic/browser_ui/glic_actor_nudge_controller.h"
+@@ -147,6 +148,7 @@
+ #include "ui/base/interaction/element_identifier.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/resource/resource_bundle.h"
+ #include "ui/base/theme_provider.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/base/window_open_disposition_utils.h"
+@@ -157,6 +159,7 @@
+ #include "ui/gfx/canvas.h"
+ #include "ui/gfx/geometry/insets.h"
+ #include "ui/gfx/image/canvas_image_source.h"
++#include "ui/gfx/image/image_skia_operations.h"
+ #include "ui/gfx/paint_vector_icon.h"
+ #include "ui/gfx/scoped_canvas.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+@@ -524,6 +527,46 @@
+   } else {
+     pinned_toolbar_actions_ = toolbar_webview_->GetPinnedToolbarActions();
+   }
++
++  // Create AI Assistant DevTools button
++  auto custom_dev_tools_button = std::make_unique<ToolbarButton>(
++      base::BindRepeating(
++          [](BrowserWindowInterface* browser, const ui::Event& event) {
++            chrome::ToggleDevToolsWindow(
++                browser, DevToolsToggleAction::Show(),
++                DevToolsOpenedByAction::kPinnedToolbarButton);
++          },
++          browser_));
++
++  custom_dev_tools_button->SetTooltipText(u"AI Assistant");
++  custom_dev_tools_button->SetID(VIEW_ID_TOOLBAR + 100);
++
++  // Use the ai_assistant.png image from theme resources but resize it
++  gfx::ImageSkia* icon = ui::ResourceBundle::GetSharedInstance()
++      .GetImageSkiaNamed(IDR_DEVTOOLS_TOOLBAR_ICON_PNG);
++
++  const int button_size =
++      GetLayoutConstant(LayoutConstant::kToolbarButtonHeight);
++
++  // Scale the image to fit the toolbar button
++  gfx::ImageSkia resized_icon = gfx::ImageSkiaOperations::CreateResizedImage(
++      *icon,
++      skia::ImageOperations::RESIZE_BEST,
++      gfx::Size(button_size * 0.6, button_size * 0.6));  // 60% of button size
++
++  custom_dev_tools_button->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromImageSkia(resized_icon));
++
++  custom_dev_tools_button->SetImageModel(
++      views::Button::STATE_HOVERED,
++      ui::ImageModel::FromImageSkia(resized_icon));
++
++  custom_dev_tools_button->SetImageModel(
++      views::Button::STATE_PRESSED,
++      ui::ImageModel::FromImageSkia(resized_icon));
++
++  dev_tools_button_ = AddChildView(std::move(custom_dev_tools_button));
+ 
+   if (IsChromeLabsEnabled()) {
+     UpdateChromeLabsNewBadgePrefs(browser_->GetProfile());
