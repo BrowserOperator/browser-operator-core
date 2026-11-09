@@ -1,0 +1,73 @@
+diff --git a/chrome/common/chrome_constants.cc b/chrome/common/chrome_constants.cc
+--- a/chrome/common/chrome_constants.cc
++++ b/chrome/common/chrome_constants.cc
+@@ -24,17 +24,17 @@
+ //     kHelperProcessExecutablePath
+ //
+ // In one condition, our tests will be built using the Chrome branding
+-// though we want to actually execute a Chromium branded application.
++// though we want to actually execute a Browser Operator branded application.
+ // This happens for the reference build on Mac.  To support that case,
+-// we also include a Chromium version of each of the four constants and
++// we also include a Browser Operator version of each of the four constants and
+ // in the UITest class we support switching to that version when told to
+ // do so.
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("browseroperator.exe");
+ const base::FilePath::CharType kHelperProcessExecutableName[] =
+-    FPL("chrome.exe");
++    FPL("browseroperator.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutableName[] =
+     FPL(PRODUCT_FULLNAME_STRING);
+@@ -42,11 +42,11 @@
+     FPL(PRODUCT_FULLNAME_STRING " Helper");
+ #elif BUILDFLAG(IS_ANDROID)
+ // NOTE: Keep it synced with the process names defined in AndroidManifest.xml.
+-const base::FilePath::CharType kBrowserProcessExecutableName[] = FPL("chrome");
++const base::FilePath::CharType kBrowserProcessExecutableName[] = FPL("browseroperator");
+ const base::FilePath::CharType kHelperProcessExecutableName[] =
+     FPL("sandboxed_process");
+ #elif BUILDFLAG(IS_POSIX)
+-const base::FilePath::CharType kBrowserProcessExecutableName[] = FPL("chrome");
++const base::FilePath::CharType kBrowserProcessExecutableName[] = FPL("browseroperator");
+ // Helper processes end up with a name of "exe" due to execing via
+ // /proc/self/exe.  See bug 22703.
+ const base::FilePath::CharType kHelperProcessExecutableName[] = FPL("exe");
+@@ -54,9 +54,9 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("browseroperator.exe");
+ const base::FilePath::CharType kHelperProcessExecutablePath[] =
+-    FPL("chrome.exe");
++    FPL("browseroperator.exe");
+ #elif BUILDFLAG(IS_MAC)
+ const base::FilePath::CharType kBrowserProcessExecutablePath[] =
+     FPL(PRODUCT_FULLNAME_STRING ".app/Contents/MacOS/" PRODUCT_FULLNAME_STRING);
+@@ -67,16 +67,16 @@
+ const base::FilePath::CharType kGoogleChromeBrowserProcessExecutablePath[] =
+     FPL("Google Chrome.app/Contents/MacOS/Google Chrome");
+ const base::FilePath::CharType kChromiumBrowserProcessExecutablePath[] =
+-    FPL("Chromium.app/Contents/MacOS/Chromium");
++    FPL("Browser Operator.app/Contents/MacOS/Browser Operator");
+ const base::FilePath::CharType kHelperProcessExecutablePath[] =
+     FPL(PRODUCT_FULLNAME_STRING
+         " Helper.app/Contents/MacOS/" PRODUCT_FULLNAME_STRING " Helper");
+ #elif BUILDFLAG(IS_ANDROID)
+-const base::FilePath::CharType kBrowserProcessExecutablePath[] = FPL("chrome");
+-const base::FilePath::CharType kHelperProcessExecutablePath[] = FPL("chrome");
++const base::FilePath::CharType kBrowserProcessExecutablePath[] = FPL("browseroperator");
++const base::FilePath::CharType kHelperProcessExecutablePath[] = FPL("browseroperator");
+ #elif BUILDFLAG(IS_POSIX)
+-const base::FilePath::CharType kBrowserProcessExecutablePath[] = FPL("chrome");
+-const base::FilePath::CharType kHelperProcessExecutablePath[] = FPL("chrome");
++const base::FilePath::CharType kBrowserProcessExecutablePath[] = FPL("browseroperator");
++const base::FilePath::CharType kHelperProcessExecutablePath[] = FPL("browseroperator");
+ #endif  // OS_*
+ 
+ #if BUILDFLAG(IS_MAC)
