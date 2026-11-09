@@ -45,7 +45,8 @@ Test release:
 https://github.com/BrowserOperator/browser-operator-releases/releases/tag/autoupdate-test-159.0.8144.0-macos-arm64-20261109.
 The VM is temporary and automatically deletes after four hours; this endpoint
 and key are not a production feed. Current draft reviews:
-https://github.com/BrowserOperator/browser-operator-core/pull/101 and
+browser stack #102 → #103 → #104 at
+https://github.com/BrowserOperator/browser-operator-core/pull/104 and
 https://github.com/tysonthomas9/test-github-pipeline/pull/7. Never publish loopback builds as production releases. Only ARM64 is
 qualified; x86, universal, Windows, Linux, updater self-update and production
 rollout remain separate work. The original /Applications app is unchanged.

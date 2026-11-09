@@ -9,12 +9,15 @@ private Omaha test server and the opt-in CircleCI release path.
 The browser changes are split into three dependent draft PRs (merge bottom
 first). Their exact PR URLs are recorded in the descriptions:
 
-1. `codex/chromium-integration` targets `codex/browser-operator-review-base`:
+1. [PR #102](https://github.com/BrowserOperator/browser-operator-core/pull/102)
+   `codex/chromium-integration` targets `codex/browser-operator-review-base`:
    frontend/development support, Chromium 158/159 patches 01–07 and AI assets.
-2. `codex/signed-macos-releases` targets `codex/chromium-integration`:
+2. [PR #103](https://github.com/BrowserOperator/browser-operator-core/pull/103)
+   `codex/signed-macos-releases` targets `codex/chromium-integration`:
    official builds, immutable input/build validation, nested signing,
    notarization, APFS packaging and release verification.
-3. `codex/native-macos-updates` targets `codex/signed-macos-releases`:
+3. [PR #104](https://github.com/BrowserOperator/browser-operator-core/pull/104)
+   `codex/native-macos-updates` targets `codex/signed-macos-releases`:
    patch 08, native update configuration, client packaging and qualification.
 
 The review root preserves the original `fix/simplification` snapshot; that
