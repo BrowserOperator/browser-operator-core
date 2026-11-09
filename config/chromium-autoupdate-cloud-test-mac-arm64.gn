@@ -1,0 +1,7 @@
+# Ephemeral cloud qualification only. Generate the HTTPS endpoint/public key
+# with scripts/updater/configure_cloud_test.py before invoking the builder.
+import(
+    "//third_party/devtools-frontend/src/config/chromium-release-mac-arm64.gn")
+enable_updater = true
+enable_update_notifications = true
+browser_operator_updater_config = "//third_party/devtools-frontend/src/config/updater/macos-cloud-test.generated.gni"
