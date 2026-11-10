@@ -1,0 +1,5 @@
+# Intel slice of the same production release and updater trust roots.
+import(
+    "//third_party/devtools-frontend/src/config/chromium-release-mac-arm64.gn")
+
+target_cpu = "x64"

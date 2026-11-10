@@ -102,6 +102,7 @@ try {
     accessibilityTree: value.tree,
     screenshotWorks: true,
     frontendLabels: names,
+    processInfo: (await browser.send('SystemInfo.getProcessInfo')).processInfo,
   };
   await writeFile(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({...report, accessibilityTree: 'passed'}, null, 2));

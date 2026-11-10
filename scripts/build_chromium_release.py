@@ -22,17 +22,22 @@ def show_progress(log):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chromium-src', type=Path, required=True)
-    parser.add_argument('--build-dir', type=Path, default=Path('out/Release'))
+    parser.add_argument('--build-dir', type=Path,
+                        help='Defaults to out/Release for ARM64 or out/Release_x64 for Intel')
     parser.add_argument('--target-cpu', choices=('arm64', 'x64'), default='arm64')
     parser.add_argument('--jobs', type=int, default=6)
     parser.add_argument('--min-free-gib', type=float, default=5)
     parser.add_argument('--log', type=Path, required=True)
-    parser.add_argument('--gn-config', default='//third_party/devtools-frontend/src/config/chromium-release-mac-arm64.gn')
+    parser.add_argument('--gn-config', help='Defaults to the production release config for target-cpu')
     parser.add_argument('--extra-target', action='append', default=[])
     args = parser.parse_args()
     if args.jobs < 1 or args.min_free_gib <= 0:
         parser.error('jobs and min-free-gib must be positive')
     source = args.chromium_src.expanduser().resolve()
+    if args.build_dir is None:
+        args.build_dir = Path('out/Release' if args.target_cpu == 'arm64' else 'out/Release_x64')
+    if args.gn_config is None:
+        args.gn_config = f'//third_party/devtools-frontend/src/config/chromium-release-mac-{args.target_cpu}.gn'
     build = (source / args.build_dir).resolve()
     if args.build_dir.is_absolute() or not build.is_relative_to(source / 'out'):
         parser.error('build-dir must be a directory under the Chromium out tree')
@@ -69,6 +74,8 @@ def main():
     settings = capture_shipping_settings(source, build)
     if settings['target_cpu'] != '"' + args.target_cpu + '"':
         raise RuntimeError('GN configuration target_cpu differs from the requested architecture')
+    from chromium_build_input import release_targets
+    targets = list(dict.fromkeys([*release_targets(settings), *args.extra_target]))
     log = args.log.expanduser().resolve()
     log.parent.mkdir(parents=True, exist_ok=True)
     print(f'Release build: {build}\nLog: {log}\n'
@@ -79,7 +86,7 @@ def main():
     with log.open('a') as output:
         process = subprocess.Popen(
             [str(source / 'third_party/ninja/ninja'), '-C', str(build),
-             'chrome', 'chrome/installer/mac', *args.extra_target, '-j', str(args.jobs)],
+             *targets, '-j', str(args.jobs)],
             cwd=source, env=environment, stdout=output, stderr=subprocess.STDOUT,
             start_new_session=True)
         try:
