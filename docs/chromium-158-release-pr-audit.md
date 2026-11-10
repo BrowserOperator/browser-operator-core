@@ -62,3 +62,10 @@ complete frontend tree, require owner merge and policy for production publishing
 poll for the native action, and retry/record baseline restoration with signal
 unwinding. Volatile updater check timestamps are not claimed to be restored.
 Packaging now requires the verified frozen input path for every release.
+
+Final signed-DMG testing caught a downstream DevToolsWindow security check
+turning the AI update URL into about:blank. The reviewed native action now
+invokes Chromium's fixed ShowAboutChrome command through the profile's tabbed
+browser, after the same exact help alias and trusted bundled-origin checks.
+Generic DevTools navigation retains both upstream security checks. The failed
+ARM candidate was never published; installed updater restoration passed.

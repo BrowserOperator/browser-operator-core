@@ -140,6 +140,7 @@ try {
       if (opened) break;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
+    await writeFile(join(artifacts, 'native-update-targets.json'), JSON.stringify((await browser.send('Target.getTargets')).targetInfos, null, 2));
     assert.ok(opened, 'AI panel must open the real native About/update page');
     nativeUpdates.openedURL = opened.url;
     // The narrow update-page action must not unlock arbitrary chrome:// pages.
