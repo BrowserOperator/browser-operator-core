@@ -2,3 +2,6 @@ package-lock.json binary
 front_end/ui/visual_logging/KnownContextValues.ts merge=union
 # Automatically normalize line endings (to LF) for all text-based files.
 * text=auto eol=lf
+
+# Unified diff context includes single-space blank lines and may end on one.
+patches/chromium/**/*.patch whitespace=-blank-at-eol,-blank-at-eof
