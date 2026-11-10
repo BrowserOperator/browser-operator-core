@@ -38,7 +38,7 @@ can retain the hostname and keys without rebuilding clients.
 
 The initial stable catalog is deliberately empty. A production 159 release must
 be built with these same production identities, signed/notarized, packaged and
-qualified before offering it to 158 clients. Earlier158-to159 qualification with
+qualified before offering it to 158 clients. Earlier 158-to-159 qualification with
 test identities is not a substitute for the production rollout check.
 
 ## Build, freeze and merge
@@ -160,3 +160,7 @@ Native update requests expose OS architecture, which cannot distinguish ARM64
 and universal installations on Apple Silicon. Both installers receive future
 universal updates, preserving Intel compatibility. ARM-only catalog candidates
 may accompany download assets but must not be activated in the stable service.
+
+Each verification attempt gets a fresh evidence subdirectory; retrying never
+truncates the previous smoke test or collides with its retired controller logs.
+The release manifest records the successful evidence directory.

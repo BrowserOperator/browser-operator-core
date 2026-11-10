@@ -189,6 +189,9 @@ def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
 
 
 def verify_release(source, output, app_name, version, team, settings, node, provenance=None):
+    verification = output / 'verification'
+    verification.mkdir(exist_ok=True)
+    tests = Path(tempfile.mkdtemp(prefix='attempt-', dir=verification))
     dmgs = list((output / 'artifacts').glob('*.dmg'))
     if len(dmgs) != 1:
         raise RuntimeError('Expected exactly one final DMG')
@@ -196,7 +199,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
     run(['codesign', '--verify', '--strict', '--verbose=2', dmg])
     run(['xcrun', 'stapler', 'validate', dmg])
     assess_gatekeeper(['spctl', '--assess', '--type', 'open', '--context',
-                       'context:primary-signature', '--verbose=2', dmg], output / 'gatekeeper-dmg.txt')
+                       'context:primary-signature', '--verbose=2', dmg], tests / 'gatekeeper-dmg.txt')
     run(['hdiutil', 'verify', dmg])
     mounted = plistlib.loads(subprocess.check_output(
         ['hdiutil', 'attach', '-readonly', '-nobrowse', '-plist', str(dmg)]))
@@ -210,19 +213,17 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         verify_bundle_version(mounted_app, version)
         if not (volume / 'Applications').is_symlink() or os.readlink(volume / 'Applications') != '/Applications':
             raise RuntimeError('DMG is missing the Applications installation shortcut')
-        validate_mounted_app(mounted_app, team, output / 'gatekeeper-app.txt')
+        validate_mounted_app(mounted_app, team, tests / 'gatekeeper-app.txt')
         from chromium_macos_arch import verify_architectures
         architecture = settings['target_cpu'].strip('"')
         binaries = verify_architectures(mounted_app, architecture)
-        tests = output / 'verification'
-        tests.mkdir(exist_ok=True)
         updater_enabled = settings['enable_updater'] == 'true'
         if updater_enabled:
             helpers = mounted_app / 'Contents/Frameworks/Browser Operator Framework.framework/Versions/Current/Helpers'
             updater_apps = [p for p in helpers.glob('*Updater*.app') if p.is_dir()]
             if len(updater_apps) != 1:
                 raise RuntimeError('Expected exactly one embedded updater')
-            validate_mounted_app(updater_apps[0], team, output / 'gatekeeper-updater.txt')
+            validate_mounted_app(updater_apps[0], team, tests / 'gatekeeper-updater.txt')
         tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
         from updater.macos_smoke_scope import UpdaterSmokeScope
         scope = UpdaterSmokeScope(settings, team, tests) if updater_enabled else contextlib.nullcontext()
@@ -248,6 +249,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 'notarization': 'accepted and stapled', 'gatekeeper': 'accepted',
                 'mounted_app_functional_tests': 'passed'}
     manifest['mach_o_architectures'] = binaries
+    manifest['verification_evidence'] = str(tests.relative_to(output))
     manifest['functional_test_architectures'] = {cpu: 'passed' for cpu in tested_architectures}
     if architecture == 'universal':
         manifest['intel_hardware_test'] = 'pending; x86_64 tested with Rosetta on Apple Silicon'

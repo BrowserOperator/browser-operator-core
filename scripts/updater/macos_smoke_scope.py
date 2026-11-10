@@ -49,7 +49,7 @@ class UpdaterSmokeScope:
                                      capture_output=True, text=True, check=True).stderr
             if f'TeamIdentifier={self.team}' not in details:
                 raise RuntimeError('Refusing to uninstall an updater from another signing team')
-            with (self.evidence / 'native-updater-uninstall.log').open('w') as log:
+            with (self.evidence / 'native-updater-uninstall.log').open('x') as log:
                 subprocess.run([str(app / 'Contents/MacOS' / self.product), '--uninstall',
                                 '--enable-logging', '--v=1'], check=True, timeout=120,
                                stdout=log, stderr=subprocess.STDOUT)
