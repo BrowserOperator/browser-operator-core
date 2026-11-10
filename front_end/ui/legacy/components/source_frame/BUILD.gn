@@ -90,6 +90,7 @@ ts_library("unittests") {
 
   sources = [
     "BinaryResourceViewFactory.test.ts",
+    "FontView.test.ts",
     "ResourceSourceFrame.test.ts",
     "SourceFrame.test.ts",
     "StreamingContentHexView.test.ts",

@@ -253,6 +253,7 @@ group("unittests") {
     "ui/components/request_link_icon:unittests",
     "ui/components/settings:unittests",
     "ui/components/snackbars:unittests",
+    "ui/components/suggestion_input:unittests",
     "ui/components/survey_link:unittests",
     "ui/components/switch:unittests",
     "ui/components/text_editor:unittests",
