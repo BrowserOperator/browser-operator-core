@@ -63,7 +63,9 @@ def main(production=False):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from chromium_build_input import load
         frozen = load(a.build_input)
-        if (frozen['version'] != release['version'] or frozen.get('updater_trust') != release['updater_trust']
+        if (frozen.get('publication_policy') != release.get('publication_policy')
+                or frozen.get('release_source_trees') != release.get('release_source_trees')
+                or frozen['version'] != release['version'] or frozen.get('updater_trust') != release['updater_trust']
                 or frozen['build_settings']['target_cpu'].strip('"') != release['architecture']
                 or hashlib.sha256((a.build_input / 'frozen-input.json').read_bytes()).hexdigest()
                 != release.get('source_frozen_manifest_sha256')):
@@ -108,9 +110,12 @@ def main(production=False):
     for path in files:
         with path.open('rb') as stream:
             expected[path.name] = (path, path.stat().st_size, 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest())
-    if production and release.get('publication_policy'):
+    if production:
         from release_merge_gate import require_merged_release
-        require_merged_release(release['publication_policy'], release.get('release_source_trees', {}))
+        policy = frozen.get('publication_policy')
+        if not policy or policy.get('product_version') != release.get('browser_operator_version') or policy.get('chromium_version') != release['version']:
+            p.error('Production policy product/Chromium version mismatch')
+        require_merged_release(policy, frozen.get('release_source_trees', {}))
     # Draft releases do not necessarily have a Git tag yet; look them up by
     # release ID rather than the /tags endpoint. Uploaded assets are immutable.
     pages = json.loads(checked('api', f'repos/{REPOSITORY}/releases?per_page=100', '--paginate', '--slurp'))

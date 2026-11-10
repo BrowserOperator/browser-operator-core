@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+from unittest.mock import patch
 import unittest
 from apply_chromium_patches import combined_patch
 
@@ -33,3 +34,16 @@ class OrderedPatchTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 combined_patch(source, patches)
             self.assertEqual((source / 'file.txt').read_text(), 'original\n')
+
+    def test_user_git_ignore_diff_settings_and_environment_do_not_change_patch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, patches = self.inputs(root)
+            config = root / 'hostile.gitconfig'
+            ignore = root / 'ignore'
+            ignore.write_text('file.txt\n')
+            config.write_text(f'[core]\n excludesFile = {ignore}\n[diff]\n noprefix = true\n[color]\n diff = always\n')
+            with patch.dict('os.environ', {'GIT_CONFIG_GLOBAL': str(config), 'GIT_DIR': str(root / 'not-a-repo')}):
+                prepared = combined_patch(source, patches)
+            subprocess.run(['git', 'apply', '-'], cwd=source, input=prepared, check=True)
+            self.assertEqual((source / 'file.txt').read_text(), 'final\n')

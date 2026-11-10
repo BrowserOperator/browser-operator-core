@@ -49,7 +49,7 @@ export class VersionBanner extends HTMLElement {
       `, this.#shadow, {host: this});
       return;
     }
-    if (!this.#info || !this.#info.isUpdateAvailable || this.#dismissed) { this.#shadow.innerHTML = ''; return; }
+    if (!this.#info || !this.#info.isUpdateAvailable || this.#dismissed) { Lit.render(Lit.nothing, this.#shadow, {host: this}); return; }
     const info = this.#info;
     Lit.render(html`
       <style>

@@ -2,6 +2,9 @@
 
 import json
 import hashlib
+import signal
+import shlex
+import time
 from pathlib import Path
 import plistlib
 import subprocess
@@ -13,6 +16,7 @@ class UpdaterSmokeScope:
         self.team, self.evidence = team, evidence
         self.baseline_app, self.restore_baseline = baseline_app, restore_baseline
         self.baseline = None
+        self.previous_handlers = {}
         config = settings['browser_operator_updater_config'].strip('"')
         if config.endswith('/macos-production.gni'):
             company, self.product, self.appid = 'BrowserOperator', 'BrowserOperatorUpdater', 'com.browseroperator.Updater'
@@ -39,6 +43,11 @@ class UpdaterSmokeScope:
         self.require_clean()
         if self.baseline_app and not self.restore_baseline:
             raise RuntimeError('An explicit baseline requires a native registration restore callback')
+        if self.baseline_app:
+            def interrupted(signum, _frame):
+                raise KeyboardInterrupt(f'Release test interrupted by signal {signum}')
+            for name in (signal.SIGTERM, signal.SIGHUP):
+                self.previous_handlers[name] = signal.signal(name, interrupted)
         return self
 
     def baseline_registration(self):
@@ -70,17 +79,48 @@ class UpdaterSmokeScope:
             raise RuntimeError('Baseline app, updater and registration must have the same version and path')
         with (helper / 'Contents/MacOS' / self.product).open('rb') as stream:
             helper_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
-        return {'application': str(app), 'version': registration['pv'], 'helper_sha256': helper_hash}
+        return {'application': str(app), 'version': registration['pv'], 'helper_sha256': helper_hash,
+                'current_target': str(current.readlink()),
+                'launch_agents': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.agents()}}
 
     def __exit__(self, *_exception):
         if self.baseline_app:
             # Restore through the installed browser's real native API. Never
             # edit live updater preferences or uninstall the permanent helper.
-            self.restore_baseline()
-            if self.baseline_registration() != self.baseline:
-                raise RuntimeError('Installed updater baseline was not restored exactly')
-            (self.evidence / 'native-updater-baseline-restored.json').write_text(
-                json.dumps({**self.baseline, 'registration_restored': True, 'helper_uninstalled': False}) + '\n')
+            # Finish bounded recovery before honoring any further cancellation.
+            for name in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                if name not in self.previous_handlers:
+                    self.previous_handlers[name] = signal.getsignal(name)
+                signal.signal(name, signal.SIG_IGN)
+            errors = []
+            restored = False
+            try:
+                for attempt in range(3):
+                    try:
+                        self.restore_baseline()
+                    except Exception as error:
+                        errors.append(str(error))
+                    try:
+                        # A transport error after native registration does not
+                        # prevent proving that the original app owns it again.
+                        restored = self.baseline_registration() == self.baseline
+                    except Exception as error:
+                        errors.append(str(error))
+                    if restored:
+                        break
+                    if attempt < 2:
+                        time.sleep(2)
+                if not restored:
+                    recovery = 'open -n -a ' + shlex.quote(str(self.baseline_app)) + ' --args chrome://settings/help'
+                    (self.evidence / 'native-updater-baseline-RESTORE-FAILED.json').write_text(
+                        json.dumps({'baseline': self.baseline, 'errors': errors, 'manual_recovery': recovery}, indent=2) + '\n')
+                    raise RuntimeError('Installed updater baseline not restored exactly; preserve test app and run: ' + recovery)
+                (self.evidence / 'native-updater-baseline-restored.json').write_text(
+                    json.dumps({**self.baseline, 'registration_restored': True, 'helper_uninstalled': False,
+                                'restore_warnings': errors}) + '\n')
+            finally:
+                for name, handler in self.previous_handlers.items():
+                    signal.signal(name, handler)
             return
         if not self.controller.exists() and not self.agents():
             return

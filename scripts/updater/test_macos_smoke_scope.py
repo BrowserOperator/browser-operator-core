@@ -31,7 +31,7 @@ class ScopeTests(unittest.TestCase):
             scope = self.scope(Path(temp))
             scope.baseline_app = Path('/Applications/Browser Operator.app')
             scope.restore_baseline = lambda: None
-            with patch.object(scope, 'baseline_registration', side_effect=[{'version': '158'}, {'version': '159'}]):
+            with patch('macos_smoke_scope.time.sleep'), patch.object(scope, 'baseline_registration', side_effect=[{'version': '158'}, {'version': '159'}, {'version': '159'}, {'version': '159'}]):
                 with self.assertRaisesRegex(RuntimeError, 'not restored exactly'):
                     with scope:
                         pass
@@ -82,3 +82,16 @@ class ScopeTests(unittest.TestCase):
                     (scope.controller / 'Current').symlink_to('158')
             run.assert_not_called()
             self.assertTrue(scope.controller.exists())
+
+    def test_restore_retries_and_preserves_warning_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            scope = self.scope(Path(temp))
+            scope.baseline_app = Path('/Applications/Browser Operator.app')
+            baseline = {'version': '158'}
+            with patch.object(scope, 'baseline_registration', side_effect=[baseline, {'version': '159'}, baseline]), \
+                    patch('macos_smoke_scope.time.sleep'), \
+                    patch.object(scope, 'restore_baseline', side_effect=[RuntimeError('network unavailable'), None]) as restore:
+                with scope:
+                    pass
+            self.assertEqual(restore.call_count, 2)
+            self.assertIn('network unavailable', (scope.evidence / 'native-updater-baseline-restored.json').read_text())

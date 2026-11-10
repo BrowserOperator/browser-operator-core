@@ -10,9 +10,17 @@ import plistlib
 import re
 import subprocess
 
+from chromium_git import git_environment
 from chromium_build_input import inventory, load, release_targets, require_current_build, source_state, updater_trust
 from chromium_macos_arch import verify_architectures, verify_bundle_version
 from package_chromium_release import shipping_args
+
+
+def clean_frontend(state):
+    return (state['patch_sha256'] == hashlib.sha256(b'').hexdigest()
+            and not state['untracked_source_files']
+            and state.get('gitlink_revision', state['revision']) == state['revision']
+            and all(clean_frontend(child) for child in state['dependency_source_states'].values()))
 
 
 def updater_product(build):
@@ -49,11 +57,11 @@ def freeze(source, build, destination):
     product_version = re.search(r"version: ['\"]([0-9]+\.[0-9]+\.[0-9]+)['\"]", (frontend_root / 'front_end/panels/ai_chat/core/Version.ts').read_text())
     if not product_version:
         raise RuntimeError('Expected an explicit Browser Operator product version')
-    patch = subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=source)
+    patch = subprocess.check_output(['git', 'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD'], cwd=source, env=git_environment())
     metadata = {
         'schema': 1, 'version': info['CFBundleShortVersionString'],
         'browser_operator_version': product_version.group(1),
-        'source_base_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip(),
+        'source_base_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True, env=git_environment()).strip(),
         'source_has_local_changes': bool(patch), 'source_patch_sha256': hashlib.sha256(patch).hexdigest(),
         'build_settings': settings, 'updater_product': product, 'mach_o_architectures': binaries,
         'native_source_state': source_state(source),
@@ -62,16 +70,15 @@ def freeze(source, build, destination):
         'input_files': inventory(destination),
     }
     policy_path = frontend_root / 'config/releases' / (product_version.group(1) + '.json')
+    if tuple(map(int, product_version.group(1).split('.'))) >= (0, 7, 0) and not policy_path.exists():
+        raise RuntimeError('Release policy required for product0.7.0 and later')
     if policy_path.exists():
         frontend_state = metadata['frontend_source_state']
-        if (frontend_state['patch_sha256'] != hashlib.sha256(b'').hexdigest()
-                or frontend_state['untracked_source_files']):
+        if not clean_frontend(frontend_state):
             raise RuntimeError('Merge-gated release inputs require committed, clean frontend source')
         metadata['publication_policy'] = json.loads(policy_path.read_text())
-        metadata['release_source_trees'] = {
-            name: subprocess.check_output(['git', 'rev-parse', 'HEAD:' + name], cwd=frontend_root, text=True).strip()
-            for name in ('front_end', 'BUILD.gn', 'config', 'scripts', 'patches')
-        }
+        metadata['release_source_trees'] = {'root': subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD^{tree}'], cwd=frontend_root, text=True, env=git_environment()).strip()}
     (destination / 'frozen-input.json').write_text(json.dumps(metadata, indent=2) + '\n')
     load(destination)
     return metadata

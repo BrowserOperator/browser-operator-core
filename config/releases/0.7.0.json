@@ -4,11 +4,7 @@
   "integration_repository": "BrowserOperator/browser-operator-core",
   "required_merged_pr": 111,
   "required_base_branch": "main",
-  "public_bootstrap_repository": "BrowserOperator/browser-operator-core",
-  "private_distribution_repository": "BrowserOperator/omaha",
-  "tag": "v0.7.0",
-  "prerelease": false,
-  "make_latest": true,
-  "publish_before_merge": false,
-  "activate_omaha_offer": false
+  "allowed_mergers": [
+    "tysonthomas9"
+  ]
 }

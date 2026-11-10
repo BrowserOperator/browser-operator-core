@@ -8,12 +8,14 @@ import re
 import stat
 import subprocess
 
+from chromium_git import git_environment
+
 
 def source_state(root):
     """Record tracked edits and untracked source/assets, including the external frontend."""
-    patch = subprocess.check_output(['git', 'diff', '--binary', 'HEAD', '--ignore-submodules=all'], cwd=root)
+    patch = subprocess.check_output(['git', 'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', '--ignore-submodules=all'], cwd=root, env=git_environment())
     untracked = {}
-    names = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z'], cwd=root)
+    names = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z'], cwd=root, env=git_environment())
     for raw in names.split(b'\0'):
         if not raw:
             continue
@@ -28,7 +30,7 @@ def source_state(root):
         # Nested dependency Git repositories are managed by the pinned DEPS,
         # not treated as untracked browser modifications.
     dependencies = {}
-    index = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=root)
+    index = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=root, env=git_environment())
     for record in index.split(b'\0'):
         metadata, _, raw_path = record.partition(b'\t')
         if not metadata.startswith(b'160000 ') or not raw_path:
@@ -37,7 +39,8 @@ def source_state(root):
         child = root / name
         if child.is_dir() and not child.is_symlink() and (child / '.git').exists():
             dependencies[name] = source_state(child)
-    return {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
+            dependencies[name]['gitlink_revision'] = metadata.split()[1].decode()
+    return {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True, env=git_environment()).strip(),
             'patch_sha256': hashlib.sha256(patch).hexdigest(), 'untracked_source_files': untracked,
             'dependency_source_states': dependencies}
 

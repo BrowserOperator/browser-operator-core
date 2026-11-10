@@ -98,33 +98,42 @@ try {
   assert.ok(names.some(name => /Browser Operator|AI Assistant/.test(name)), 'Expected branded frontend');
   let nativeUpdates;
   if (expectedProductVersion) {
-    const inspected = await frontend.send('Runtime.evaluate', {expression: `(() => {
-      function find(root) {
-        const banner = root.querySelector('ai-version-banner');
-        if (banner) return banner;
-        for (const element of root.querySelectorAll('*')) {
-          if (element.shadowRoot) { const found = find(element.shadowRoot); if (found) return found; }
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const inspected = await frontend.send('Runtime.evaluate', {expression: `(() => {
+        function find(root) {
+          const banner = root.querySelector('ai-version-banner');
+          if (banner) return banner;
+          for (const element of root.querySelectorAll('*')) {
+            if (element.shadowRoot) { const found = find(element.shadowRoot); if (found) return found; }
+          }
         }
-      }
-      const banner = find(document);
-      return {native: banner?.nativeUpdater, text: banner?.shadowRoot?.textContent};
-    })()`, returnByValue: true});
-    assert.ok(!inspected.exceptionDetails, JSON.stringify(inspected.exceptionDetails));
-    nativeUpdates = inspected.result.value;
+        const banner = find(document);
+        return {native: banner?.nativeUpdater, text: banner?.shadowRoot?.textContent};
+      })()`, returnByValue: true});
+      assert.ok(!inspected.exceptionDetails, JSON.stringify(inspected.exceptionDetails));
+      nativeUpdates = inspected.result.value;
+      if (nativeUpdates?.native === true && nativeUpdates.text?.includes('Check for updates')) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
     assert.equal(nativeUpdates.native, true, 'Expected the native updater entry, not a GitHub frontend notice');
     assert.ok(nativeUpdates.text.includes(expectedProductVersion), nativeUpdates.text);
     assert.ok(nativeUpdates.text.includes('Check for updates'));
     assert.ok(!/New version|View Release|0\.6\.0/.test(nativeUpdates.text));
     const before = new Set((await browser.send('Target.getTargets')).targetInfos.map(t => t.targetId));
-    await frontend.send('Runtime.evaluate', {expression: `(() => {
+    const clicked = await frontend.send('Runtime.evaluate', {expression: `(() => {
       function click(root) {
         const banner = root.querySelector('ai-version-banner');
-        if (banner) { banner.shadowRoot.querySelector('button').click(); return true; }
+        if (banner) {
+          const button = [...banner.shadowRoot.querySelectorAll('button')].find(b => b.textContent.includes('Check for updates'));
+          if (!button) return false;
+          button.click(); return true;
+        }
         for (const element of root.querySelectorAll('*')) if (element.shadowRoot && click(element.shadowRoot)) return true;
         return false;
       }
       if (!click(document)) throw new Error('Native updater action missing');
     })()`});
+    assert.ok(!clicked.exceptionDetails, JSON.stringify(clicked.exceptionDetails));
     let opened;
     for (let attempt = 0; attempt < 60; attempt++) {
       opened = (await browser.send('Target.getTargets')).targetInfos.find(t => !before.has(t.targetId) && t.url === 'chrome://settings/help');
@@ -134,16 +143,25 @@ try {
     assert.ok(opened, 'AI panel must open the real native About/update page');
     nativeUpdates.openedURL = opened.url;
     // The narrow update-page action must not unlock arbitrary chrome:// pages.
-    const previous = new Set((await browser.send('Target.getTargets')).targetInfos.map(t => t.targetId));
-    await frontend.send('Runtime.evaluate', {expression: "import('./core/host/host.js').then(h => h.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab('chrome://settings/passwords'))", awaitPromise: true});
-    let rejected;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      rejected = (await browser.send('Target.getTargets')).targetInfos.find(t => !previous.has(t.targetId) && t.type === 'page');
-      if (rejected?.url) break;
-      await new Promise(resolve => setTimeout(resolve, 250));
+    const blockedURLs = ['chrome://settings/passwords', 'chrome://settings/help',
+      'chrome://help/x', 'chrome://help/?a', 'chrome://help/#x', 'chrome-untrusted://settings/'];
+    for (const url of blockedURLs) {
+      const previous = new Set((await browser.send('Target.getTargets')).targetInfos.map(t => t.targetId));
+      const attempted = await frontend.send('Runtime.evaluate', {expression:
+        `import('./core/host/host.js').then(h => h.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(${JSON.stringify(url)}))`, awaitPromise: true});
+      assert.ok(!attempted.exceptionDetails, JSON.stringify(attempted.exceptionDetails));
+      let rejected;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        rejected = (await browser.send('Target.getTargets')).targetInfos.find(t => !previous.has(t.targetId) && t.type === 'page');
+        if (rejected?.url && rejected.url !== 'about:blank') {
+          assert.fail(`Privileged URL was opened: ${rejected.url}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.equal(rejected?.url, 'about:blank', `Privileged URL must retain stock blocking: ${url}`);
+      await browser.send('Target.closeTarget', {targetId: rejected.targetId});
     }
-    assert.equal(rejected?.url, 'about:blank', 'Unrelated privileged URLs must retain stock blocking');
-    nativeUpdates.otherPrivilegedURLs = 'blocked';
+    nativeUpdates.otherPrivilegedURLs = {status: 'blocked', urls: blockedURLs};
   }
   const report = {
     version: version.Browser,

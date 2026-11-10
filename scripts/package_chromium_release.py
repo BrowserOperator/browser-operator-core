@@ -231,8 +231,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
         from updater.macos_smoke_scope import UpdaterSmokeScope
         def restore_baseline():
-            restore = tests / 'restore-installed-baseline'
-            restore.mkdir()
+            restore = Path(tempfile.mkdtemp(prefix='restore-installed-baseline-', dir=tests))
             smoke_test(baseline_app, restore, node, updater_enabled=True, frontend_checks=False)
         scope = UpdaterSmokeScope(settings, team, tests, baseline_app=baseline_app,
                                  restore_baseline=restore_baseline) if updater_enabled else contextlib.nullcontext()
@@ -249,7 +248,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 cpu_tests = tests / cpu
                 cpu_tests.mkdir(exist_ok=True)
                 smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu,
-                           product_version=provenance.get('browser_operator_version') if provenance else None)
+                           product_version=provenance.get('browser_operator_version') if provenance and updater_enabled else None)
         # This is an owned disposable installation, not the mounted app or a
         # user's browser. Keep failed attempts for diagnosis; retire successes.
         shutil.rmtree(installed)
@@ -352,9 +351,7 @@ def main():
         settings = validate_shipping_settings(provenance['build_settings'], args.updater_enabled,
                                                allow_universal=bool(provenance.get('universal_composition')))
     else:
-        settings = shipping_args(source, build, updater_enabled=args.updater_enabled)
-        from chromium_build_input import release_targets, require_current_build
-        require_current_build(source, build, release_targets(settings))
+        raise RuntimeError('Release packaging requires hash-verified frozen input; run freeze_chromium_release.py first')
     if settings['target_cpu'] != '"' + args.architecture + '"':
         raise RuntimeError('Requested DMG architecture differs from the verified build inputs')
     if args.architecture == 'universal':

@@ -44,7 +44,9 @@ class ProductionPublishingTests(unittest.TestCase):
         self.release_data = {'version': '159.0.8144.0', 'architecture': 'universal', 'update_channel': 'stable',
             'notarization': 'accepted and stapled', 'gatekeeper': 'accepted', 'dmg': self.dmg.name,
             'sha256': digest(self.dmg), 'updater_trust': {'crx_public_spki_sha256': 'a' * 64},
-            'source_frozen_manifest_sha256': digest(self.build / 'frozen-input.json')}
+            'source_frozen_manifest_sha256': digest(self.build / 'frozen-input.json'),
+            'browser_operator_version': '0.7.0',
+            'publication_policy': {'required_merged_pr': 111, 'product_version': '0.7.0', 'chromium_version': '159.0.8144.0'}, 'release_source_trees': {'root': 'a'*40}}
         self.candidate_data = {'version': '159.0.8144.0', 'source_release_sha256': digest(self.dmg),
             'crx_sha256': digest(self.crx), 'crx_public_key_sha256': 'a' * 64,
             'channel': 'stable', 'architecture': 'universal'}
@@ -52,7 +54,7 @@ class ProductionPublishingTests(unittest.TestCase):
             'version': '159.0.8144.0', 'architectures': ['arm64', 'x86_64'],
             'crx': {'name': self.crx.name, 'sha256': digest(self.crx), 'size': self.crx.stat().st_size}}]}
 
-    def run_publish(self, checked, invalid_signature=False):
+    def run_publish(self, checked, invalid_signature=False, merge_error=None):
         for path, value in [(self.release / 'release-manifest.json', self.release_data),
                             (self.candidate / 'update-manifest.json', self.candidate_data),
                             (self.candidate / 'catalog-candidate.json', self.catalog)]:
@@ -60,7 +62,8 @@ class ProductionPublishingTests(unittest.TestCase):
         argv = ['publish', '--release', str(self.release), '--candidate', str(self.candidate), '--tag', self.tag,
                 '--build-input', str(self.build)]
         frozen = {'version': self.release_data['version'], 'updater_trust': self.release_data['updater_trust'],
-                  'build_settings': {'target_cpu': '"universal"'}}
+                  'build_settings': {'target_cpu': '"universal"'},
+                  'publication_policy': self.release_data['publication_policy'], 'release_source_trees': self.release_data['release_source_trees']}
         real_run = subprocess.run
         def run(command, **kwargs):
             if command[0].endswith('browser_operator_update_verify'):
@@ -70,9 +73,14 @@ class ProductionPublishingTests(unittest.TestCase):
             return real_run(command, **kwargs)
         with patch.object(sys, 'argv', argv), patch.object(publisher, 'checked', checked), \
                 patch('chromium_build_input.load', return_value=frozen), \
+                patch('release_merge_gate.require_merged_release', side_effect=merge_error, return_value={'release_commit': 'a'*40}), \
                 patch.object(publisher.subprocess, 'run', run), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             publisher.main(production=True)
+
+    def test_unmerged_release_prevents_any_github_mutation(self):
+        with self.assertRaisesRegex(RuntimeError, 'RELEASE HELD'):
+            self.run_publish(lambda *args: self.fail('Held release contacted GitHub'), merge_error=RuntimeError('RELEASE HELD'))
 
     def test_wrong_publisher_pin_rejected_before_github(self):
         self.candidate_data['crx_public_key_sha256'] = 'b' * 64
