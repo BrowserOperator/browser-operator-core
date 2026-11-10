@@ -166,3 +166,8 @@ may accompany download assets but must not be activated in the stable service.
 Each verification attempt gets a fresh evidence subdirectory; retrying never
 truncates the previous smoke test or collides with its retired controller logs.
 The release manifest records the successful evidence directory.
+
+DMG-to-install copying crosses volumes and may require a full copy even when
+`cp -c` is requested. Successful test installations are removed after helper
+cleanup; failed attempts retain the app for diagnosis. Output-volume free space
+is checked independently. Detailed verification evidence remains private.

@@ -240,6 +240,9 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 cpu_tests = tests / cpu
                 cpu_tests.mkdir(exist_ok=True)
                 smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
+        # This is an owned disposable installation, not the mounted app or a
+        # user's browser. Keep failed attempts for diagnosis; retire successes.
+        shutil.rmtree(installed)
     finally:
         run(['hdiutil', 'detach', volume])
     with dmg.open('rb') as stream:
@@ -319,6 +322,11 @@ def main():
         raise RuntimeError('Output must be absent or empty; existing releases are never removed')
     if shutil.disk_usage(source).free < 5 * 1024**3:
         raise RuntimeError('At least 5 GiB free is required for signing and packaging')
+    output_volume = output
+    while not output_volume.exists():
+        output_volume = output_volume.parent
+    if shutil.disk_usage(output_volume).free < 5 * 1024**3:
+        raise RuntimeError('At least 5 GiB free is required on the release output volume')
     provenance = None
     if args.frozen_input:
         from chromium_build_input import load
