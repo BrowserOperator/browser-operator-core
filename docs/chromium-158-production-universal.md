@@ -185,8 +185,8 @@ a maintained mode; translated coverage does not replace hardware qualification.
 
 Cold Rosetta startup exceeded the original 30-second test limit. The Intel
 startup probe now allows a bounded 180 seconds; the complete test then passed.
-No security check or CPU assertion was bypassed. Visible toolbar verification
-awaits an isolated GUI launch because desktop automation denied Terminal access.
+No security check or CPU assertion was bypassed. Visible toolbar verification subsequently passed after a manual Finder
+installation and Guest-mode launch; desktop Terminal access was not needed.
 
 The permanent stable feed is empty. A production 159 build, real native upgrade
 qualification and explicit catalog promotion are still required before clients
@@ -194,3 +194,25 @@ receive 159. Local verified candidates have not been published to GitHub in this
 run. CircleCI scripts/YAML were checked, but no remote CI execution is claimed.
 Claude's final focused static review found no introduced blockers. The release,
 CircleCI and private Omaha changes remain separate review PRs.
+
+## Manual installation and private distribution
+
+The verified universal app was manually copied from the final DMG into
+`/Applications/Browser Operator.app`, preserving the prior app in a local backup.
+Its signature, stapled ticket, both CPU slices and main executable/Info.plist
+match were rechecked. The native profile picker opened; Guest mode kept the
+existing user profiles unselected. AI toolbar open/close/reopen, welcome Skip,
+provider settings and the model picker all rendered correctly. Native About
+showed 158.0.8127.18 (Official Build) and up to date. The real production updater
+registration now points at that installed app and version, and remains enabled.
+
+Observed follow-ups: the AI panel still shows a separate legacy frontend 0.6.0
+release banner, and the initial Guest new tab showed a missing Google API keys
+notice. Neither blocked toolbar testing. No provider credentials were entered
+and no provider conversation was sent.
+
+At the owner's request, both signed DMGs, reduced verification manifests and
+SHA256SUMS were uploaded as release assets to the existing private Omaha
+repository. GitHub asset sizes and SHA256 digests were confirmed before
+publishing the private release. These are signed-in manual downloads; the
+public updater repository and the empty production catalog were unchanged.
