@@ -218,6 +218,9 @@ devtools_module("ai_chat") {
   deps = [
     ":css_files",
     "../../core/common:bundle",
+    "../../core/host:bundle",
+    "../../core/platform:bundle",
+    "../../core/root:bundle",
     "../../core/i18n:bundle",
     "../../core/sdk:bundle",
     "../../generated:protocol",

@@ -518,6 +518,7 @@ interface DevToolsStartingStyleDebugging {
  * @see hostConfig
  */
 export type HostConfig = Platform.TypeScriptUtilities.RecursivePartial<{
+  browserOperatorUpdates: {enabled: boolean},
   aidaAvailability: AidaAvailability,
   channel: Channel,
   devToolsConsoleInsights: HostConfigConsoleInsights,

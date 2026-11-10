@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 
 from chromium_build_input import inventory, load, release_targets, require_current_build, source_state, updater_trust
@@ -44,14 +45,19 @@ def freeze(source, build, destination):
         subprocess.run(['cp', '-cR', str(build / name), str(destination / name)], check=True)
     subprocess.run(['cp', '-c', str(build / crypto), str(destination / 'crx3_build_action')], check=True)
     info = plistlib.loads((destination / 'Browser Operator.app/Contents/Info.plist').read_bytes())
+    frontend_root = (source / 'third_party/devtools-frontend/src').resolve()
+    product_version = re.search(r"version: ['\"]([0-9]+\.[0-9]+\.[0-9]+)['\"]", (frontend_root / 'front_end/panels/ai_chat/core/Version.ts').read_text())
+    if not product_version:
+        raise RuntimeError('Expected an explicit Browser Operator product version')
     patch = subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=source)
     metadata = {
         'schema': 1, 'version': info['CFBundleShortVersionString'],
+        'browser_operator_version': product_version.group(1),
         'source_base_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip(),
         'source_has_local_changes': bool(patch), 'source_patch_sha256': hashlib.sha256(patch).hexdigest(),
         'build_settings': settings, 'updater_product': product, 'mach_o_architectures': binaries,
         'native_source_state': source_state(source),
-        'frontend_source_state': source_state((source / 'third_party/devtools-frontend/src').resolve()),
+        'frontend_source_state': source_state(frontend_root),
         'updater_trust': updater_trust(source, settings),
         'input_files': inventory(destination),
     }

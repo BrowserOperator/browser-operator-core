@@ -133,7 +133,7 @@ def validate_mounted_app(app, team, evidence):
     return details
 
 
-def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
+def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None, frontend_checks=True, product_version=None):
     with socket.socket() as server:
         server.bind(('127.0.0.1', 0))
         port = server.getsockname()[1]
@@ -164,8 +164,10 @@ def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
                             raise RuntimeError('Release test app did not expose its local test endpoint')
                         time.sleep(0.25)
                 version = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
-                run([node, scripts / 'verify_chromium_release.mjs', endpoint, version, artifacts])
-                if cpu:
+                if frontend_checks:
+                    run([node, scripts / 'verify_chromium_release.mjs', endpoint, version, artifacts,
+                         *([product_version] if product_version else [])])
+                if cpu and frontend_checks:
                     from chromium_macos_arch import process_architecture
                     report = json.loads((artifacts / 'report.json').read_text())
                     owned = [entry for entry in report['processInfo'] if entry['type'] in ('browser', 'renderer')]
@@ -190,7 +192,7 @@ def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
                         process.wait()
 
 
-def verify_release(source, output, app_name, version, team, settings, node, provenance=None):
+def verify_release(source, output, app_name, version, team, settings, node, provenance=None, baseline_app=None):
     verification = output / 'verification'
     verification.mkdir(exist_ok=True)
     tests = Path(tempfile.mkdtemp(prefix='attempt-', dir=verification))
@@ -228,7 +230,12 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
             validate_mounted_app(updater_apps[0], team, tests / 'gatekeeper-updater.txt')
         tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
         from updater.macos_smoke_scope import UpdaterSmokeScope
-        scope = UpdaterSmokeScope(settings, team, tests) if updater_enabled else contextlib.nullcontext()
+        def restore_baseline():
+            restore = tests / 'restore-installed-baseline'
+            restore.mkdir()
+            smoke_test(baseline_app, restore, node, updater_enabled=True, frontend_checks=False)
+        scope = UpdaterSmokeScope(settings, team, tests, baseline_app=baseline_app,
+                                 restore_baseline=restore_baseline) if updater_enabled else contextlib.nullcontext()
         # Native Chromium correctly refuses registration on a read-only DMG.
         # Exercise the actual installation path using this exact verified app,
         # leaving the user's /Applications and browser profile untouched.
@@ -241,7 +248,8 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
             for cpu in tested_architectures:
                 cpu_tests = tests / cpu
                 cpu_tests.mkdir(exist_ok=True)
-                smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
+                smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu,
+                           product_version=provenance.get('browser_operator_version') if provenance else None)
         # This is an owned disposable installation, not the mounted app or a
         # user's browser. Keep failed attempts for diagnosis; retire successes.
         shutil.rmtree(installed)
@@ -263,6 +271,8 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 'mounted_app_validation': 'passed',
                 'installed_dmg_copy_functional_tests': 'passed'}
     manifest['mach_o_architectures'] = binaries
+    if provenance.get('browser_operator_version'):
+        manifest['browser_operator_version'] = provenance['browser_operator_version']
     manifest['verification_evidence'] = str(tests.relative_to(output))
     manifest['functional_test_architectures'] = {cpu: 'passed' for cpu in tested_architectures}
     if architecture == 'universal':
@@ -304,6 +314,8 @@ def main():
                          help='Explicitly package a historical/manual-update build')
     parser.add_argument('--frozen-input', type=Path,
                         help='Use hash-verified signing inputs captured from a completed native build')
+    parser.add_argument('--installed-updater-baseline', type=Path,
+                        help='Explicit same-version installed app to preserve and restore through its native updater API')
     parser.add_argument('--verify-existing', action='store_true',
                         help='Resume final verification of an existing signed/stapled DMG without signing or uploading again')
     args = parser.parse_args()
@@ -352,9 +364,14 @@ def main():
     from chromium_macos_arch import verify_architectures
     verify_architectures(app, args.architecture)
     identity, team = find_identity(args.identity)
+    if args.installed_updater_baseline:
+        args.installed_updater_baseline = args.installed_updater_baseline.resolve()
+        baseline_version = plistlib.loads((args.installed_updater_baseline / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
+        if baseline_version != plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']:
+            raise RuntimeError('Baseline reuse requires exactly the same browser/updater version; use a dedicated clean user for version upgrades')
     if args.updater_enabled:
         from updater.macos_smoke_scope import UpdaterSmokeScope
-        UpdaterSmokeScope(settings, team, output).require_clean()
+        UpdaterSmokeScope(settings, team, output, baseline_app=args.installed_updater_baseline).require_clean()
     packaging = build / 'Browser Operator Packaging'
     if not (packaging / 'sign_chrome.py').is_file():
         raise RuntimeError('Build chrome/installer/mac to generate the packaging pipeline first')
@@ -362,7 +379,7 @@ def main():
     if provenance and provenance['version'] != version:
         raise RuntimeError('Frozen input version differs from its captured build metadata')
     if args.verify_existing:
-        verify_release(source, output, app.name, version, team, settings, args.node, provenance)
+        verify_release(source, output, app.name, version, team, settings, args.node, provenance, args.installed_updater_baseline)
         return
     # Read-only authentication preflight; no password or private key is logged.
     subprocess.run([
@@ -442,7 +459,7 @@ def main():
                     raise
                 print('Apple timestamp service failed transiently; retrying in 10 seconds', flush=True)
                 time.sleep(10)
-    verify_release(source, output, app.name, version, team, settings, args.node, provenance)
+    verify_release(source, output, app.name, version, team, settings, args.node, provenance, args.installed_updater_baseline)
 
 
 if __name__ == '__main__':
