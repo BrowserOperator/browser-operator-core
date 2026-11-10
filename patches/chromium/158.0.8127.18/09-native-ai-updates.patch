@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
-index 7ab3e80be5..57ec1e1f3a 100644
+index 7ab3e80be5..41cc46fefe 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
 +++ b/chrome/browser/devtools/devtools_ui_bindings.cc
 @@ -40,6 +40,7 @@
@@ -40,7 +40,7 @@ index 7ab3e80be5..57ec1e1f3a 100644
 +      // Generic OpenInNewTab also applies its security policy downstream and
 +      // correctly blocks privileged URLs attributed to web content.
 +      Profile* update_profile = profile_->IsGuestSession()
-+                                    ? profile_
++                                    ? profile_.get()
 +                                    : profile_->GetOriginalProfile();
 +      chrome::ScopedTabbedBrowserDisplayer displayer(update_profile);
 +      if (auto* browser = displayer.browser_window_interface()) {
