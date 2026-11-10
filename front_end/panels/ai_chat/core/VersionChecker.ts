@@ -17,8 +17,8 @@ export interface VersionInfo {
 
 export class VersionChecker {
   private static instance: VersionChecker;
-  private readonly GITHUB_API_URL = 'https://api.github.com/repos/tysonthomas9/browser-operator-devtools-frontend/releases/latest';
-  private readonly RELEASE_URL = 'https://github.com/tysonthomas9/browser-operator-devtools-frontend/releases';
+  private readonly GITHUB_API_URL = 'https://api.github.com/repos/BrowserOperator/browser-operator-core/releases/latest';
+  private readonly RELEASE_URL = 'https://github.com/BrowserOperator/browser-operator-core/releases';
   private readonly CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
   private readonly STORAGE_KEY = 'devtools-version-check';
   private currentVersion: string;

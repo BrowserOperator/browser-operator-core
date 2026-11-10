@@ -11,6 +11,31 @@ from macos_smoke_scope import UpdaterSmokeScope
 
 
 class ScopeTests(unittest.TestCase):
+    def test_existing_baseline_is_restored_even_when_qualification_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            scope = self.scope(Path(temp))
+            scope.baseline_app = Path('/Applications/Browser Operator.app')
+            restored = []
+            scope.restore_baseline = lambda: restored.append(True)
+            baseline = {'application': str(scope.baseline_app), 'version': '158.0.8127.18', 'helper_sha256': 'a' * 64}
+            with patch.object(scope, 'baseline_registration', return_value=baseline), \
+                    patch('macos_smoke_scope.subprocess.run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'qualification failed'):
+                    with scope:
+                        raise RuntimeError('qualification failed')
+            self.assertEqual(restored, [True])
+            run.assert_not_called()  # No uninstall or preference editing.
+
+    def test_changed_baseline_after_restore_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            scope = self.scope(Path(temp))
+            scope.baseline_app = Path('/Applications/Browser Operator.app')
+            scope.restore_baseline = lambda: None
+            with patch.object(scope, 'baseline_registration', side_effect=[{'version': '158'}, {'version': '159'}]):
+                with self.assertRaisesRegex(RuntimeError, 'not restored exactly'):
+                    with scope:
+                        pass
+
     def scope(self, root):
         evidence = root / 'evidence'
         evidence.mkdir()

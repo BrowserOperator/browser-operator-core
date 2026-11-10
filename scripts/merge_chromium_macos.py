@@ -16,7 +16,7 @@ def merge(source, arm, intel, output):
     if output.exists():
         raise RuntimeError('Universal output must not exist')
     a, b = load(arm), load(intel)
-    for key in ('version', 'source_base_revision', 'source_patch_sha256', 'updater_product',
+    for key in ('version', 'browser_operator_version', 'source_base_revision', 'source_patch_sha256', 'updater_product',
                 'native_source_state', 'frontend_source_state', 'updater_trust'):
         if a.get(key) != b.get(key) or not a.get(key):
             raise RuntimeError(f'Architecture inputs differ in {key}')

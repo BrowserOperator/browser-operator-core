@@ -9,6 +9,7 @@ import {tmpdir} from 'node:os';
 const endpoint = process.argv[2] ?? 'http://127.0.0.1:9445';
 const expectedVersion = process.argv[3] ?? '158.0.8127.18';
 const artifacts = resolve(process.argv[4] ?? join(tmpdir(), 'browser-operator-release-verification'));
+const expectedProductVersion = process.argv[5];
 await mkdir(artifacts, {recursive: true});
 const version = await fetch(`${endpoint}/json/version`).then(r => r.json());
 assert.equal(version.Browser.split('/').at(-1), expectedVersion);
@@ -95,6 +96,55 @@ try {
   const tree = await frontend.send('Accessibility.getFullAXTree');
   const names = tree.nodes.map(n => n.name?.value).filter(Boolean);
   assert.ok(names.some(name => /Browser Operator|AI Assistant/.test(name)), 'Expected branded frontend');
+  let nativeUpdates;
+  if (expectedProductVersion) {
+    const inspected = await frontend.send('Runtime.evaluate', {expression: `(() => {
+      function find(root) {
+        const banner = root.querySelector('ai-version-banner');
+        if (banner) return banner;
+        for (const element of root.querySelectorAll('*')) {
+          if (element.shadowRoot) { const found = find(element.shadowRoot); if (found) return found; }
+        }
+      }
+      const banner = find(document);
+      return {native: banner?.nativeUpdater, text: banner?.shadowRoot?.textContent};
+    })()`, returnByValue: true});
+    assert.ok(!inspected.exceptionDetails, JSON.stringify(inspected.exceptionDetails));
+    nativeUpdates = inspected.result.value;
+    assert.equal(nativeUpdates.native, true, 'Expected the native updater entry, not a GitHub frontend notice');
+    assert.ok(nativeUpdates.text.includes(expectedProductVersion), nativeUpdates.text);
+    assert.ok(nativeUpdates.text.includes('Check for updates'));
+    assert.ok(!/New version|View Release|0\.6\.0/.test(nativeUpdates.text));
+    const before = new Set((await browser.send('Target.getTargets')).targetInfos.map(t => t.targetId));
+    await frontend.send('Runtime.evaluate', {expression: `(() => {
+      function click(root) {
+        const banner = root.querySelector('ai-version-banner');
+        if (banner) { banner.shadowRoot.querySelector('button').click(); return true; }
+        for (const element of root.querySelectorAll('*')) if (element.shadowRoot && click(element.shadowRoot)) return true;
+        return false;
+      }
+      if (!click(document)) throw new Error('Native updater action missing');
+    })()`});
+    let opened;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      opened = (await browser.send('Target.getTargets')).targetInfos.find(t => !before.has(t.targetId) && t.url === 'chrome://settings/help');
+      if (opened) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert.ok(opened, 'AI panel must open the real native About/update page');
+    nativeUpdates.openedURL = opened.url;
+    // The narrow update-page action must not unlock arbitrary chrome:// pages.
+    const previous = new Set((await browser.send('Target.getTargets')).targetInfos.map(t => t.targetId));
+    await frontend.send('Runtime.evaluate', {expression: "import('./core/host/host.js').then(h => h.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab('chrome://settings/passwords'))", awaitPromise: true});
+    let rejected;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      rejected = (await browser.send('Target.getTargets')).targetInfos.find(t => !previous.has(t.targetId) && t.type === 'page');
+      if (rejected?.url) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    assert.equal(rejected?.url, 'about:blank', 'Unrelated privileged URLs must retain stock blocking');
+    nativeUpdates.otherPrivilegedURLs = 'blocked';
+  }
   const report = {
     version: version.Browser,
     frontendURL: target.url,
@@ -103,6 +153,7 @@ try {
     screenshotWorks: true,
     frontendLabels: names,
     processInfo: (await browser.send('SystemInfo.getProcessInfo')).processInfo,
+    nativeUpdates,
   };
   await writeFile(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({...report, accessibilityTree: 'passed'}, null, 2));

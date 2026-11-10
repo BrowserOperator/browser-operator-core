@@ -57,7 +57,7 @@ class UniversalMergeTests(unittest.TestCase):
                 (directory / 'Browser Operator Packaging' / name).write_bytes(binary)
             for name in ('BrowserOperatorUpdaterUtil', 'crx3_build_action', 'browser_operator_update_verify'):
                 (directory / name).write_bytes(binary)
-            metadata = {'schema': 1, 'version': '158.0.8127.18', 'source_base_revision': 'a' * 40,
+            metadata = {'schema': 1, 'version': '158.0.8127.18', 'browser_operator_version': '0.7.0', 'source_base_revision': 'a' * 40,
                         'source_patch_sha256': 'b' * 64, 'updater_product': 'BrowserOperatorUpdater',
                         'native_source_state': {'revision': 'a' * 40},
                         'frontend_source_state': {'revision': 'd' * 40, 'untracked_source_files': {}},
