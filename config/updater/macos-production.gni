@@ -1,0 +1,36 @@
+browser_operator_updater_branding = {
+  # Production macOS update identity and public trust roots. Private keys stay
+  # outside Git.
+  browser_name = "Browser Operator"
+  browser_product_name = "Browser Operator"
+  crash_product_name = "BrowserOperatorUpdater"
+  crash_upload_url = "https://updates.browseroperator.io/disabled/crash"
+  help_center_url = "https://docs.browseroperator.io/"
+  app_logo_url = "https://updates.browseroperator.io/disabled/logo"
+  keystone_app_name = "BrowserOperatorSoftwareUpdate"
+  keystone_bundle_identifier = "com.browseroperator.Keystone"
+  mac_browser_bundle_identifier = "com.browseroperator.BrowserOperator"
+  mac_updater_bundle_identifier = "com.browseroperator.Updater"
+  privileged_helper_bundle_name = "BrowserOperatorUpdaterPrivilegedHelper"
+  privileged_helper_name =
+      "com.browseroperator.BrowserOperator.UpdaterPrivilegedHelper"
+  updater_company_full_name = "Browser Operator"
+  updater_company_short_name = "BrowserOperator"
+  updater_company_short_name_lowercase = "browseroperator"
+  updater_company_short_name_uppercase = "BROWSEROPERATOR"
+  updater_product_full_name = "BrowserOperatorUpdater"
+  updater_product_full_name_dashed_lowercase = "browser-operator-updater"
+  updater_product_full_display_name = "Browser Operator Updater"
+  updater_metainstaller_name = "Browser Operator Installer"
+  mac_team_identifier = "BN879H59CY"
+  updater_appid = "com.browseroperator.Updater"
+  browser_appid = "com.browseroperator.BrowserOperator"
+  qualification_appid = "com.browseroperator.UpdateQualification"
+  crx_pkhash = "eT50GJwVvKurEDTZINRdWA3Q+YMkPKfUig59c7PlgJ8="
+  legacy_service_name_prefix = "browseroperator-update"
+  update_check_url = "https://updates.browseroperator.io/service/update2/json"
+  updater_event_logging_url =
+      "https://updates.browseroperator.io/disabled/events"
+  browser_operator_cup_key = "MIIFMjALBglghkgBZQMEAxEDggUhAJ5fCYsg52OZB45CMMREjLAxM+zlQO8+biT9QJt3pda+L074PtaoyvhODcfG1QIIyySdAD9tJKYE/PBsPGj1i8y90DnhRGhtBfMx6E4Prn3sCg5HyU/XhzXjG0O2SXiVfl1XtVf0VWMZsYpJKQjqRwR1niew2nbu4uppchlUsx2qteuPS2J7lWfetS8MwdiqghEQVHMF6X7K2Yta+QzYJ648tMKr68OL7YNAwYSzrzVSiCyJsCcmmA7Il952H1ndeuZPeMiZu9Rvjiq/Z0zIopsB7thyd2hic70zufGEWQ38x+xMpXOfw08vKnhVRmM4zPB9NjTTVo7Mcj5FqbufYZBHML4CltE8GRjWbjlKDysrdwtYhxFj3KtB90zWJb96bOQB7BCyPZubuN26enQtlsh6fqmMCJ6BlwILdZ/IaahirNep4sb8GJEbG3I5t7JPttEv6UjIO2bkJ4fqejZ0mRJOhIeAAK1EePFpnEsGOn+1CD+dTEMHUkel0cfy64VpobA7JlodU7ofKpn7h00N+FOgVk532+fs4X+z+Rq1WACLmBjrnab+cVLpDf3AsOCIiR6ZiJxBcICbJDjAtoAVG5OO0fyARVwt5bi/9fwfYOEyhDGrgCLAYOnG7xMG1eEvALuVXRgi4hqjpBWj6hfetsk3RUEIW+w5LyHki/sedT+4EOlfsX5l3jhacFWoERFNerX1urV/P89z8GRFjSeGz2rSbf0dz2/xhNoZyroUtF3m6LJZswdOsCNjXbkvOHD6m8EAAWFhKuc9IVDDyB2v6vN3JdnK0Voek3fKp2/tzxTlBp6Gpa0JZ5VgCa5ZdVrLT3l86GsNfmm9BHCla9yMUtJqqeSQf2+5tEVyhycSp1+3nCbuaK1OZkCqhExAFXQEA4dZNuwfHllhgGuO04so1f59Eom7BJ/C+Mbt/cOrervhEcuHYzMOc5TZX8FkEnbegdFOW8l6/Qc+gKEoGc/mL1zqC5zuYPAgh9js1jeru5KBt/31DdaJS/oDt42YY3YFT7l0VON3uvQZjVI8ZE4ABzgr5I3cUGIVn0SKOOPleuBhZHtmtoMeJhXWHAtE/rhsNXd5vAH4O1ivW7fFHoKKOIM6/tVTbPd2imjgUlWofdUT1Hm/BAxRYYjq14Vq9qzK1sM+LY9JGh32vVbOnCNV5R9tuCwZLLwwykdfa7CFVbIOkpcNcO0zVQXWQ2XB/W3uWIp20PfnuXmSVidkCh+UncrsinRpuZBmD55G2HfYjwyC7pLCSdR6RFlOA/EbGc+tIffv5YhHymqXC0W/vH8+dfk3FqABOnGxY19HzTg2XIobUvxAFXMhgADSGgfRAxtXmgTSobjgnxqn1nVRziiGAA110NbDcRmq0HvsO80zOZrfTcwctBKv0J1DXtmOc38RnD7zLyInsx1LSrWuIe8hrLHY73Q26G7nqjUJzbt5HXp486AGaVwbwzfiHMzqT00V1Jff+xQcpRkaaGhdA59RigNB2UnqoxwG/NMcnbZ0J6hrgBoEqS8qJe6pBzzVwACcfNxHXP7uwIcyHSLGF4tmeNl6lb6rRYWVmc9JDEe3pQNLJ2rE/bHY/3XyhfoiTcsi2SEmjsXKg7FXolNKX7aZByGD+9DWN8KIZ+zEei0jUoeqelXqCL2gFz1XoI0sn8uQ2Akgowuw0QgOuBZnF/SGC9Tp006zZ4IVS7dSKuG+u6f4k5XrYh6JD1OpS4hnXS6QXA9EGqN7X6SiDSCnZqP0LD0="
+  browser_operator_cup_key_version = 1
+}

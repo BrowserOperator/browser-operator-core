@@ -32,7 +32,7 @@
  */
 
 import * as i18n from '../../../../core/i18n/i18n.js';
-import * as Platform from '../../../../core/platform/platform.js';
+import type * as Platform from '../../../../core/platform/platform.js';
 import * as TextUtils from '../../../../models/text_utils/text_utils.js';
 import * as VisualLogging from '../../../visual_logging/visual_logging.js';
 import * as UI from '../../legacy.js';
@@ -83,8 +83,16 @@ export class FontView extends UI.View.SimpleView {
     if (!this.fontStyleElement) {
       return;
     }
-    this.fontStyleElement.textContent =
-        Platform.StringUtilities.sprintf('@font-face { font-family: "%s"; src: url(%s); }', uniqueFontName, url);
+    if (url) {
+      const sheet = new CSSStyleSheet();
+      sheet.insertRule('@font-face {}');
+      const rule = sheet.cssRules[0] as CSSFontFaceRule;
+      rule.style.setProperty('font-family', uniqueFontName);
+      rule.style.setProperty('src', `url(${JSON.stringify(url)})`);
+      this.fontStyleElement.textContent = rule.cssText;
+    } else {
+      this.fontStyleElement.textContent = '';
+    }
     this.updateFontPreviewSize();
   }
 

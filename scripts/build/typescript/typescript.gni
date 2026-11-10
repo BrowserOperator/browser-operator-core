@@ -43,6 +43,13 @@ assert(!devtools_skip_typecheck || !is_official_build,
 #   }
 #
 template("ts_library") {
+  # New Chromium consumers separate TypeScript references (ts_deps) from
+  # ordinary build dependencies. Keep the legacy contract within this frontend.
+  _external_ts_consumer =
+      build_with_chromium &&
+      filter_include([ get_label_info(":$target_name", "dir") ],
+                     [ "//${devtools_root_location}*" ]) == []
+
   action(target_name) {
     script =
         devtools_location_prepend + "scripts/build/typescript/ts_library.py"
@@ -56,6 +63,17 @@ template("ts_library") {
                              "inputs",
                              "data_deps",
                            ])
+
+    _typescript_deps = []
+    if (defined(invoker.ts_deps)) {
+      _typescript_deps = invoker.ts_deps
+      if (!defined(deps)) {
+        deps = []
+      }
+      deps += invoker.ts_deps
+    } else if (!_external_ts_consumer && defined(deps)) {
+      _typescript_deps = deps
+    }
 
     inputs += [
       "//third_party/node/node.py",
@@ -105,13 +123,15 @@ template("ts_library") {
       public_deps = []
     }
 
-    if (defined(deps)) {
+    if (_typescript_deps != []) {
       args += [ "--deps" ]
-      foreach(dep, deps) {
+      foreach(dep, _typescript_deps) {
         args += [ rebase_path(get_label_info(dep, "dir"), ".") + "/" +
                   get_label_info(dep, "name") + "-tsconfig.json" ]
       }
+    }
 
+    if (defined(deps)) {
       # We need to expose our deps in the Ninja chain, to allow `generate_devtools_grd`
       # to eventually roll up all files. If these are not public, Ninja complains that
       # the files are not reachable.
@@ -247,6 +267,17 @@ template("ts_library") {
 
     if (!devtools_bundle) {
       metadata.grd_files = _javascript_implementation_files
+    }
+  }
+
+  if (_external_ts_consumer) {
+    group("${target_name}_sources") {
+      forward_variables_from(invoker, [ "visibility", "testonly" ])
+      public_deps = [ ":${invoker.target_name}" ]
+    }
+    group("${target_name}_checked") {
+      forward_variables_from(invoker, [ "visibility", "testonly" ])
+      public_deps = [ ":${invoker.target_name}" ]
     }
   }
 }

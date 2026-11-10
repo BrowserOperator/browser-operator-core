@@ -1,0 +1,10 @@
+{
+  "product_version": "0.7.0",
+  "chromium_version": "158.0.8127.18",
+  "integration_repository": "BrowserOperator/browser-operator-core",
+  "required_merged_pr": 111,
+  "required_base_branch": "main",
+  "allowed_mergers": [
+    "tysonthomas9"
+  ]
+}

@@ -1,0 +1,330 @@
+--- a/build/apple/tweak_info_plist.py
++++ b/build/apple/tweak_info_plist.py
+@@ -234,12 +234,12 @@
+     return tag_suffixes
+ 
+ 
+-def _AddKeystoneKeys(plist, bundle_identifier, base_tag):
++def _AddKeystoneKeys(plist, bundle_identifier, base_tag, update_url):
+     """Adds the Keystone keys. This must be called AFTER _AddVersionKeys() and
+     also requires the |bundle_identifier| argument (com.example.product)."""
+     plist['KSVersion'] = plist['CFBundleShortVersionString']
+     plist['KSProductID'] = bundle_identifier
+-    plist['KSUpdateURL'] = 'https://tools.google.com/service/update2'
++    plist['KSUpdateURL'] = update_url
+ 
+     _RemoveKeys(plist, 'KSChannelID')
+     if base_tag != '':
+@@ -436,6 +436,8 @@
+         default=None,
+         help='The id of the privileged helper executable.',
+     )
++    parser.add_option('--keystone-update-url',
++                      default='https://tools.google.com/service/update2')
+     (options, args) = parser.parse_args(argv)
+ 
+     if len(args) > 0:
+@@ -530,7 +532,8 @@
+             )
+             return 1
+         _AddKeystoneKeys(
+-            plist, options.bundle_identifier, options.keystone_base_tag
++            plist, options.bundle_identifier, options.keystone_base_tag,
++            options.keystone_update_url
+         )
+     else:
+         _RemoveKeystoneKeys(plist)
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -532,6 +532,12 @@
+         if (current_cpu == "arm64") {
+           args += [ "--keystone-base-tag=arm64" ]
+         }
++      } else if (browser_operator_updater_config != "") {
++        args += [
++          "--keystone=1",
++          "--keystone-base-tag=autoupdate-test-arm64",
++          "--keystone-update-url=$update_check_url",
++        ]
+       } else {
+         args += [ "--keystone=0" ]
+       }
+--- a/chrome/updater/apply_updater_branding.gni
++++ b/chrome/updater/apply_updater_branding.gni
+@@ -18,6 +18,10 @@
+   _extra_args = [
+     "-e",
+     "BROWSER_NAME=\"$browser_name\"",
++    "-e",
++    "BROWSER_OPERATOR_CUP_KEY=\"$browser_operator_cup_key\"",
++    "-e",
++    "BROWSER_OPERATOR_CUP_KEY_VERSION=$browser_operator_cup_key_version",
+     "-e",
+     "BROWSER_PRODUCT_NAME=\"$browser_product_name\"",
+     "-e",
+--- a/chrome/updater/branding.gni
++++ b/chrome/updater/branding.gni
+@@ -3,6 +3,12 @@
+ # found in the LICENSE file.
+ 
+ import("//build/config/chrome_build.gni")
++
++declare_args() {
++  browser_operator_updater_config = ""
++}
++browser_operator_cup_key = ""
++browser_operator_cup_key_version = 0
+ 
+ if (is_chrome_branded) {
+   import("//chrome/updater/internal/branding_google.gni")
+@@ -108,3 +114,43 @@
+     legacy_google_update_appid = "{8B2B92A3-1BA2-4154-A89C-DA74C9C505E4}"
+   }
+ }
++
++# An embedder supplies its own identity and trust roots explicitly.
++if (browser_operator_updater_config != "") {
++  assert(!is_chrome_branded)
++  import(browser_operator_updater_config)
++  browser_name = browser_operator_updater_branding.browser_name
++  browser_product_name = browser_operator_updater_branding.browser_product_name
++  crash_product_name = browser_operator_updater_branding.crash_product_name
++  crash_upload_url = browser_operator_updater_branding.crash_upload_url
++  help_center_url = browser_operator_updater_branding.help_center_url
++  app_logo_url = browser_operator_updater_branding.app_logo_url
++  keystone_app_name = browser_operator_updater_branding.keystone_app_name
++  keystone_bundle_identifier = browser_operator_updater_branding.keystone_bundle_identifier
++  mac_browser_bundle_identifier = browser_operator_updater_branding.mac_browser_bundle_identifier
++  mac_updater_bundle_identifier = browser_operator_updater_branding.mac_updater_bundle_identifier
++  privileged_helper_bundle_name = browser_operator_updater_branding.privileged_helper_bundle_name
++  privileged_helper_name = browser_operator_updater_branding.privileged_helper_name
++  updater_company_full_name = browser_operator_updater_branding.updater_company_full_name
++  updater_company_short_name = browser_operator_updater_branding.updater_company_short_name
++  updater_company_short_name_lowercase = browser_operator_updater_branding.updater_company_short_name_lowercase
++  updater_company_short_name_uppercase = browser_operator_updater_branding.updater_company_short_name_uppercase
++  updater_product_full_name = browser_operator_updater_branding.updater_product_full_name
++  updater_product_full_name_dashed_lowercase = browser_operator_updater_branding.updater_product_full_name_dashed_lowercase
++  updater_product_full_display_name = browser_operator_updater_branding.updater_product_full_display_name
++  updater_metainstaller_name = browser_operator_updater_branding.updater_metainstaller_name
++  mac_team_identifier = browser_operator_updater_branding.mac_team_identifier
++  updater_appid = browser_operator_updater_branding.updater_appid
++  browser_appid = browser_operator_updater_branding.browser_appid
++  qualification_appid = browser_operator_updater_branding.qualification_appid
++  crx_pkhash = browser_operator_updater_branding.crx_pkhash
++  legacy_service_name_prefix = browser_operator_updater_branding.legacy_service_name_prefix
++  update_check_url = browser_operator_updater_branding.update_check_url
++  updater_event_logging_url = browser_operator_updater_branding.updater_event_logging_url
++  browser_operator_cup_key = browser_operator_updater_branding.browser_operator_cup_key
++  browser_operator_cup_key_version = browser_operator_updater_branding.browser_operator_cup_key_version
++
++  assert(browser_operator_cup_key != "")
++  assert(browser_operator_cup_key_version > 0)
++  assert(crx_pkhash != "")
++}
+--- a/chrome/updater/configurator.cc
++++ b/chrome/updater/configurator.cc
+@@ -13,6 +13,8 @@
+ #include <vector>
+ 
+ #include "base/check.h"
++#include "base/base64.h"
++#include "chrome/updater/updater_branding.h"
+ #include "base/containers/flat_map.h"
+ #include "base/enterprise_util.h"
+ #include "base/files/file_path.h"
+@@ -235,6 +237,20 @@
+   return external_constants_->UseCUP();
+ }
+ 
++std::optional<update_client::Configurator::CupSigningKey>
++Configurator::GetCupSigningKey() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if constexpr (std::string_view(BROWSER_OPERATOR_CUP_KEY).empty()) {
++    return std::nullopt;
++  } else {
++    auto decoded = base::Base64Decode(BROWSER_OPERATOR_CUP_KEY);
++    CHECK(decoded);
++    CHECK_GT(BROWSER_OPERATOR_CUP_KEY_VERSION, 0);
++    return update_client::Configurator::CupSigningKey{
++        BROWSER_OPERATOR_CUP_KEY_VERSION, std::move(*decoded)};
++  }
++}
++
+ PrefService* Configurator::GetPrefService() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   return prefs_->GetPrefService();
+--- a/chrome/updater/configurator.h
++++ b/chrome/updater/configurator.h
+@@ -77,6 +77,8 @@
+   scoped_refptr<update_client::PatcherFactory> GetPatcherFactory() override;
+   bool EnabledBackgroundDownloader() const override;
+   bool EnabledCupSigning() const override;
++  std::optional<update_client::Configurator::CupSigningKey> GetCupSigningKey()
++      const override;
+   PrefService* GetPrefService() const override;
+   update_client::PersistedData* GetPersistedData() const override;
+   bool IsPerUserInstall() const override;
+--- a/chrome/updater/external_constants_default.cc
++++ b/chrome/updater/external_constants_default.cc
+@@ -58,7 +58,13 @@
+   }
+ 
+   crx_file::VerifierFormat CrxVerifierFormat() const override {
+-    return crx_file::VerifierFormat::CRX3_WITH_PUBLISHER_PROOF;
++    // Embedder archives must match its pinned key, rather than Google's
++    // publisher proof. The required key hash remains mandatory.
++    if constexpr (!std::string_view(CRX_PKHASH).empty()) {
++      return crx_file::VerifierFormat::CRX3;
++    } else {
++      return crx_file::VerifierFormat::CRX3_WITH_PUBLISHER_PROOF;
++    }
+   }
+ 
+   std::optional<std::vector<uint8_t>> CrxPublicKeyHash() const override {
+--- a/chrome/updater/mac/setup/mac_setup.mm
++++ b/chrome/updater/mac/setup/mac_setup.mm
+@@ -103,6 +103,13 @@
+ }
+ 
+ bool BootstrapPlist(UpdaterScope scope, const base::FilePath& path) {
++  // This is an updater-generated launch item. A quarantining browser process
++  // can taint its child's new plist, which launchd refuses to import.
++  // Clear quarantine only on this generated file before registering it.
++  if (!RemoveQuarantineAttributes(path)) {
++    LOG(ERROR) << "Failed to prepare updater launch item " << path.value();
++    return false;
++  }
+   std::string output;
+   int exit_code = 0;
+   base::CommandLine launchctl(base::FilePath("/bin/launchctl"));
+--- a/chrome/updater/updater_branding.h.in
++++ b/chrome/updater/updater_branding.h.in
+@@ -6,6 +6,8 @@
+ #define BROWSER_NAME_STRING "@BROWSER_NAME@"
+ #define BROWSER_PRODUCT_NAME_STRING "@BROWSER_PRODUCT_NAME@"
+ #define BROWSER_APPID "@BROWSER_APPID@"
++#define BROWSER_OPERATOR_CUP_KEY "@BROWSER_OPERATOR_CUP_KEY@"
++#define BROWSER_OPERATOR_CUP_KEY_VERSION @BROWSER_OPERATOR_CUP_KEY_VERSION@
+ #define COMPANY_SHORTNAME_STRING "@COMPANY_SHORTNAME@"
+ #define COMPANY_SHORTNAME_LOWERCASE_STRING "@COMPANY_SHORTNAME_LOWERCASE@"
+ #define COMPANY_SHORTNAME_UPPERCASE_STRING "@COMPANY_SHORTNAME_UPPERCASE@"
+--- a/components/update_client/BUILD.gn
++++ b/components/update_client/BUILD.gn
+@@ -97,6 +97,7 @@
+     "command_line_config_policy.h",
+     "component.cc",
+     "component.h",
++    "configurator.cc",
+     "configurator.h",
+     "crx_cache.cc",
+     "crx_cache.h",
+--- /dev/null
++++ b/components/update_client/configurator.cc
+@@ -0,0 +1,13 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "components/update_client/configurator.h"
++
++namespace update_client {
++
++std::optional<Configurator::CupSigningKey> Configurator::GetCupSigningKey() const {
++  return std::nullopt;
++}
++
++}  // namespace update_client
+--- a/components/update_client/configurator.h
++++ b/components/update_client/configurator.h
+@@ -4,6 +4,8 @@
+ 
+ #ifndef COMPONENTS_UPDATE_CLIENT_CONFIGURATOR_H_
+ #define COMPONENTS_UPDATE_CLIENT_CONFIGURATOR_H_
++
++#include <stdint.h>
+ 
+ #include <memory>
+ #include <optional>
+@@ -114,6 +116,14 @@
+   // True if signing of update checks is enabled.
+   virtual bool EnabledCupSigning() const = 0;
+ 
++  // Optional embedder key for its own update service. Other update clients
++  // retain the upstream trust root.
++  struct CupSigningKey {
++    int version;
++    std::vector<uint8_t> spki;
++  };
++  virtual std::optional<CupSigningKey> GetCupSigningKey() const;
++
+   // Returns a PrefService that the update_client can use to store persistent
+   // update information. The PrefService must outlive the entire update_client,
+   // and be safe to access from the sequence the update_client is constructed
+--- a/components/update_client/ping_manager.cc
++++ b/components/update_client/ping_manager.cc
+@@ -79,7 +79,7 @@
+       component.disabled_reasons, /*cached_hashes=*/{},
+       std::nullopt /* update check */, {} /* data */, std::nullopt /* ping */,
+       std::move(events)));
+-  base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory())
++  base::MakeRefCounted<RequestSender>(config_)
+       ->Send(
+           urls, {},
+           config_->GetProtocolHandlerFactory()->CreateSerializer()->Serialize(
+--- a/components/update_client/request_sender.cc
++++ b/components/update_client/request_sender.cc
+@@ -177,7 +177,11 @@
+   return response_cup_server_proof;
+ }
+ 
+-client_update_protocol::Cup BuildSigner() {
++client_update_protocol::Cup BuildSigner(
++    std::optional<Configurator::CupSigningKey> key = std::nullopt) {
++  if (key) {
++    return client_update_protocol::Cup(key->version, key->spki);
++  }
+   return client_update_protocol::Cup(kCupKeyVersion,
+                                      base::as_byte_span(kCupPublicKey));
+ }
+@@ -187,6 +191,10 @@
+ RequestSender::RequestSender(
+     scoped_refptr<NetworkFetcherFactory> fetcher_factory)
+     : fetcher_factory_(fetcher_factory), signer_(BuildSigner()) {}
++
++RequestSender::RequestSender(scoped_refptr<Configurator> config)
++    : fetcher_factory_(config->GetNetworkFetcherFactory()),
++      signer_(BuildSigner(config->GetCupSigningKey())) {}
+ 
+ RequestSender::~RequestSender() = default;
+ 
+--- a/components/update_client/request_sender.h
++++ b/components/update_client/request_sender.h
+@@ -26,6 +26,8 @@
+ // of responsibility design pattern, where the urls are tried in the order they
+ // are specified, until the request to one of them succeeds or all have failed.
+ // CUP signing is optional.
++class Configurator;
++
+ class RequestSender : public base::RefCountedThreadSafe<RequestSender> {
+  public:
+   // If |error| is 0, then the response is provided in the |response| parameter.
+@@ -38,6 +40,8 @@
+       void(int error, const std::string& response, int retry_after_sec)>;
+ 
+   explicit RequestSender(scoped_refptr<NetworkFetcherFactory> fetcher_factory);
++
++  explicit RequestSender(scoped_refptr<Configurator> config);
+ 
+   RequestSender(const RequestSender&) = delete;
+   RequestSender& operator=(const RequestSender&) = delete;
+--- a/components/update_client/update_checker.cc
++++ b/components/update_client/update_checker.cc
+@@ -262,7 +262,7 @@
+       additional_attributes, updater_state_attributes, std::move(apps));
+ 
+   cancellation_->OnCancel(
+-      base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory())
++      base::MakeRefCounted<RequestSender>(config_)
+           ->Send({url},
+                  BuildUpdateCheckExtraRequestHeaders(
+                      config_->GetProdId(), config_->GetBrowserVersion(),

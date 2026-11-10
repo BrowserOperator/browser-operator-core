@@ -1,0 +1,376 @@
+{
+  "repository": "BrowserOperator/build-script",
+  "revision": "c236edd3378906aa9239126707c26597b607698b",
+  "files": [
+    {
+      "source": "theme/chromium/chromeos/chrome_app_icon_192.png",
+      "destination": "chrome/app/theme/chromium/chromeos/chrome_app_icon_192.png",
+      "sha256": "a6d56b689af8a4598e55e31e0162c0bfcfdac4af1304caf5783813fd4e6a39bb"
+    },
+    {
+      "source": "theme/chromium/chromeos/chrome_app_icon_32.png",
+      "destination": "chrome/app/theme/chromium/chromeos/chrome_app_icon_32.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/chromium/chromeos/crosh_app_icon_256.png",
+      "destination": "chrome/app/theme/chromium/chromeos/crosh_app_icon_256.png",
+      "sha256": "4f90eeaad4b725828849816068554875395b4f6e6bbf942292be95ad2fc6a723"
+    },
+    {
+      "source": "theme/chromium/chromeos/webstore_app_icon_128.png",
+      "destination": "chrome/app/theme/chromium/chromeos/webstore_app_icon_128.png",
+      "sha256": "12edba72e64e6663b535d20d8f4e4b1e0810db03a9410496bc960d7849b9d533"
+    },
+    {
+      "source": "theme/chromium/chromeos/webstore_app_icon_16.png",
+      "destination": "chrome/app/theme/chromium/chromeos/webstore_app_icon_16.png",
+      "sha256": "21acfd3d244138a03ff5ef03c5f985967ca8765ec9b0f9dace30376c7c055ec1"
+    },
+    {
+      "source": "theme/chromium/chromium.ai",
+      "destination": "chrome/app/theme/chromium/chromium.ai",
+      "sha256": "07cfbab58d48c39009e3803c043ad5e821205654000fe05275e107540b99ddb9"
+    },
+    {
+      "source": "theme/chromium/generate_icons.py",
+      "destination": "chrome/app/theme/chromium/generate_icons.py",
+      "sha256": "b550b36d0d64f79956c8332a1b8c4193ca888c4f1de483447d18c16cdf014815"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_128.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_128.png",
+      "sha256": "c6fce6729d3b3f29d4df44964ebf9097d0dbe6948701458111fa0cacbff4affc"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_16.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_16.png",
+      "sha256": "82dace2395fd87d336eb8815f374cee1338bfab094008b9d32b850883dc23960"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_24.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_24.png",
+      "sha256": "24ee446ca2050822b7cbcd29e4b991ee40e3f0fdb6593fc8b8c99eb9e4226268"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_256.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_256.png",
+      "sha256": "ed90efc280c8a63a03c0f07c482bc6180ebd14bc27f3eb995fc999fa14e22d7a"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_32.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_32.png",
+      "sha256": "bc43fbdac3b903454bfee27c45530ad69fc34bbf28a7f92d18224bdacab4ec41"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_48.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_48.png",
+      "sha256": "a3860565dd380d6b9e783208c6e20ce802781ff4d7bfed5ae7daa07f824bfba7"
+    },
+    {
+      "source": "theme/chromium/linux/product_logo_64.png",
+      "destination": "chrome/app/theme/chromium/linux/product_logo_64.png",
+      "sha256": "6f2e1a1440387027ac6897845a21e3a4dad33b1692d8882ae210e6d602e2519d"
+    },
+    {
+      "source": "theme/chromium/logo.png",
+      "destination": "chrome/app/theme/chromium/logo.png",
+      "sha256": "6d65f915f18c91f3c63eb574184a52ba6f8394f3fb9d3fcd942339f69be2d19b"
+    },
+    {
+      "source": "theme/chromium/logo.svg",
+      "destination": "chrome/app/theme/chromium/logo.svg",
+      "sha256": "78616fb0700857b99a03798380fc231e5e0f1a492bf73b1ff712259a17df7826"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.car",
+      "destination": "chrome/app/theme/chromium/mac/Assets.car",
+      "sha256": "86ed5d0fc1f57ba03cd7decc092e8ae7feb9e3c778df063d81fbfea16cd09079"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/Contents.json",
+      "sha256": "69f22447a60bef67f556623aab802cc4c11e23ed13a6b74ccbcd7c8fa8e6222b"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_1024.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_1024.png",
+      "sha256": "a6f07deda00cf1bf3cc54374e49d1d811ab43fc8a0f4d3e0c1d57f2168de7523"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_128.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_128.png",
+      "sha256": "12edba72e64e6663b535d20d8f4e4b1e0810db03a9410496bc960d7849b9d533"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_16.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_16.png",
+      "sha256": "21acfd3d244138a03ff5ef03c5f985967ca8765ec9b0f9dace30376c7c055ec1"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_256.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_256.png",
+      "sha256": "4f90eeaad4b725828849816068554875395b4f6e6bbf942292be95ad2fc6a723"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_32.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_32.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_512.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_512.png",
+      "sha256": "2b8c86e7ef04a6d9a864692fe88b9ae7e568ce4e4855bf6c5a2104a6d36c81b9"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_64.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/AppIcon.appiconset/appicon_64.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/Contents.json",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/Contents.json",
+      "sha256": "3068ae11b833a8ea03990d2ea2a2b5fe7b3c47fbda56de956a4b84888f6c6af8"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256.png",
+      "sha256": "4f90eeaad4b725828849816068554875395b4f6e6bbf942292be95ad2fc6a723"
+    },
+    {
+      "source": "theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256@2x.png",
+      "destination": "chrome/app/theme/chromium/mac/Assets.xcassets/Icon.iconset/icon_256x256@2x.png",
+      "sha256": "2b8c86e7ef04a6d9a864692fe88b9ae7e568ce4e4855bf6c5a2104a6d36c81b9"
+    },
+    {
+      "source": "theme/chromium/mac/app.icns",
+      "destination": "chrome/app/theme/chromium/mac/app.icns",
+      "sha256": "90eab168cdba74e889eef9b884d735e42a42dc34deb50ece8f52bbc07a86f885"
+    },
+    {
+      "source": "theme/chromium/mac/document.icns",
+      "destination": "chrome/app/theme/chromium/mac/document.icns",
+      "sha256": "7462a047140469011d9edc7c01e9fadcad59e997aef70dde1d8da46ff0c59b49"
+    },
+    {
+      "source": "theme/chromium/product_logo.ai",
+      "destination": "chrome/app/theme/chromium/product_logo.ai",
+      "sha256": "348fd1fbda8329bd11c967ada803c97df83a6aa1b615e47183812f91085523e7"
+    },
+    {
+      "source": "theme/chromium/product_logo.svg",
+      "destination": "chrome/app/theme/chromium/product_logo.svg",
+      "sha256": "78616fb0700857b99a03798380fc231e5e0f1a492bf73b1ff712259a17df7826"
+    },
+    {
+      "source": "theme/chromium/product_logo_128.png",
+      "destination": "chrome/app/theme/chromium/product_logo_128.png",
+      "sha256": "12edba72e64e6663b535d20d8f4e4b1e0810db03a9410496bc960d7849b9d533"
+    },
+    {
+      "source": "theme/chromium/product_logo_16.png",
+      "destination": "chrome/app/theme/chromium/product_logo_16.png",
+      "sha256": "21acfd3d244138a03ff5ef03c5f985967ca8765ec9b0f9dace30376c7c055ec1"
+    },
+    {
+      "source": "theme/chromium/product_logo_22.png",
+      "destination": "chrome/app/theme/chromium/product_logo_22.png",
+      "sha256": "533f054a9f4ab3512184de198127f101738194a16662f1c4764d070378e06f01"
+    },
+    {
+      "source": "theme/chromium/product_logo_22_mono.png",
+      "destination": "chrome/app/theme/chromium/product_logo_22_mono.png",
+      "sha256": "3e3687e327169bbe9c03645479981541721da457718ef7642206975479a9577c"
+    },
+    {
+      "source": "theme/chromium/product_logo_24.png",
+      "destination": "chrome/app/theme/chromium/product_logo_24.png",
+      "sha256": "37f2706216bacc706e6ddc7af21a51775427a6c54aae900de6278621a67a881b"
+    },
+    {
+      "source": "theme/chromium/product_logo_256.png",
+      "destination": "chrome/app/theme/chromium/product_logo_256.png",
+      "sha256": "4f90eeaad4b725828849816068554875395b4f6e6bbf942292be95ad2fc6a723"
+    },
+    {
+      "source": "theme/chromium/product_logo_32.png",
+      "destination": "chrome/app/theme/chromium/product_logo_32.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/chromium/product_logo_48.png",
+      "destination": "chrome/app/theme/chromium/product_logo_48.png",
+      "sha256": "aa9e7d48fb58e0eb58dfa440f3a7e6a1554bcd09efc3aef7781bb75e39714cac"
+    },
+    {
+      "source": "theme/chromium/product_logo_64.png",
+      "destination": "chrome/app/theme/chromium/product_logo_64.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    },
+    {
+      "source": "theme/chromium/product_logo_animation.svg",
+      "destination": "chrome/app/theme/chromium/product_logo_animation.svg",
+      "sha256": "78616fb0700857b99a03798380fc231e5e0f1a492bf73b1ff712259a17df7826"
+    },
+    {
+      "source": "theme/chromium/win/README",
+      "destination": "chrome/app/theme/chromium/win/README",
+      "sha256": "f020bc28c7ea1083e13efaa70b0cbaa89844860b5bab5a494c458cd65c1bf4b0"
+    },
+    {
+      "source": "theme/chromium/win/app_list.ico",
+      "destination": "chrome/app/theme/chromium/win/app_list.ico",
+      "sha256": "c59bfeac78a2dc6b844846d4e994c2281d03929930bca1fc2dafd50dd705568a"
+    },
+    {
+      "source": "theme/chromium/win/chromium.ico",
+      "destination": "chrome/app/theme/chromium/win/chromium.ico",
+      "sha256": "c59bfeac78a2dc6b844846d4e994c2281d03929930bca1fc2dafd50dd705568a"
+    },
+    {
+      "source": "theme/chromium/win/chromium_doc.ico",
+      "destination": "chrome/app/theme/chromium/win/chromium_doc.ico",
+      "sha256": "cddfb8cf8317fb9849f7b8d71d886c5cc7ea2414dfc4fa50a6e1157925629822"
+    },
+    {
+      "source": "theme/chromium/win/chromium_pdf.ico",
+      "destination": "chrome/app/theme/chromium/win/chromium_pdf.ico",
+      "sha256": "cddfb8cf8317fb9849f7b8d71d886c5cc7ea2414dfc4fa50a6e1157925629822"
+    },
+    {
+      "source": "theme/chromium/win/incognito.ico",
+      "destination": "chrome/app/theme/chromium/win/incognito.ico",
+      "sha256": "1a7821335fd5885e3b16a022556a495d3c3a3cd6cded320eb393fc84202c3a72"
+    },
+    {
+      "source": "theme/chromium/win/tiles/Logo.png",
+      "destination": "chrome/app/theme/chromium/win/tiles/Logo.png",
+      "sha256": "6fb4964e658a02ccc9aea82928aa7d28de4674c5cb61a36fde8512779715adb5"
+    },
+    {
+      "source": "theme/chromium/win/tiles/SmallLogo.png",
+      "destination": "chrome/app/theme/chromium/win/tiles/SmallLogo.png",
+      "sha256": "cd478567fc8da16cd0d763bb270718b7ff079262d70009edd7a302c40ef345e0"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/favicon_password_manager.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/favicon_password_manager.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/linux/product_logo_16.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/linux/product_logo_16.png",
+      "sha256": "21acfd3d244138a03ff5ef03c5f985967ca8765ec9b0f9dace30376c7c055ec1"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/linux/product_logo_32.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/linux/product_logo_32.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/product_logo_16.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/product_logo_16.png",
+      "sha256": "21acfd3d244138a03ff5ef03c5f985967ca8765ec9b0f9dace30376c7c055ec1"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/product_logo_32.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/product_logo_32.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/product_logo_name_22.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/product_logo_name_22.png",
+      "sha256": "80da8523b83558dfaf9c586207c101834018bc077f10be1cc8c1bac20442e292"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/product_logo_name_22_white.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/product_logo_name_22_white.png",
+      "sha256": "07025f3575043f94f4e89d9ff612c77f3b797bbe806db5c9a4368997b9c88558"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/product_logo_name_32.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/product_logo_name_32.png",
+      "sha256": "be50365a11b864b9d897ddd6da31b297513ba13988ed14e90e183051474d2fb2"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/webstore_icon.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/webstore_icon.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/webstore_icon_16.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/webstore_icon_16.png",
+      "sha256": "21acfd3d244138a03ff5ef03c5f985967ca8765ec9b0f9dace30376c7c055ec1"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/webstore_icon_24.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/webstore_icon_24.png",
+      "sha256": "37f2706216bacc706e6ddc7af21a51775427a6c54aae900de6278621a67a881b"
+    },
+    {
+      "source": "theme/default_100_percent/chromium/webstore_icon_32.png",
+      "destination": "chrome/app/theme/default_100_percent/chromium/webstore_icon_32.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/favicon_password_manager.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/favicon_password_manager.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/linux/product_logo_16.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/linux/product_logo_16.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/linux/product_logo_32.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/linux/product_logo_32.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/product_logo_16.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/product_logo_16.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/product_logo_32.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/product_logo_32.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/product_logo_name_22.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/product_logo_name_22.png",
+      "sha256": "e2444446f2e7ff529cf09fc1d23ac2a8a72abb27068452a3f8834b933448f370"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/product_logo_name_22_white.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/product_logo_name_22_white.png",
+      "sha256": "e57467fbf330c91d5e2af1f41d26427ad8bd365738955f95fd54be2bd30a5748"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/product_logo_name_32.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/product_logo_name_32.png",
+      "sha256": "3ab4ac11dc8c75e3c3e13ad01f00dca4dfd3111a24a79005dc849555e6701738"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/webstore_icon.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/webstore_icon.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/webstore_icon_16.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/webstore_icon_16.png",
+      "sha256": "ac6cf10e752ee236b3cfb5d6065ad7879e4b5beb27c41ec05ac9c1fdf399c3f3"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/webstore_icon_24.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/webstore_icon_24.png",
+      "sha256": "aa9e7d48fb58e0eb58dfa440f3a7e6a1554bcd09efc3aef7781bb75e39714cac"
+    },
+    {
+      "source": "theme/default_200_percent/chromium/webstore_icon_32.png",
+      "destination": "chrome/app/theme/default_200_percent/chromium/webstore_icon_32.png",
+      "sha256": "0df4a29ed67d83606ab4f21fb418ec22b0631fe8e11d64a709c2979ac32ef7d6"
+    }
+  ]
+}

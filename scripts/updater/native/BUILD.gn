@@ -1,0 +1,11 @@
+executable("browser_operator_update_verify") {
+  testonly = true
+  sources = [ "verify.cc" ]
+  deps = [
+    "//base",
+    "//components/client_update_protocol",
+    "//components/crx_file",
+    "//crypto",
+    "//third_party/zlib/google:zip",
+  ]
+}

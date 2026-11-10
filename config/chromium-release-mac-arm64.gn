@@ -1,0 +1,26 @@
+# Shipping optimization settings for the Browser Operator Chromium fork.
+# Official optimization is independent of Google branding and code signing.
+is_official_build = true
+is_debug = false
+is_component_build = false
+dcheck_always_on = false
+is_chrome_branded = false
+enable_updater = true
+enable_update_notifications = true
+browser_operator_updater_config =
+    "//third_party/devtools-frontend/src/config/updater/macos-production.gni"
+chrome_pgo_phase = 2
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+enable_dsyms = false
+
+# Bound linker memory and disk use on the local 16 GB Mac.
+use_thin_lto = false
+use_remoteexec = false
+use_siso = false
+use_system_xcode = true
+target_cpu = "arm64"
+
+devtools_bundle = true
+devtools_skip_typecheck = false

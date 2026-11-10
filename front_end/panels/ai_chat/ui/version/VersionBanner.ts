@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import * as Lit from '../../../../ui/lit/lit.js';
+import { CURRENT_VERSION } from '../../core/Version.js';
 
 const {html, Decorators} = Lit;
 const {customElement} = Decorators as any;
@@ -17,18 +18,38 @@ export class VersionBanner extends HTMLElement {
   // Manual properties
   #info: VersionInfo | null = null;
   #dismissed = false;
+  #nativeUpdater = false;
 
   get info(): VersionInfo | null { return this.#info; }
   set info(value: VersionInfo | null) { this.#info = value; this.#render(); }
   get dismissed(): boolean { return this.#dismissed; }
   set dismissed(value: boolean) { this.#dismissed = value; this.#render(); }
+  get nativeUpdater(): boolean { return this.#nativeUpdater; }
+  set nativeUpdater(value: boolean) { this.#nativeUpdater = value; this.#render(); }
 
   connectedCallback(): void { this.#render(); }
 
   #dismiss = () => { this.dispatchEvent(new CustomEvent('dismiss', {bubbles: true})); };
 
   #render(): void {
-    if (!this.#info || !this.#info.isUpdateAvailable || this.#dismissed) { this.#shadow.innerHTML = ''; return; }
+    if (this.#nativeUpdater) {
+      Lit.render(html`
+        <style>
+          .native-updates { display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; padding: 8px 12px; margin: 8px 0; border-radius: 6px;
+            background: var(--sys-color-surface-variant); color: var(--sys-color-on-surface); }
+          button { border: none; background: transparent; color: var(--sys-color-primary);
+            cursor: pointer; font: inherit; }
+        </style>
+        <div class="native-updates"><span>Browser Operator ${CURRENT_VERSION}</span>
+          <button @click=${() => this.dispatchEvent(new CustomEvent('check-native-updates', {bubbles: true}))}>
+            Check for updates
+          </button>
+        </div>
+      `, this.#shadow, {host: this});
+      return;
+    }
+    if (!this.#info || !this.#info.isUpdateAvailable || this.#dismissed) { Lit.render(Lit.nothing, this.#shadow, {host: this}); return; }
     const info = this.#info;
     Lit.render(html`
       <style>

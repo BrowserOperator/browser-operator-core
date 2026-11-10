@@ -5,6 +5,9 @@
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
 import * as Lit from '../../../ui/lit/lit.js';
 import * as SDK from '../../../core/sdk/sdk.js';
+import * as Host from '../../../core/host/host.js';
+import type * as Platform from '../../../core/platform/platform.js';
+import type * as Root from '../../../core/root/root.js';
 import * as BaseOrchestratorAgent from '../core/BaseOrchestratorAgent.js';
 import { TIMING_CONSTANTS } from '../core/Constants.js';
 import { PromptEditDialog } from './PromptEditDialog.js';
@@ -226,6 +229,7 @@ export class ChatView extends HTMLElement {
   // Add version info state
   #versionInfo: VersionInfo | null = null;
   #isVersionBannerDismissed = false;
+  #nativeUpdaterEnabled = false;
 
   connectedCallback(): void {
     const sheet = new CSSStyleSheet();
@@ -1223,6 +1227,16 @@ export class ChatView extends HTMLElement {
   // Method to check for updates
   async #checkForUpdates(): Promise<void> {
     try {
+      const hostConfig = await new Promise<Root.Runtime.HostConfig>(resolve => {
+        Host.InspectorFrontendHost.InspectorFrontendHostInstance.getHostConfig(resolve);
+      });
+      if (hostConfig.browserOperatorUpdates?.enabled) {
+        this.#nativeUpdaterEnabled = true;
+        this.#versionInfo = null;
+        VersionChecker.getInstance().clearCache();
+        void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
+        return;
+      }
       const versionChecker = VersionChecker.getInstance();
       // Version is now automatically loaded from Version.ts
       
@@ -1265,6 +1279,12 @@ export class ChatView extends HTMLElement {
 
   // Method to render version banner (delegates to component)
   #renderVersionBanner(): Lit.TemplateResult {
+    if (this.#nativeUpdaterEnabled) {
+      return html`<ai-version-banner .nativeUpdater=${true}
+        @check-native-updates=${() => Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(
+          'chrome://help/' as Platform.DevToolsPath.UrlString)}
+      ></ai-version-banner>`;
+    }
     if (!this.#versionInfo || !this.#versionInfo.isUpdateAvailable || this.#isVersionBannerDismissed || this.#messages.length > 1) {
       return html``;
     }

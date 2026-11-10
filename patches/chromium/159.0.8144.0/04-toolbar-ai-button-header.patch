@@ -1,0 +1,11 @@
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -410,6 +410,7 @@
+   // view hierarchy.
+   raw_ptr<ToolbarButton> contextual_tasks_button_ = nullptr;
+   raw_ptr<ToolbarButton> back_ = nullptr;
++  raw_ptr<ToolbarButton> dev_tools_button_ = nullptr;
+   raw_ptr<ToolbarButton> forward_ = nullptr;
+   raw_ptr<ReloadButton> reload_ = nullptr;
+   raw_ptr<WebUIToolbarWebView> toolbar_webview_ = nullptr;

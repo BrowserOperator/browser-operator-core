@@ -1,0 +1,77 @@
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
+index 7ab3e80be5..41cc46fefe 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.cc
++++ b/chrome/browser/devtools/devtools_ui_bindings.cc
+@@ -40,6 +40,7 @@
+ #include "build/build_config.h"
+ #include "chrome/browser/about_flags.h"
+ #include "chrome/browser/browser_process.h"
++#include "chrome/browser/buildflags.h"
+ #include "chrome/browser/devtools/aida_service_handler.h"
+ #include "chrome/browser/devtools/devtools_file_watcher.h"
+ #include "chrome/browser/devtools/devtools_http_service_registry.h"
+@@ -59,9 +60,11 @@
+ #include "chrome/browser/sync/sync_service_factory.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/chrome_pages.h"
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "chrome/browser/ui/hats/hats_service.h"
+ #include "chrome/browser/ui/hats/hats_service_factory.h"
++#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+ #include "chrome/common/channel_info.h"
+ #include "chrome/common/chrome_switches.h"
+ #include "chrome/common/pref_names.h"
+@@ -1429,6 +1432,30 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
+ 
+ void DevToolsUIBindings::OpenInNewTab(const std::string& url) {
+   GURL gurl(url);
++#if BUILDFLAG(IS_MAC) && BUILDFLAG(ENABLE_UPDATER)
++  // The shipped Browser Operator panel may open only the fixed native update
++  // page. Remote/custom frontends and all other chrome:// URLs retain the
++  // standard request policy below.
++  if (is_local_frontend_ && !profile_->IsSystemProfile() && web_contents_ &&
++      gurl == GURL(chrome::kChromeUIHelpURL)) {
++    const GURL& frontend = web_contents_->GetLastCommittedURL();
++    if (frontend.SchemeIs(content::kChromeDevToolsScheme) &&
++        frontend.host() == "devtools" &&
++        base::StartsWith(frontend.path(), "/bundled/")) {
++      // This fixed browser command is independent of the inspected page.
++      // Generic OpenInNewTab also applies its security policy downstream and
++      // correctly blocks privileged URLs attributed to web content.
++      Profile* update_profile = profile_->IsGuestSession()
++                                    ? profile_.get()
++                                    : profile_->GetOriginalProfile();
++      chrome::ScopedTabbedBrowserDisplayer displayer(update_profile);
++      if (auto* browser = displayer.browser_window_interface()) {
++        chrome::ShowAboutChrome(browser);
++      }
++      return;
++    }
++  }
++#endif
+   // Hardening: Verify that the frontend renderer is allowed to request this URL.
+   content::ChildProcessSecurityPolicy* policy =
+       content::ChildProcessSecurityPolicy::GetInstance();
+@@ -2359,7 +2386,20 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
+ }
+ 
+ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
+-  base::Value response(GetHostConfigDictionary(profile_));
++  base::DictValue config = GetHostConfigDictionary(profile_);
++#if BUILDFLAG(IS_MAC) && BUILDFLAG(ENABLE_UPDATER)
++  if (is_local_frontend_ && !profile_->IsSystemProfile() && web_contents_) {
++    const GURL& frontend = web_contents_->GetLastCommittedURL();
++    if (frontend.SchemeIs(content::kChromeDevToolsScheme) &&
++        frontend.host() == "devtools" &&
++        base::StartsWith(frontend.path(), "/bundled/")) {
++      base::DictValue browser_operator_updates;
++      browser_operator_updates.Set("enabled", true);
++      config.Set("browserOperatorUpdates", std::move(browser_operator_updates));
++    }
++  }
++#endif
++  base::Value response(std::move(config));
+   std::move(callback).Run(&response);
+ }
+ 

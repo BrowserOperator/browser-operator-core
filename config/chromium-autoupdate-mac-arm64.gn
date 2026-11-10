@@ -1,0 +1,7 @@
+# Local update qualification; never use this loopback configuration for release.
+import(
+    "//third_party/devtools-frontend/src/config/chromium-release-mac-arm64.gn")
+enable_updater = true
+enable_update_notifications = true
+browser_operator_updater_config =
+    "//third_party/devtools-frontend/src/config/updater/macos-local-test.gni"

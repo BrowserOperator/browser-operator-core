@@ -31,3 +31,12 @@ devtools_entrypoint("bundle") {
 
   visibility = default_components_visibility
 }
+
+ts_library("unittests") {
+  testonly = true
+  sources = [ "SuggestionInput.test.ts" ]
+  deps = [
+    ":bundle",
+    "../../../testing",
+  ]
+}
