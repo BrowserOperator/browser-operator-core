@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wrap a verified macOS release as a pinned-key CRX3 local update candidate."""
+"""Wrap a verified macOS release as a pinned-key CRX3 update candidate."""
 
 import argparse
 import hashlib
@@ -44,8 +44,22 @@ def main():
     args = parser.parse_args()
     release, build = args.release.resolve(), args.build_input.resolve()
     manifest = json.loads((release / 'release-manifest.json').read_text())
-    if manifest.get('update_channel') not in ('local-test', 'cloud-test') or manifest['architecture'] != 'arm64':
-        raise RuntimeError('This qualification tool only accepts isolated macOS ARM64 test releases')
+    channel, architecture = manifest.get('update_channel'), manifest['architecture']
+    if channel not in ('local-test', 'cloud-test', 'stable') or architecture not in ('arm64', 'universal'):
+        raise RuntimeError('Expected a verified updater-enabled macOS release')
+    pin = hashlib.sha256(args.crx_public_key.read_bytes()).hexdigest()
+    if channel == 'stable':
+        if (manifest.get('notarization') != 'accepted and stapled' or manifest.get('gatekeeper') != 'accepted'
+                or manifest.get('updater_trust', {}).get('crx_public_spki_sha256') != pin):
+            raise RuntimeError('Production candidate must match its notarized release and compiled publisher pin')
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from chromium_build_input import load
+        frozen = load(build)
+        if (frozen['version'] != manifest['version'] or frozen.get('updater_trust') != manifest['updater_trust']
+                or frozen['build_settings']['target_cpu'].strip('"') != architecture
+                or manifest.get('source_frozen_manifest_sha256') != hashlib.sha256((build / 'frozen-input.json').read_bytes()).hexdigest()):
+            raise RuntimeError('Production installer and tools must come from the same verified frozen release inputs')
     dmg = release / 'artifacts' / manifest['dmg']
     if dmg.parent != release / 'artifacts':
         raise RuntimeError('Invalid release filename')
@@ -75,7 +89,10 @@ def main():
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
         subprocess.run(['xcrun', 'stapler', 'validate', str(app)], check=True)
         subprocess.run(['spctl', '--assess', '--type', 'execute', str(app)], check=True)
-        archive = args.output / f'BrowserOperator-{version}-arm64-update.zip'
+        if channel == 'stable':
+            from chromium_macos_arch import verify_architectures
+            verify_architectures(app, architecture)
+        archive = args.output / f'BrowserOperator-{version}-{architecture}-update.zip'
         archive_app(app, installer, archive)
     finally:
         subprocess.run(['hdiutil', 'detach', str(volume)], check=True)
@@ -94,17 +111,19 @@ def main():
     package = archive.with_suffix('.crx3')
     subprocess.run([str(build / 'crx3_build_action'), str(package), str(archive),
                     str(args.crx_private_key)], check=True)
-    pin = hashlib.sha256(args.crx_public_key.read_bytes()).hexdigest()
     subprocess.run([str(build / 'browser_operator_update_verify'), 'crx', str(package), pin], check=True)
     with package.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-    catalog = {'channel': 'autoupdate-test', 'apps': [{
+    catalog = {'channel': 'stable' if channel == 'stable' else 'autoupdate-test', 'apps': [{
         'appid': info['CFBundleIdentifier'], 'version': version,
         'crx': {'name': package.name, 'sha256': digest, 'size': package.stat().st_size},
     }]}
+    if channel == 'stable':
+        catalog['apps'][0]['architectures'] = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
     (args.output / 'catalog-candidate.json').write_text(json.dumps(catalog, indent=2) + '\n')
     (args.output / 'update-manifest.json').write_text(json.dumps({
-        'version': version, 'crx_sha256': digest, 'crx_public_key_sha256': pin,
+        'version': version, 'architecture': architecture, 'channel': channel,
+        'crx_sha256': digest, 'crx_public_key_sha256': pin,
         'source_release_sha256': manifest['sha256'],
         'source_base_revision': manifest['source_base_revision'],
         'native_upgrade_test': 'pending',

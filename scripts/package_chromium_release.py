@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Sign, notarize, package, and test a Chromium ARM64 shipping DMG.
+"""Sign, notarize, package, and test a Chromium ARM64 or universal shipping DMG.
 
 Uses Chromium's generated nested-signing pipeline and the existing project's
 notarytool keychain profile. Never modifies the input app or deletes a release.
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -68,12 +69,16 @@ def shipping_args(source, build, updater_enabled=False):
     return validate_shipping_settings(values, updater_enabled)
 
 
-def validate_shipping_settings(values, updater_enabled=False):
+def validate_shipping_settings(values, updater_enabled=False, allow_universal=False):
+    cpu = values.get('target_cpu')
+    allowed = ('"arm64"', '"x64"', '"universal"') if allow_universal else ('"arm64"', '"x64"')
+    if cpu not in allowed:
+        raise RuntimeError('Shipping macOS build must target arm64 or x64')
     expected = {
         'is_official_build': 'true', 'is_debug': 'false',
         'is_component_build': 'false', 'dcheck_always_on': 'false',
         'chrome_pgo_phase': '2', 'devtools_bundle': 'true',
-        'devtools_skip_typecheck': 'false', 'target_cpu': '"arm64"',
+        'devtools_skip_typecheck': 'false', 'target_cpu': cpu,
         'is_chrome_branded': 'false', 'enable_updater': 'true' if updater_enabled else 'false',
     }
     for key, value in expected.items():
@@ -128,14 +133,15 @@ def validate_mounted_app(app, team, evidence):
     return details
 
 
-def smoke_test(app, artifacts, node, updater_enabled=False):
+def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
     with socket.socket() as server:
         server.bind(('127.0.0.1', 0))
         port = server.getsockname()[1]
     scripts = Path(__file__).resolve().parent
     with tempfile.TemporaryDirectory(prefix='browser-operator-dmg-profile-') as profile:
         with (artifacts / 'browser.log').open('w') as log:
-            process = subprocess.Popen([
+            prefix = ['/usr/bin/arch', '-' + cpu] if cpu else []
+            process = subprocess.Popen([*prefix,
                 str(app / 'Contents/MacOS/Browser Operator'), '--headless=new',
                 '--use-mock-keychain', '--user-data-dir=' + profile,
                 '--no-first-run', '--no-default-browser-check', '--lang=en-US',
@@ -144,21 +150,36 @@ def smoke_test(app, artifacts, node, updater_enabled=False):
             ], stdout=log, stderr=subprocess.STDOUT)
             try:
                 endpoint = f'http://127.0.0.1:{port}'
-                deadline = time.monotonic() + 30
+                # First-launch translation of the Intel framework can exceed
+                # native startup time on Apple Silicon. Keep a bounded wait.
+                deadline = time.monotonic() + (180 if cpu == 'x86_64' else 30)
                 while True:
                     if process.poll() is not None:
-                        raise RuntimeError('Mounted DMG app exited during startup; inspect browser.log')
+                        raise RuntimeError('Release test app exited during startup; inspect browser.log')
                     try:
                         with urllib.request.urlopen(endpoint + '/json/version', timeout=1):
                             break
                     except OSError:
                         if time.monotonic() >= deadline:
-                            raise RuntimeError('Mounted DMG app did not expose its local test endpoint')
+                            raise RuntimeError('Release test app did not expose its local test endpoint')
                         time.sleep(0.25)
                 version = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
                 run([node, scripts / 'verify_chromium_release.mjs', endpoint, version, artifacts])
+                if cpu:
+                    from chromium_macos_arch import process_architecture
+                    report = json.loads((artifacts / 'report.json').read_text())
+                    owned = [entry for entry in report['processInfo'] if entry['type'] in ('browser', 'renderer')]
+                    if not any(p['type'] == 'browser' for p in owned) or not any(p['type'] == 'renderer' for p in owned):
+                        raise RuntimeError('Expected live browser and renderer processes for architecture validation')
+                    actual = [{**entry, 'architecture': process_architecture(entry['id'])} for entry in owned]
+                    (artifacts / 'process-architectures.json').write_text(json.dumps(actual, indent=2) + '\n')
+                    if any(p['architecture'] != cpu for p in actual):
+                        raise RuntimeError('Browser or renderer helper ran the wrong architecture')
                 if not updater_enabled:
                     run([node, scripts / 'verify_chromium_about.mjs', endpoint, artifacts])
+                else:
+                    run([node, scripts / 'updater/verify_browser_updater.mjs',
+                         endpoint, version, 'successful-check', artifacts])
             finally:
                 if process.poll() is None:
                     process.terminate()
@@ -170,6 +191,9 @@ def smoke_test(app, artifacts, node, updater_enabled=False):
 
 
 def verify_release(source, output, app_name, version, team, settings, node, provenance=None):
+    verification = output / 'verification'
+    verification.mkdir(exist_ok=True)
+    tests = Path(tempfile.mkdtemp(prefix='attempt-', dir=verification))
     dmgs = list((output / 'artifacts').glob('*.dmg'))
     if len(dmgs) != 1:
         raise RuntimeError('Expected exactly one final DMG')
@@ -177,7 +201,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
     run(['codesign', '--verify', '--strict', '--verbose=2', dmg])
     run(['xcrun', 'stapler', 'validate', dmg])
     assess_gatekeeper(['spctl', '--assess', '--type', 'open', '--context',
-                       'context:primary-signature', '--verbose=2', dmg], output / 'gatekeeper-dmg.txt')
+                       'context:primary-signature', '--verbose=2', dmg], tests / 'gatekeeper-dmg.txt')
     run(['hdiutil', 'verify', dmg])
     mounted = plistlib.loads(subprocess.check_output(
         ['hdiutil', 'attach', '-readonly', '-nobrowse', '-plist', str(dmg)]))
@@ -187,23 +211,40 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         mounted_version = plistlib.loads((mounted_app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
         if mounted_version != version:
             raise RuntimeError(f'Mounted app version {mounted_version} differs from expected {version}')
+        from chromium_macos_arch import verify_bundle_version
+        verify_bundle_version(mounted_app, version)
         if not (volume / 'Applications').is_symlink() or os.readlink(volume / 'Applications') != '/Applications':
             raise RuntimeError('DMG is missing the Applications installation shortcut')
-        validate_mounted_app(mounted_app, team, output / 'gatekeeper-app.txt')
-        architecture = subprocess.check_output(
-            ['lipo', '-archs', str(mounted_app / 'Contents/MacOS/Browser Operator')], text=True).strip()
-        if architecture != 'arm64':
-            raise RuntimeError(f'Unexpected DMG architecture: {architecture}')
-        tests = output / 'verification'
-        tests.mkdir(exist_ok=True)
+        validate_mounted_app(mounted_app, team, tests / 'gatekeeper-app.txt')
+        from chromium_macos_arch import verify_architectures
+        architecture = settings['target_cpu'].strip('"')
+        binaries = verify_architectures(mounted_app, architecture)
         updater_enabled = settings['enable_updater'] == 'true'
         if updater_enabled:
             helpers = mounted_app / 'Contents/Frameworks/Browser Operator Framework.framework/Versions/Current/Helpers'
             updater_apps = [p for p in helpers.glob('*Updater*.app') if p.is_dir()]
             if len(updater_apps) != 1:
                 raise RuntimeError('Expected exactly one embedded updater')
-            validate_mounted_app(updater_apps[0], team, output / 'gatekeeper-updater.txt')
-        smoke_test(mounted_app, tests, node, updater_enabled=updater_enabled)
+            validate_mounted_app(updater_apps[0], team, tests / 'gatekeeper-updater.txt')
+        tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
+        from updater.macos_smoke_scope import UpdaterSmokeScope
+        scope = UpdaterSmokeScope(settings, team, tests) if updater_enabled else contextlib.nullcontext()
+        # Native Chromium correctly refuses registration on a read-only DMG.
+        # Exercise the actual installation path using this exact verified app,
+        # leaving the user's /Applications and browser profile untouched.
+        installed = tests / 'installed'
+        installed.mkdir()
+        installed_app = installed / app_name
+        run(['cp', '-cR', mounted_app, installed_app])
+        validate_mounted_app(installed_app, team, tests / 'gatekeeper-installed-app.txt')
+        with scope:
+            for cpu in tested_architectures:
+                cpu_tests = tests / cpu
+                cpu_tests.mkdir(exist_ok=True)
+                smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
+        # This is an owned disposable installation, not the mounted app or a
+        # user's browser. Keep failed attempts for diagnosis; retire successes.
+        shutil.rmtree(installed)
     finally:
         run(['hdiutil', 'detach', volume])
     with dmg.open('rb') as stream:
@@ -212,18 +253,37 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         provenance = {'source_base_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip(),
                       'source_has_local_changes': bool(subprocess.check_output(
                           ['git', 'status', '--porcelain', '--untracked-files=no'], cwd=source))}
-    manifest = {'version': version, 'architecture': 'arm64', 'team_id': team,
+        if settings['enable_updater'] == 'true':
+            from chromium_build_input import updater_trust
+            provenance['updater_trust'] = updater_trust(source, settings)
+    manifest = {'version': version, 'architecture': architecture, 'team_id': team,
                 **{key: value for key, value in provenance.items() if key.startswith('source_')},
                 'dmg': dmg.name, 'sha256': digest, 'build_settings': settings,
                 'notarization': 'accepted and stapled', 'gatekeeper': 'accepted',
-                'mounted_app_functional_tests': 'passed'}
+                'mounted_app_validation': 'passed',
+                'installed_dmg_copy_functional_tests': 'passed'}
+    manifest['mach_o_architectures'] = binaries
+    manifest['verification_evidence'] = str(tests.relative_to(output))
+    manifest['functional_test_architectures'] = {cpu: 'passed' for cpu in tested_architectures}
+    if architecture == 'universal':
+        manifest['intel_hardware_test'] = 'pending; x86_64 tested with Rosetta on Apple Silicon'
+    if settings['enable_updater'] == 'true':
+        if provenance and provenance.get('updater_trust'):
+            manifest['updater_trust'] = provenance['updater_trust']
+    for key in ('native_source_state', 'frontend_source_state'):
+        if provenance.get(key):
+            manifest[key] = provenance[key]
     manifest['native_updater_upgrade_test'] = 'pending' if settings['enable_updater'] == 'true' else 'not enabled'
     updater_config = settings['browser_operator_updater_config'].strip('"')
     manifest['update_channel'] = ('cloud-test' if updater_config.endswith('/macos-cloud-test.generated.gni')
                                   else 'local-test' if updater_config.endswith('/macos-local-test.gni')
-                                  else 'manual' if settings['enable_updater'] == 'false' else 'configured')
+                                  else 'manual' if settings['enable_updater'] == 'false'
+                                  else 'stable' if updater_config.endswith('/macos-production.gni') else 'configured')
     if provenance and provenance.get('updater_composition'):
         manifest['updater_composition'] = provenance['updater_composition']
+    if provenance and provenance.get('universal_composition'):
+        manifest['universal_composition'] = {**provenance['universal_composition'],
+            'intel_runtime_test': 'passed under Rosetta; physical Intel hardware qualification pending'}
     (output / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2), flush=True)
 
@@ -232,12 +292,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chromium-src', required=True, type=Path)
     parser.add_argument('--build-dir', default='out/Release', type=Path)
+    parser.add_argument('--architecture', choices=('arm64', 'universal'), default='arm64')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--identity', default=os.environ.get('SIGNING_IDENTITY'))
     parser.add_argument('--keychain-profile', default=os.environ.get('KEYCHAIN_PROFILE', 'tthoma9'))
     parser.add_argument('--node', default=shutil.which('node'))
-    parser.add_argument('--updater-enabled', action='store_true',
-                        help='Package and sign an updater-enabled build; upgrade qualification is a separate test')
+    updater = parser.add_mutually_exclusive_group()
+    updater.add_argument('--updater-enabled', action='store_true', default=True,
+                         help='Sign the embedded updater (default); upgrade qualification is a separate test')
+    updater.add_argument('--manual-updates', dest='updater_enabled', action='store_false',
+                         help='Explicitly package a historical/manual-update build')
     parser.add_argument('--frozen-input', type=Path,
                         help='Use hash-verified signing inputs captured from a completed native build')
     parser.add_argument('--verify-existing', action='store_true',
@@ -260,16 +324,37 @@ def main():
         raise RuntimeError('Output must be absent or empty; existing releases are never removed')
     if shutil.disk_usage(source).free < 5 * 1024**3:
         raise RuntimeError('At least 5 GiB free is required for signing and packaging')
+    output_volume = output
+    while not output_volume.exists():
+        output_volume = output_volume.parent
+    if shutil.disk_usage(output_volume).free < 5 * 1024**3:
+        raise RuntimeError('At least 5 GiB free is required on the release output volume')
     provenance = None
     if args.frozen_input:
         from chromium_build_input import load
         provenance = load(build)
-        settings = validate_shipping_settings(provenance['build_settings'], args.updater_enabled)
+        provenance['source_frozen_manifest_sha256'] = hashlib.sha256((build / 'frozen-input.json').read_bytes()).hexdigest()
+        settings = validate_shipping_settings(provenance['build_settings'], args.updater_enabled,
+                                               allow_universal=bool(provenance.get('universal_composition')))
     else:
         settings = shipping_args(source, build, updater_enabled=args.updater_enabled)
-        from chromium_build_input import require_current_build
-        require_current_build(source, build, ['chrome', 'chrome/installer/mac'])
+        from chromium_build_input import release_targets, require_current_build
+        require_current_build(source, build, release_targets(settings))
+    if settings['target_cpu'] != '"' + args.architecture + '"':
+        raise RuntimeError('Requested DMG architecture differs from the verified build inputs')
+    if args.architecture == 'universal':
+        if subprocess.run(['/usr/bin/arch', '-x86_64', '/usr/bin/true'],
+                          capture_output=True).returncode:
+            raise RuntimeError('Rosetta or Intel runtime is required to test the universal DMG before release')
+    if (provenance and settings['browser_operator_updater_config'].endswith('/macos-production.gni"')
+            and not provenance.get('updater_trust')):
+        raise RuntimeError('Production frozen input must include the compiled updater trust roots')
+    from chromium_macos_arch import verify_architectures
+    verify_architectures(app, args.architecture)
     identity, team = find_identity(args.identity)
+    if args.updater_enabled:
+        from updater.macos_smoke_scope import UpdaterSmokeScope
+        UpdaterSmokeScope(settings, team, output).require_clean()
     packaging = build / 'Browser Operator Packaging'
     if not (packaging / 'sign_chrome.py').is_file():
         raise RuntimeError('Build chrome/installer/mac to generate the packaging pipeline first')
@@ -310,7 +395,7 @@ def main():
         config = staged_packaging / 'signing/internal_config.py'
         if config.exists():
             raise RuntimeError('Unexpected existing custom signing configuration')
-        suffix = '-arm64'
+        suffix = '-' + args.architecture
         if settings['browser_operator_updater_config'].strip('"').endswith(('/macos-local-test.gni', '/macos-cloud-test.generated.gni')):
             suffix += '-updater-test'
         config.write_text(

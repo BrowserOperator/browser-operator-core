@@ -6,6 +6,9 @@ import {CDP} from '../chromium_cdp.mjs';
 
 const [endpoint, expectedVersion, expectedStatus, output] = process.argv.slice(2);
 assert.ok(endpoint && expectedVersion && expectedStatus && output, 'endpoint version status artifacts required');
+// UPDATING is emitted only after the native authenticated check accepts an
+// offer. This probe checks transport/authentication, not installation success.
+const accepted = expectedStatus === 'successful-check' ? new Set(['updated', 'updating', 'nearly_updated']) : new Set([expectedStatus]);
 const artifacts = resolve(output);
 await mkdir(artifacts, {recursive: true});
 const version = await fetch(`${endpoint}/json/version`).then(r => r.json());
@@ -55,7 +58,7 @@ try {
       history.push({time: new Date().toISOString(), ...state});
       console.log(JSON.stringify({status: state.status, message: state.message}));
     }
-    if (state?.status === expectedStatus || state?.status?.startsWith('failed')) break;
+    if (accepted.has(state?.status) || state?.status?.startsWith('failed')) break;
     await new Promise(r => setTimeout(r, 500));
   }
   await writeFile(join(artifacts, 'native-updater-report.json'), JSON.stringify({
@@ -63,7 +66,7 @@ try {
   }, null, 2));
   const screenshot = await page.send('Page.captureScreenshot', {format: 'png'});
   await writeFile(join(artifacts, 'native-updater.png'), Buffer.from(screenshot.data, 'base64'));
-  assert.equal(state?.status, expectedStatus, JSON.stringify(state));
+  assert.ok(accepted.has(state?.status), JSON.stringify(state));
   assert.ok(state.text.includes('Official Build'));
 } finally {
   page?.close();

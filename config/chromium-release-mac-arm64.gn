@@ -5,7 +5,10 @@ is_debug = false
 is_component_build = false
 dcheck_always_on = false
 is_chrome_branded = false
-enable_updater = false
+enable_updater = true
+enable_update_notifications = true
+browser_operator_updater_config =
+    "//third_party/devtools-frontend/src/config/updater/macos-production.gni"
 chrome_pgo_phase = 2
 symbol_level = 0
 blink_symbol_level = 0
