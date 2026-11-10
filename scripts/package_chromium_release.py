@@ -150,16 +150,18 @@ def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
             ], stdout=log, stderr=subprocess.STDOUT)
             try:
                 endpoint = f'http://127.0.0.1:{port}'
-                deadline = time.monotonic() + 30
+                # First-launch translation of the Intel framework can exceed
+                # native startup time on Apple Silicon. Keep a bounded wait.
+                deadline = time.monotonic() + (180 if cpu == 'x86_64' else 30)
                 while True:
                     if process.poll() is not None:
-                        raise RuntimeError('Mounted DMG app exited during startup; inspect browser.log')
+                        raise RuntimeError('Release test app exited during startup; inspect browser.log')
                     try:
                         with urllib.request.urlopen(endpoint + '/json/version', timeout=1):
                             break
                     except OSError:
                         if time.monotonic() >= deadline:
-                            raise RuntimeError('Mounted DMG app did not expose its local test endpoint')
+                            raise RuntimeError('Release test app did not expose its local test endpoint')
                         time.sleep(0.25)
                 version = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
                 run([node, scripts / 'verify_chromium_release.mjs', endpoint, version, artifacts])

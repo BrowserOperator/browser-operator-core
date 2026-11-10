@@ -171,3 +171,26 @@ DMG-to-install copying crosses volumes and may require a full copy even when
 `cp -c` is requested. Successful test installations are removed after helper
 cleanup; failed attempts retain the app for diagnosis. Output-volume free space
 is checked independently. Detailed verification evidence remains private.
+
+## Verified release checkpoint, 2026-11-10
+
+Both 158.0.8127.18 production DMGs passed Developer ID signing, app/DMG
+notarization and stapling, Gatekeeper and image-integrity checks. The ARM64
+release passed its native execution; the universal release passed both ARM64
+and translated x86_64 browser/renderer execution, bundled AI tools and native
+About update checks. Both update candidates passed Chromium archive round-trip
+and pinned-key CRX verification. Physical Intel hardware testing and provider
+conversations remain unqualified. Chromium warns that Rosetta execution is not
+a maintained mode; translated coverage does not replace hardware qualification.
+
+Cold Rosetta startup exceeded the original 30-second test limit. The Intel
+startup probe now allows a bounded 180 seconds; the complete test then passed.
+No security check or CPU assertion was bypassed. Visible toolbar verification
+awaits an isolated GUI launch because desktop automation denied Terminal access.
+
+The permanent stable feed is empty. A production 159 build, real native upgrade
+qualification and explicit catalog promotion are still required before clients
+receive 159. Local verified candidates have not been published to GitHub in this
+run. CircleCI scripts/YAML were checked, but no remote CI execution is claimed.
+Claude's final focused static review found no introduced blockers. The release,
+CircleCI and private Omaha changes remain separate review PRs.
