@@ -2,15 +2,34 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as SDK from '../../../core/sdk/sdk.js';
 import * as Protocol from '../../../generated/protocol.js';
-import * as Utils from '../common/utils.js';
+import * as UtilsUniversal from '../common/utils-universal.js';
 import type { AccessibilityNode } from '../common/context.js';
-import { AgentService } from '../core/AgentService.js';
 import { createLogger } from '../core/Logger.js';
 import { callLLMWithTracing } from './LLMTracingWrapper.js';
 import type { Tool, LLMContext } from './Tools.js';
 import { LLMResponseParser } from '../LLM/LLMResponseParser.js';
+import { getAdapter } from '../cdp/getAdapter.js';
+import type { CDPSessionAdapter } from '../cdp/CDPSessionAdapter.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only dependencies for API key fallback
+let AgentService: typeof import('../core/AgentService.js').AgentService | null = null;
+let agentServiceLoaded = false;
+
+async function ensureAgentService(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (!agentServiceLoaded) {
+    agentServiceLoaded = true;
+    try {
+      const agentServiceModule = await import('../core/AgentService.js');
+      AgentService = agentServiceModule.AgentService;
+    } catch { return false; }
+  }
+  return AgentService !== null;
+}
 
 const logger = createLogger('Tool:StreamlinedSchemaExtractor');
 
@@ -107,8 +126,25 @@ export class StreamlinedSchemaExtractorTool implements Tool<StreamlinedSchemaExt
 
   private async setupExecution(args: StreamlinedSchemaExtractionArgs, ctx?: LLMContext): Promise<ExecutionContext | StreamlinedExtractionResult> {
     const { schema, instruction } = args;
-    const agentService = AgentService.getInstance();
-    const apiKey = agentService.getApiKey();
+
+    // Get CDP adapter (works in both DevTools and eval runner)
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return {
+        success: false,
+        data: null,
+        error: 'No browser connection available'
+      };
+    }
+
+    // Get API key from context first, fallback to AgentService in browser
+    let apiKey = ctx?.apiKey;
+    if (!apiKey && !isNodeEnvironment) {
+      await ensureAgentService();
+      if (AgentService) {
+        apiKey = AgentService.getInstance().getApiKey() ?? undefined;
+      }
+    }
 
     // Get provider from context
     const provider = ctx?.provider;
@@ -132,16 +168,7 @@ export class StreamlinedSchemaExtractorTool implements Tool<StreamlinedSchemaExt
       };
     }
 
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return {
-        success: false,
-        error: 'No page target available',
-        data: null
-      };
-    }
-
-    const accessibilityData = await this.getAccessibilityData(target);
+    const accessibilityData = await this.getAccessibilityData(adapter);
 
     return {
       success: true,
@@ -153,12 +180,51 @@ export class StreamlinedSchemaExtractorTool implements Tool<StreamlinedSchemaExt
     };
   }
 
-  private async getAccessibilityData(target: SDK.Target.Target): Promise<{urlMappings: Record<string, string>, treeText: string}> {
-    const processedTreeResult = await Utils.getAccessibilityTree(target);
+  private async getAccessibilityData(adapter: CDPSessionAdapter): Promise<{urlMappings: Record<string, string>, treeText: string}> {
+    // Get raw accessibility tree nodes to build URL mapping
+    const accessibilityAgent = adapter.accessibilityAgent();
+    const rawAxTree = await accessibilityAgent.invoke<{nodes: Protocol.Accessibility.AXNode[]}>('getFullAXTree', {});
+
+    // Build URL mapping from raw accessibility nodes
+    const urlMappings = this.buildUrlMapping(rawAxTree?.nodes || []);
+    logger.debug(`Built URL mapping with ${Object.keys(urlMappings).length} entries`);
+
+    // Get the processed accessibility tree text
+    const processedTreeResult = await UtilsUniversal.getAccessibilityTree(adapter);
+
     return {
       treeText: processedTreeResult.simplified,
-      urlMappings: processedTreeResult.idToUrl || {}
+      urlMappings
     };
+  }
+
+  /**
+   * Build a mapping from accessibility node IDs to URLs
+   * Extracts URLs from nodes that have the Url property
+   */
+  private buildUrlMapping(nodes: Protocol.Accessibility.AXNode[]): Record<string, string> {
+    const urlMapping: Record<string, string> = {};
+
+    for (const node of nodes) {
+      // Find the URL property in node properties
+      const urlProperty = node.properties?.find(p =>
+        p.name === Protocol.Accessibility.AXPropertyName.Url
+      );
+
+      // If URL property exists and has a string value, add to mapping
+      if (urlProperty?.value?.type === 'string' && urlProperty.value.value && node.nodeId) {
+        urlMapping[node.nodeId] = String(urlProperty.value.value);
+      }
+    }
+
+    // Log some sample entries for debugging
+    const mappingSize = Object.keys(urlMapping).length;
+    if (mappingSize > 0) {
+      const sampleEntries = Object.entries(urlMapping).slice(0, 3);
+      logger.debug('Sample URL mappings:', sampleEntries);
+    }
+
+    return urlMapping;
   }
 
   private async performExtraction(context: ExecutionContext, ctx?: LLMContext): Promise<any> {

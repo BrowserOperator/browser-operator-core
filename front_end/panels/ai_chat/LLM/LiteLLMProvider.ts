@@ -209,6 +209,12 @@ export class LiteLLMProvider extends LLMBaseProvider {
         payloadBody.tool_choice = options.tool_choice;
       }
 
+      // Add tracing metadata for Langfuse integration
+      // LiteLLM forwards this to Langfuse callbacks
+      if (options?.tracingMetadata) {
+        payloadBody.metadata = options.tracingMetadata;
+      }
+
       logger.info('Request payload:', payloadBody);
 
       const data = await this.makeAPIRequest(payloadBody);

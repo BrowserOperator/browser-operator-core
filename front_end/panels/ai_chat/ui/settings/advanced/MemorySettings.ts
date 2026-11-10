@@ -21,6 +21,7 @@ export class MemorySettings {
   private memoryEnabledCheckbox: HTMLInputElement | null = null;
   private blockListContainer: HTMLElement | null = null;
   private blockManager: MemoryBlockManager;
+  private statusMessageElement: HTMLElement | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -104,6 +105,12 @@ export class MemorySettings {
     blocksTitle.textContent = 'Stored Memory';
     this.blockListContainer.appendChild(blocksTitle);
 
+    // Create status message element
+    this.statusMessageElement = document.createElement('div');
+    this.statusMessageElement.className = 'memory-status-message';
+    this.statusMessageElement.style.display = 'none';
+    this.blockListContainer.appendChild(this.statusMessageElement);
+
     try {
       const blocks = await this.blockManager.getAllBlocks();
 
@@ -164,16 +171,20 @@ export class MemorySettings {
 
     item.appendChild(info);
 
-    // Delete button
+    // Delete button container (for inline confirmation)
+    const deleteContainer = document.createElement('div');
+    deleteContainer.className = 'memory-block-delete-container';
+
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'memory-block-delete';
     deleteBtn.textContent = '🗑️';
     deleteBtn.title = 'Delete this memory block';
     deleteBtn.addEventListener('click', (e: MouseEvent) => {
       e.stopPropagation(); // Don't trigger view
-      this.confirmAndDeleteBlock(block);
+      this.showInlineDeleteConfirmation(deleteContainer, deleteBtn, block);
     });
-    item.appendChild(deleteBtn);
+    deleteContainer.appendChild(deleteBtn);
+    item.appendChild(deleteContainer);
 
     // Click handler to view content
     const handleClick = (): void => {
@@ -192,14 +203,52 @@ export class MemorySettings {
   }
 
   /**
-   * Confirm and delete a memory block
+   * Show inline delete confirmation UI
    */
-  private async confirmAndDeleteBlock(block: MemoryBlock): Promise<void> {
-    const confirmed = confirm(`Delete "${block.label}" memory block? This cannot be undone.`);
-    if (!confirmed) {
-      return;
-    }
+  private showInlineDeleteConfirmation(
+    container: HTMLElement,
+    deleteBtn: HTMLElement,
+    block: MemoryBlock
+  ): void {
+    // Hide the delete button
+    deleteBtn.style.display = 'none';
 
+    // Create confirmation UI
+    const confirmUI = document.createElement('div');
+    confirmUI.className = 'memory-block-confirm';
+
+    const confirmLabel = document.createElement('span');
+    confirmLabel.className = 'memory-block-confirm-label';
+    confirmLabel.textContent = 'Delete?';
+    confirmUI.appendChild(confirmLabel);
+
+    const yesBtn = document.createElement('button');
+    yesBtn.className = 'memory-block-confirm-yes';
+    yesBtn.textContent = 'Yes';
+    yesBtn.addEventListener('click', (e: MouseEvent) => {
+      e.stopPropagation();
+      void this.deleteBlock(block);
+    });
+    confirmUI.appendChild(yesBtn);
+
+    const noBtn = document.createElement('button');
+    noBtn.className = 'memory-block-confirm-no';
+    noBtn.textContent = 'No';
+    noBtn.addEventListener('click', (e: MouseEvent) => {
+      e.stopPropagation();
+      // Restore original delete button
+      confirmUI.remove();
+      deleteBtn.style.display = '';
+    });
+    confirmUI.appendChild(noBtn);
+
+    container.appendChild(confirmUI);
+  }
+
+  /**
+   * Delete a memory block
+   */
+  private async deleteBlock(block: MemoryBlock): Promise<void> {
     // Extract projectName from filename for project blocks
     let projectName: string | undefined;
     if (block.type === 'project') {
@@ -211,7 +260,7 @@ export class MemorySettings {
       await this.renderMemoryBlocks(); // Refresh list
     } catch (error) {
       console.error('Failed to delete memory block:', error);
-      alert('Failed to delete memory block.');
+      this.showStatusMessage('Failed to delete memory block.', 'error');
     }
   }
 
@@ -339,7 +388,7 @@ export class MemorySettings {
       await this.renderMemoryBlocks();
     } catch (error) {
       console.error('Failed to save memory block:', error);
-      alert('Failed to save memory block. Content may exceed the character limit.');
+      this.showStatusMessage('Failed to save memory block. Content may exceed the character limit.', 'error');
     }
   }
 
@@ -350,5 +399,25 @@ export class MemorySettings {
   cleanup(): void {
     // Stop any active polling
     this.stopPollingForSave();
+  }
+
+  /**
+   * Show an inline status message
+   */
+  private showStatusMessage(message: string, type: 'error' | 'success'): void {
+    if (!this.statusMessageElement) {
+      return;
+    }
+
+    this.statusMessageElement.textContent = message;
+    this.statusMessageElement.className = `memory-status-message ${type}`;
+    this.statusMessageElement.style.display = 'block';
+
+    // Auto-hide after 4 seconds
+    setTimeout(() => {
+      if (this.statusMessageElement) {
+        this.statusMessageElement.style.display = 'none';
+      }
+    }, 4000);
   }
 }

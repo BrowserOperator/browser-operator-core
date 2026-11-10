@@ -381,7 +381,7 @@ export class BrowserAgentServer extends EventEmitter {
     const { provider, apiKey, endpoint, models, partial = false } = params;
 
     // Validate inputs
-    const supportedProviders = ['openai', 'litellm', 'groq', 'openrouter'];
+    const supportedProviders = ['openai', 'litellm', 'groq', 'openrouter', 'cerebras', 'anthropic', 'google'];
     if (partial) {
       // For partial updates, validate only provided fields
       if (provider && !supportedProviders.includes(provider)) {
@@ -730,10 +730,18 @@ export class BrowserAgentServer extends EventEmitter {
           metadata: {
             tags: request.metadata?.tags || [],
             retries: request.settings?.retry_policy?.max_retries || 0
-          }
+          },
+          // Forward tracing metadata for Langfuse session grouping
+          tracing: request.tracing || {}
         },
         id: rpcId
       };
+
+      logger.debug('RPC request prepared with tracing:', {
+        hasTracing: !!request.tracing,
+        tracingKeys: request.tracing ? Object.keys(request.tracing) : [],
+        sessionId: request.tracing?.session_id
+      });
 
       // Send RPC request
       const response = await connection.rpcClient.callMethod(
@@ -1307,6 +1315,69 @@ export class BrowserAgentServer extends EventEmitter {
   }
 
   /**
+   * Capture DOM snapshot using CDP DOMSnapshot.captureSnapshot
+   * @param {string} tabId - Tab ID (target ID)
+   * @param {Object} options - Snapshot options
+   * @param {string[]} options.computedStyles - Array of computed style properties to capture (default: [])
+   * @param {boolean} options.includeDOMRects - Whether to include bounding boxes (default: true)
+   * @param {boolean} options.includePaintOrder - Whether to include paint order (default: false)
+   * @returns {Promise<Object>} Result with DOM snapshot data
+   */
+  async captureDOMSnapshot(tabId, options = {}) {
+    const {
+      computedStyles = [],
+      includeDOMRects = true,
+      includePaintOrder = false
+    } = options;
+
+    try {
+      logger.info('Capturing DOM snapshot via CDP', {
+        tabId,
+        computedStyleCount: computedStyles.length,
+        includeDOMRects,
+        includePaintOrder
+      });
+
+      // Use DOMSnapshot.captureSnapshot CDP command
+      const result = await this.sendCDPCommandToTarget(tabId, 'DOMSnapshot.captureSnapshot', {
+        computedStyles,
+        includeDOMRects,
+        includePaintOrder
+      });
+
+      // Validate response structure
+      if (!result.documents || !result.strings) {
+        throw new Error('Invalid DOMSnapshot response: missing documents or strings array');
+      }
+
+      logger.info('DOM snapshot captured successfully', {
+        tabId,
+        documentCount: result.documents.length,
+        stringCount: result.strings.length,
+        totalNodes: result.documents.reduce((sum, doc) => sum + (doc.nodes?.nodeType?.length || 0), 0)
+      });
+
+      return {
+        tabId,
+        snapshot: result  // Contains documents[] and strings[]
+      };
+    } catch (error) {
+      logger.error('Failed to capture DOM snapshot via CDP', {
+        tabId,
+        error: error.message,
+        stack: error.stack
+      });
+
+      // Check if DOMSnapshot domain is available
+      if (error.message && error.message.includes('was not found')) {
+        throw new Error('DOMSnapshot domain not available. Requires Chrome 74+ with CDP enabled.');
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Capture page screenshot using CDP
    * @param {string} tabId - Tab ID (target ID)
    * @param {Object} options - Screenshot options
@@ -1341,6 +1412,55 @@ export class BrowserAgentServer extends EventEmitter {
     } catch (error) {
       logger.error('Failed to capture screenshot via CDP', {
         tabId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Execute a tool directly on a connected DevTools client
+   * This bypasses LLM orchestration and calls the tool directly
+   * @param {Object} connection - DevTools WebSocket connection
+   * @param {string} tool - Tool name (e.g., 'perform_action', 'navigate_url')
+   * @param {Object} args - Tool-specific arguments
+   * @param {number} timeout - Execution timeout in milliseconds
+   * @returns {Promise<Object>} Tool execution result
+   */
+  async executeToolDirect(connection, tool, args, timeout = 30000) {
+    const rpcId = `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    logger.info('Executing tool directly', {
+      clientId: connection.clientId,
+      tool,
+      timeout
+    });
+
+    try {
+      // Prepare RPC request for execute_tool method
+      const response = await connection.rpcClient.callMethod(
+        connection.ws,
+        'execute_tool',
+        {
+          tool,
+          args,
+          timeout
+        },
+        timeout + 5000 // Add buffer for network overhead
+      );
+
+      logger.info('Tool execution completed', {
+        clientId: connection.clientId,
+        tool,
+        success: response?.result?.success
+      });
+
+      return response;
+
+    } catch (error) {
+      logger.error('Tool execution failed', {
+        clientId: connection.clientId,
+        tool,
         error: error.message
       });
       throw error;

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Closed Shadow DOM Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+    }
+    closed-shadow-element {
+      display: block;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Closed Shadow DOM Test</h1>
+  <p>This page contains a custom element with a closed shadow root.</p>
+
+  <closed-shadow-element></closed-shadow-element>
+
+  <script>
+    class ClosedShadowElement extends HTMLElement {
+      constructor() {
+        super();
+        // Create a CLOSED shadow root - cannot be accessed via element.shadowRoot
+        const shadow = this.attachShadow({ mode: 'closed' });
+        shadow.innerHTML = `
+          <style>
+            button {
+              padding: 10px 20px;
+              font-size: 16px;
+              background-color: #4CAF50;
+              color: white;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+            }
+            button:hover {
+              background-color: #45a049;
+            }
+            .result {
+              margin-top: 10px;
+              color: #666;
+            }
+          </style>
+          <button id="closed-btn">Closed Button</button>
+          <div class="result" id="result"></div>
+        `;
+
+        // Add click handler
+        shadow.getElementById('closed-btn').addEventListener('click', () => {
+          shadow.getElementById('result').textContent = 'Button was clicked!';
+        });
+      }
+    }
+    customElements.define('closed-shadow-element', ClosedShadowElement);
+  </script>
+</body>
+</html>

@@ -17,14 +17,14 @@ export class AgentRunnerEventBus extends Common.ObjectWrapper.ObjectWrapper<{
   'agent-progress': AgentRunnerProgressEvent
 }> {
   private static instance: AgentRunnerEventBus;
-  
+
   static getInstance(): AgentRunnerEventBus {
     if (!this.instance) {
       this.instance = new AgentRunnerEventBus();
     }
     return this.instance;
   }
-  
+
   emitProgress(event: AgentRunnerProgressEvent, isBackground?: boolean): void {
     if (isBackground) {
       return;

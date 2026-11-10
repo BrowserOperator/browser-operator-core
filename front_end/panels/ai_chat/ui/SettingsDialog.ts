@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as Host from '../../../core/host/host.js';
 import * as UI from '../../../ui/legacy/legacy.js';
 import { createLogger } from '../core/Logger.js';
 import { LLMClient } from '../LLM/LLMClient.js';
@@ -10,7 +11,7 @@ import { CustomProviderManager } from '../core/CustomProviderManager.js';
 
 // Import settings utilities
 import { i18nString, UIStrings } from './settings/i18n-strings.js';
-import { PROVIDER_SELECTION_KEY, MINI_MODEL_STORAGE_KEY, NANO_MODEL_STORAGE_KEY, ADVANCED_SETTINGS_ENABLED_KEY } from './settings/constants.js';
+import { PROVIDER_SELECTION_KEY, MINI_MODEL_STORAGE_KEY, NANO_MODEL_STORAGE_KEY, ADVANCED_SETTINGS_ENABLED_KEY, PANEL_FILTER_ENABLED_KEY } from './settings/constants.js';
 import { applySettingsStyles } from './settings/utils/styles.js';
 import { isVectorDBEnabled } from './settings/utils/storage.js';
 import type { ModelOption, ProviderType, FetchLiteLLMModelsFunction, UpdateModelOptionsFunction, GetModelOptionsFunction, AddCustomModelOptionFunction, RemoveCustomModelOptionFunction } from './settings/types.js';
@@ -445,6 +446,16 @@ export class SettingsDialog {
     );
     mcpSettings.render();
 
+    // Create Memory section
+    const memorySection = document.createElement('div');
+    memorySection.className = 'settings-section memory-section';
+    memorySection.style.display = 'block';
+    contentDiv.appendChild(memorySection);
+
+    // Instantiate and render Memory settings
+    const memorySettings = new MemorySettings(memorySection);
+    memorySettings.render();
+
     // Add Advanced Settings Toggle
     const advancedToggleContainer = document.createElement('div');
     advancedToggleContainer.className = 'advanced-settings-toggle-container';
@@ -484,6 +495,43 @@ export class SettingsDialog {
     evaluationSection.className = 'settings-section evaluation-section';
     contentDiv.appendChild(evaluationSection);
 
+    // Create panel filter section (inside advanced settings)
+    const panelFilterSection = document.createElement('div');
+    panelFilterSection.className = 'settings-section panel-filter-section';
+    contentDiv.appendChild(panelFilterSection);
+
+    const panelFilterTitle = document.createElement('h3');
+    panelFilterTitle.className = 'settings-subtitle';
+    panelFilterTitle.textContent = 'Panel Visibility';
+    panelFilterSection.appendChild(panelFilterTitle);
+
+    const panelFilterContainer = document.createElement('div');
+    panelFilterContainer.className = 'settings-checkbox-container';
+    panelFilterContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px;';
+    panelFilterSection.appendChild(panelFilterContainer);
+
+    const panelFilterCheckbox = document.createElement('input');
+    panelFilterCheckbox.type = 'checkbox';
+    panelFilterCheckbox.id = 'panel-filter-toggle';
+    panelFilterCheckbox.checked = localStorage.getItem(PANEL_FILTER_ENABLED_KEY) !== 'false';
+    panelFilterContainer.appendChild(panelFilterCheckbox);
+
+    const panelFilterLabel = document.createElement('label');
+    panelFilterLabel.htmlFor = 'panel-filter-toggle';
+    panelFilterLabel.textContent = 'Show only AI Chat panel';
+    panelFilterContainer.appendChild(panelFilterLabel);
+
+    const panelFilterHint = document.createElement('div');
+    panelFilterHint.className = 'settings-hint';
+    panelFilterHint.textContent = 'When disabled, shows all standard DevTools panels (Elements, Console, etc.). Requires DevTools reload.';
+    panelFilterSection.appendChild(panelFilterHint);
+
+    panelFilterCheckbox.addEventListener('change', () => {
+      localStorage.setItem(PANEL_FILTER_ENABLED_KEY, panelFilterCheckbox.checked.toString());
+      // Reload DevTools to apply the panel filter change
+      Host.InspectorFrontendHost.InspectorFrontendHostInstance.reattach(() => window.location.reload());
+    });
+
     // Instantiate advanced feature settings classes
     const memorySettings = new MemorySettings(memorySection);
     const browsingHistorySettings = new BrowsingHistorySettings(historySection);
@@ -505,7 +553,12 @@ export class SettingsDialog {
       vectorDBSettings,
       tracingSettings,
       evaluationSettings,
-      mcpSettings
+    ];
+
+    // Store basic features for cleanup (MCP and Memory are not toggled)
+    const basicFeatures = [
+      mcpSettings,
+      memorySettings,
     ];
 
     // Advanced Settings Toggle Logic
@@ -516,6 +569,7 @@ export class SettingsDialog {
       vectorDBSection.style.display = display;
       tracingSection.style.display = display;
       evaluationSection.style.display = display;
+      panelFilterSection.style.display = display;
 
       // Save state to localStorage
       localStorage.setItem(ADVANCED_SETTINGS_ENABLED_KEY, show.toString());
@@ -666,6 +720,13 @@ export class SettingsDialog {
     dialog.contentElement.addEventListener('DOMNodeRemovedFromDocument', () => {
       // Cleanup all advanced features that have cleanup methods
       advancedFeatures.forEach(feature => {
+        if (feature.cleanup) {
+          feature.cleanup();
+        }
+      });
+
+      // Cleanup basic features (MCP and Memory)
+      basicFeatures.forEach(feature => {
         if (feature.cleanup) {
           feature.cleanup();
         }

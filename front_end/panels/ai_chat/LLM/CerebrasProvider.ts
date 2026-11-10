@@ -99,6 +99,88 @@ export class CerebrasProvider extends LLMBaseProvider {
   }
 
   /**
+   * JSON Schema fields not supported by Cerebras API.
+   * These constraints cause "Invalid fields for schema with types ['number']" errors.
+   */
+  private static readonly UNSUPPORTED_SCHEMA_FIELDS = new Set([
+    // Number constraints
+    'minimum',
+    'maximum',
+    'exclusiveMinimum',
+    'exclusiveMaximum',
+    'multipleOf',
+    // String constraints
+    'minLength',
+    'maxLength',
+    'pattern',
+    // Array constraints
+    'minItems',
+    'maxItems',
+    'uniqueItems',
+    // Object constraints
+    'minProperties',
+    'maxProperties',
+    'additionalProperties',
+    // Other unsupported fields
+    'format',
+    'default',
+    'examples',
+    '$schema',
+    '$id',
+    '$ref',
+    'const',
+  ]);
+
+  /**
+   * Simplifies JSON schemas for Cerebras compatibility.
+   * Cerebras has strict schema requirements:
+   * - Removes complex constructs like oneOf/anyOf
+   * - Strips unsupported constraints (minimum, maximum, etc.)
+   * - Ensures all object types have properties defined
+   */
+  private simplifySchemaForCerebras(schema: any): any {
+    if (!schema || typeof schema !== 'object') {
+      return schema;
+    }
+
+    // Handle arrays
+    if (Array.isArray(schema)) {
+      return schema.map(item => this.simplifySchemaForCerebras(item));
+    }
+
+    const result: any = {};
+
+    for (const key of Object.keys(schema)) {
+      // Skip unsupported schema fields
+      if (CerebrasProvider.UNSUPPORTED_SCHEMA_FIELDS.has(key)) {
+        continue;
+      }
+
+      if (key === 'oneOf' || key === 'anyOf') {
+        // For union types, pick the first option that has type: 'object' with properties,
+        // or the first option if none match
+        const options = schema[key];
+        if (Array.isArray(options) && options.length > 0) {
+          const objectOption = options.find((opt: any) => opt.type === 'object' && opt.properties);
+          const chosen = objectOption || options[0];
+          // Merge the chosen option's properties into result
+          const simplified = this.simplifySchemaForCerebras(chosen);
+          Object.assign(result, simplified);
+        }
+      } else {
+        result[key] = this.simplifySchemaForCerebras(schema[key]);
+      }
+    }
+
+    // Ensure object types have properties
+    if (result.type === 'object' && !result.properties) {
+      result.properties = {};
+    }
+
+    return result;
+  }
+
+  /**
    * Makes a request to the Cerebras API
    */
   private async makeAPIRequest(endpoint: string, payloadBody: any): Promise<any> {
@@ -115,9 +197,19 @@ export class CerebrasProvider extends LLMBaseProvider {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        // Log the full error details and request info for debugging
         logger.error('Cerebras API error:', JSON.stringify(errorData, null, 2));
-        throw new Error(`Cerebras API error: ${response.statusText} - ${errorData?.error?.message || 'Unknown error'}`);
+        logger.error('Request that caused error - keys:', Object.keys(payloadBody));
+        if (payloadBody.tools) {
+          logger.error('Tool schemas:', JSON.stringify(payloadBody.tools.map((t: any) => ({
+            name: t.function?.name,
+            parameterKeys: Object.keys(t.function?.parameters || {})
+          })), null, 2));
+        }
+        // Extract message from either Cerebras format (errorData.message) or OpenAI format (errorData.error.message)
+        const errorMessage = errorData?.message || errorData?.error?.message || 'Unknown error';
+        throw new Error(`Cerebras API error: ${response.statusText} - ${errorMessage}`);
       }
 
       const data = await response.json();
@@ -206,14 +298,15 @@ export class CerebrasProvider extends LLMBaseProvider {
 
       // Add tools if provided
       if (options?.tools) {
-        // Ensure all tools have valid parameters
+        // Ensure all tools have valid parameters and convert oneOf to anyOf for Cerebras
         payloadBody.tools = options.tools.map(tool => {
           if (tool.type === 'function' && tool.function) {
+            const parameters = tool.function.parameters || { type: 'object', properties: {} };
             return {
               ...tool,
               function: {
                 ...tool.function,
-                parameters: tool.function.parameters || { type: 'object', properties: {} }
+                parameters: this.simplifySchemaForCerebras(parameters)
               }
             };
           }
@@ -228,7 +321,20 @@ export class CerebrasProvider extends LLMBaseProvider {
         payloadBody.tool_choice = options.tool_choice;
       }
 
-      logger.info('Request payload:', payloadBody);
+      // IMPORTANT: Cerebras does not support response_format with function calling
+      // Ensure we never send response_format to avoid API errors
+      delete payloadBody.response_format;
+
+      // Log the full payload for debugging (including tool count)
+      logger.info('Cerebras request payload:', {
+        model: payloadBody.model,
+        messageCount: payloadBody.messages?.length,
+        toolCount: payloadBody.tools?.length,
+        temperature: payloadBody.temperature,
+        tool_choice: payloadBody.tool_choice,
+        hasResponseFormat: 'response_format' in payloadBody,
+        toolNames: payloadBody.tools?.map((t: any) => t.function?.name),
+      });
 
       const data = await this.makeAPIRequest(this.getChatEndpoint(), payloadBody);
       return this.processCerebrasResponse(data);
@@ -270,15 +376,21 @@ export class CerebrasProvider extends LLMBaseProvider {
 
   /**
    * Fetch available models from Cerebras API
+   * @param apiKey Optional API key to use instead of the instance's apiKey
    */
-  async fetchModels(): Promise<CerebrasModel[]> {
-    logger.debug('Fetching available Cerebras models...');
+  async fetchModels(apiKey?: string): Promise<CerebrasModel[]> {
+    const effectiveApiKey = apiKey || this.apiKey;
+    logger.debug('Fetching available Cerebras models...', {
+      receivedApiKey: apiKey ? `${apiKey.substring(0, 5)}...` : 'none',
+      instanceApiKey: this.apiKey ? `${this.apiKey.substring(0, 5)}...` : 'none',
+      effectiveApiKey: effectiveApiKey ? `${effectiveApiKey.substring(0, 5)}...` : 'none'
+    });
 
     try {
       const response = await fetch(this.getModelsEndpoint(), {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
+          'Authorization': `Bearer ${effectiveApiKey}`,
         },
       });
 

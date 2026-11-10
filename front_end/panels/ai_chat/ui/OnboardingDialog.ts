@@ -536,14 +536,16 @@ export class OnboardingDialog {
     statusDiv.className = 'test-status';
 
     try {
-      // Save API key temporarily for testing
       const provider = this.selectedProvider!;
-      LLMProviderRegistry.saveProviderApiKey(provider.id as any, this.apiKey);
 
-      // Try to fetch models to verify the key works
-      const providerInstance = LLMProviderRegistry.getProvider(provider.id as any);
-      if (providerInstance && typeof (providerInstance as any).fetchModels === 'function') {
-        await (providerInstance as any).fetchModels(this.apiKey);
+      // Use testProviderConnection which creates a fresh provider instance with the API key
+      const result = await LLMProviderRegistry.testProviderConnection(
+        provider.id as any,
+        this.apiKey
+      );
+
+      if (!result.success) {
+        throw new Error(result.message);
       }
 
       statusDiv.className = 'test-status visible success';
@@ -731,7 +733,6 @@ export class OnboardingDialog {
         }
         return;
       }
-
     }
 
     if (currentIndex < STEPS.length - 1) {

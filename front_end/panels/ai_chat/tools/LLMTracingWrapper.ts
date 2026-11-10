@@ -85,6 +85,8 @@ export async function callLLMWithTracing(
       messages: llmCallConfig.messages,
       systemPrompt: llmCallConfig.systemPrompt || '',
       temperature: llmCallConfig.temperature,
+      // Pass tracing metadata explicitly for Langfuse integration
+      tracingMetadata: tracingContext?.metadata,
       ...llmCallConfig.options
     });
 

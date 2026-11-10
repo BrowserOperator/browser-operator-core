@@ -43,10 +43,15 @@ export class TodoListDisplay extends HTMLElement {
   disconnectedCallback(): void {
     if (this.#refreshInterval) {
       clearInterval(this.#refreshInterval);
+      this.#refreshInterval = undefined;
     }
   }
 
   async #loadTodos(): Promise<void> {
+    // Don't load todos if the element is no longer connected to the DOM
+    if (!this.isConnected) {
+      return;
+    }
     try {
       const file = await FileStorageManager.getInstance().readFile('todos.md');
       const newContent = file?.content || '';

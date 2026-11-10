@@ -200,7 +200,8 @@ export class ContentChunker {
 
     for (const line of lines) {
       // Check if line starts with [nodeId] pattern (including indented nodes)
-      const isNodeStart = /^\s*\[(\d+)\]/.test(line);
+      // EncodedId format is [frameOrdinal-backendNodeId] e.g., [0-123]
+      const isNodeStart = /^\s*\[\d+-\d+\]/.test(line);
       const lineTokens = this.estimateTokens(line + '\n', charsPerToken);
 
       // If adding this line exceeds limit AND we're at a node boundary, flush chunk
@@ -429,10 +430,20 @@ export class ContentChunker {
   }
 
   /**
-   * Estimate token count for content
+   * Estimate token count for content (instance method)
    */
   private estimateTokens(content: string, charsPerToken: number): number {
     return Math.ceil(content.length / charsPerToken);
+  }
+
+  /**
+   * Static helper to estimate token count for content.
+   * Uses conservative estimate of 4 characters per token.
+   * @param content The content to estimate tokens for
+   * @returns Estimated number of tokens
+   */
+  static estimateTokenCount(content: string): number {
+    return Math.ceil(content.length / 4);
   }
 
   /**

@@ -17,11 +17,16 @@ export interface TestCase<TInput = any> {
   tool: string; // Name of the tool to test
   input: TInput; // Tool-specific input
   validation: ValidationConfig;
+  skip?: boolean; // Skip this test case
   metadata: {
     tags: string[];
     timeout?: number;
     retries?: number;
     flaky?: boolean;
+    /** CSS selector to wait for visibility after navigation (for dynamic content like modals) */
+    waitForSelector?: string;
+    /** Delay in ms after navigation (alternative to waitForSelector) */
+    waitAfterNavigation?: number;
   };
 }
 

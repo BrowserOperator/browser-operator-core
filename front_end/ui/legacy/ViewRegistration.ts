@@ -162,11 +162,12 @@ export interface ViewRegistration {
 
 const viewIdSet = new Set<string>();
 export function registerViewExtension(registration: ViewRegistration): void {
-  // START ADDED CODE: Filter out panels other than ai-chat
-  if (registration.location === ViewLocationValues.PANEL && registration.id !== 'ai-chat') {
+  // Check if panel filtering is enabled (default: true for ai-chat only mode)
+  const panelFilterEnabled = localStorage.getItem('ai_chat_panel_filter_enabled') !== 'false';
+
+  if (panelFilterEnabled && registration.location === ViewLocationValues.PANEL && registration.id !== 'ai-chat') {
     return; // Don't register this panel
   }
-  // END ADDED CODE
 
   const viewId = registration.id;
   if (viewIdSet.has(viewId)) {

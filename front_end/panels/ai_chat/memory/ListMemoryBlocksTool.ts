@@ -47,6 +47,9 @@ export class ListMemoryBlocksTool implements Tool<ListMemoryBlocksArgs, ListMemo
   async execute(_args: ListMemoryBlocksArgs, _ctx?: LLMContext): Promise<ListMemoryBlocksResult> {
     logger.info('Executing list memory blocks');
 
+    // Calculate max capacity: 20000 (user) + 20000 (facts) + 4*20000 (projects)
+    const maxChars = 120000;
+
     try {
       const manager = new MemoryBlockManager();
       const blocks = await manager.getAllBlocks();
@@ -59,9 +62,6 @@ export class ListMemoryBlocksTool implements Tool<ListMemoryBlocksArgs, ListMemo
         charLimit: b.charLimit,
         updatedAt: new Date(b.updatedAt).toISOString()
       }));
-
-      // Calculate max capacity: 20000 (user) + 20000 (facts) + 4*20000 (projects)
-      const maxChars = 120000;
 
       const summary = {
         totalBlocks: blocks.length,
@@ -84,7 +84,7 @@ export class ListMemoryBlocksTool implements Tool<ListMemoryBlocksArgs, ListMemo
         summary: {
           totalBlocks: 0,
           totalChars: 0,
-          maxChars: 9500
+          maxChars,
         },
         error: error?.message || 'Failed to list memory blocks.'
       };

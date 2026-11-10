@@ -62,7 +62,7 @@ export class StateGraph<TState extends { context?: { tracingContext?: any }, mes
       // Check if execution has been aborted
       if (signal?.aborted) {
         logger.info(`Graph execution aborted at step ${step}, node: ${currentNodeName}`);
-        throw new DOMException('Agent execution was cancelled', 'AbortError');
+        throw new DOMException('Agent execution was aborted', 'AbortError');
       }
 
       logger.debug(`Step ${step}: Current Node = ${currentNodeName}`);

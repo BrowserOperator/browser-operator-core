@@ -77,10 +77,17 @@ export class FileListDisplay extends HTMLElement {
   disconnectedCallback(): void {
     if (this.#refreshInterval) {
       clearInterval(this.#refreshInterval);
+      this.#refreshInterval = undefined;
     }
+    // Clean up keydown listener if modal was open when component was removed
+    document.removeEventListener('keydown', this.#boundHandleKeyDown);
   }
 
   async #loadFiles(): Promise<void> {
+    // Don't load files if the element is no longer connected to the DOM
+    if (!this.isConnected) {
+      return;
+    }
     try {
       const manager = FileStorageManager.getInstance();
       const files = await manager.listFiles();

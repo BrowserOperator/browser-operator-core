@@ -104,6 +104,21 @@ export interface EvaluationParams {
     retries: number;
     priority?: 'low' | 'normal' | 'high';
   };
+  // Tracing metadata for Langfuse session grouping
+  tracing?: {
+    session_id?: string;
+    trace_id?: string;
+    eval_id?: string;
+    eval_name?: string;
+    category?: string;
+    tags?: string[];
+    trace_name?: string;
+    // Langfuse credentials for auto-configuration
+    // When provided, DevTools will auto-configure Langfuse tracing if not already enabled
+    langfuse_endpoint?: string;
+    langfuse_public_key?: string;
+    langfuse_secret_key?: string;
+  };
 }
 
 export interface EvaluationSuccessResponse {
@@ -333,6 +348,91 @@ export function createLLMConfigurationResponse(
       status: 'success',
       message: 'LLM configuration updated successfully',
       appliedConfig
+    },
+    id
+  };
+}
+
+// Direct Tool Execution Messages (bypass LLM orchestration)
+
+export interface ToolExecutionRequest {
+  jsonrpc: '2.0';
+  method: 'execute_tool';
+  params: ToolExecutionParams;
+  id: string;
+}
+
+export interface ToolExecutionParams {
+  tool: string;
+  args?: Record<string, any>;
+  timeout?: number;
+}
+
+export interface ToolExecutionSuccessResponse {
+  jsonrpc: '2.0';
+  result: {
+    success: true;
+    output: any;
+    executionTime: number;
+    tool: string;
+  };
+  id: string;
+}
+
+export interface ToolExecutionErrorResponse {
+  jsonrpc: '2.0';
+  error: {
+    code: number;
+    message: string;
+    data: {
+      tool: string;
+      error: string;
+    };
+  };
+  id: string;
+}
+
+// Type guard for tool execution
+export function isToolExecutionRequest(msg: any): msg is ToolExecutionRequest {
+  return msg !== null &&
+         typeof msg === 'object' &&
+         msg.jsonrpc === '2.0' &&
+         msg.method === 'execute_tool' &&
+         msg.params !== undefined;
+}
+
+// Helper functions for tool execution
+export function createToolExecutionSuccessResponse(
+  id: string,
+  tool: string,
+  output: any,
+  executionTime: number
+): ToolExecutionSuccessResponse {
+  return {
+    jsonrpc: '2.0',
+    result: {
+      success: true,
+      output,
+      executionTime,
+      tool
+    },
+    id
+  };
+}
+
+export function createToolExecutionErrorResponse(
+  id: string,
+  code: number,
+  message: string,
+  tool: string,
+  error: string
+): ToolExecutionErrorResponse {
+  return {
+    jsonrpc: '2.0',
+    error: {
+      code,
+      message,
+      data: { tool, error }
     },
     id
   };

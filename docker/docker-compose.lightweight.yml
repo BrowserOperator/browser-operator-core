@@ -1,0 +1,48 @@
+# Lightweight deployment: DevTools + Agent Server (no full build required)
+# Uses pre-built DevTools image + separate Agent Server container
+#
+# Usage:
+#   docker-compose -f docker-compose.lightweight.yml up -d
+
+services:
+  devtools:
+    image: browser-operator-devtools:latest
+    container_name: browser-operator-devtools
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    networks:
+      - devtools-network
+
+  agent-server:
+    image: node:18-alpine
+    container_name: browser-operator-agent
+    working_dir: /app
+    volumes:
+      - ../agent-server/nodejs:/app:ro
+      - agent-data:/app/clients
+    command: ["node", "start.js"]
+    ports:
+      - "8080:8080"
+      - "8082:8082"
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8082
+      - API_PORT=8080
+      - CDP_HOST=${CDP_HOST:-host.docker.internal}
+      - CDP_PORT=${CDP_PORT:-9222}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - devtools-network
+
+volumes:
+  agent-data:
+
+networks:
+  devtools-network:
+    driver: bridge

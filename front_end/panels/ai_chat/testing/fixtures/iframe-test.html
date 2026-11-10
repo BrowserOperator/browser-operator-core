@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<!-- Copyright 2025 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iframe Test Page</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 20px;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .container {
+      margin: 20px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    iframe {
+      border: 2px solid #2196F3;
+      border-radius: 4px;
+      width: 100%;
+      min-height: 200px;
+    }
+    .result {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 4px;
+    }
+    #main-btn {
+      padding: 12px 24px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Iframe Test Page</h1>
+  <p>This page contains various iframe configurations for testing cross-frame element targeting.</p>
+
+  <div class="container" id="main-content">
+    <h2>Main Frame Content</h2>
+    <button id="main-btn">Main Frame Button</button>
+    <div class="result" id="main-result"></div>
+  </div>
+
+  <div class="container">
+    <h2>Same-Origin Iframe (SPIF)</h2>
+    <p>This iframe loads content from the same origin:</p>
+    <iframe id="spif-frame" srcdoc="
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: system-ui; padding: 15px; }
+          button { padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+          input { padding: 10px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+          .result { margin-top: 10px; padding: 10px; background: #e3f2fd; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <h3>SPIF Content</h3>
+        <form id='iframe-form'>
+          <input type='text' id='name-input' name='name' placeholder='Enter your name'>
+          <button type='submit' id='submit-btn'>Submit</button>
+        </form>
+        <div class='result' id='iframe-result'></div>
+        <script>
+          document.getElementById('iframe-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var name = document.getElementById('name-input').value;
+            document.getElementById('iframe-result').textContent = 'Form submitted with name: ' + name;
+          });
+        </script>
+      </body>
+      </html>
+    "></iframe>
+  </div>
+
+  <div class="container">
+    <h2>Nested Iframes</h2>
+    <p>This iframe contains another nested iframe:</p>
+    <iframe id="outer-frame" srcdoc="
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: system-ui; padding: 15px; background: #fff3e0; }
+          iframe { width: 100%; min-height: 150px; border: 2px solid #FF9800; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <h3>Outer Iframe</h3>
+        <p>This contains an inner iframe:</p>
+        <iframe id='inner-frame' srcdoc='
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: system-ui; padding: 15px; background: #fce4ec; }
+              button { padding: 10px 20px; background: #E91E63; color: white; border: none; border-radius: 4px; cursor: pointer; }
+              .result { margin-top: 10px; padding: 10px; background: #f8bbd9; border-radius: 4px; }
+            </style>
+          </head>
+          <body>
+            <h4>Inner Iframe (Nested)</h4>
+            <button id=\"nested-iframe-btn\">Nested Button</button>
+            <div class=\"result\" id=\"nested-result\"></div>
+            <script>
+              document.getElementById(\"nested-iframe-btn\").addEventListener(\"click\", function() {
+                document.getElementById(\"nested-result\").textContent = \"Nested button clicked at \" + new Date().toLocaleTimeString();
+              });
+            </script>
+          </body>
+          </html>
+        '></iframe>
+      </body>
+      </html>
+    "></iframe>
+  </div>
+
+  <div class="container">
+    <h2>Shadow DOM Inside Iframe</h2>
+    <p>This iframe contains shadow DOM elements:</p>
+    <iframe id="shadow-iframe" srcdoc="
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: system-ui; padding: 15px; background: #e8f5e9; }
+        </style>
+      </head>
+      <body>
+        <h3>Shadow DOM in Iframe</h3>
+        <shadow-button-host></shadow-button-host>
+        <div id='shadow-result' style='margin-top: 10px; padding: 10px; background: #c8e6c9; border-radius: 4px;'></div>
+        <script>
+          class ShadowButtonHost extends HTMLElement {
+            constructor() {
+              super();
+              const shadow = this.attachShadow({ mode: 'closed' });
+              shadow.innerHTML = '<style>button { padding: 10px 20px; background: #673AB7; color: white; border: none; border-radius: 4px; cursor: pointer; }</style><button id=\"shadow-btn\">Shadow Button in Iframe</button>';
+              shadow.querySelector('#shadow-btn').addEventListener('click', function() {
+                document.getElementById('shadow-result').textContent = 'Shadow button in iframe clicked at ' + new Date().toLocaleTimeString();
+              });
+            }
+          }
+          customElements.define('shadow-button-host', ShadowButtonHost);
+        </script>
+      </body>
+      </html>
+    "></iframe>
+  </div>
+
+  <div class="container">
+    <h2>Iframe with Form Controls</h2>
+    <p>This iframe contains various form controls:</p>
+    <iframe id="form-iframe" srcdoc="
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: system-ui; padding: 15px; }
+          .form-group { margin: 10px 0; }
+          label { display: block; margin-bottom: 5px; font-weight: bold; }
+          input, select, textarea { padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 200px; }
+          button { padding: 10px 20px; background: #FF5722; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+          .result { margin-top: 15px; padding: 10px; background: #ffccbc; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <h3>Form Controls</h3>
+        <form id='control-form'>
+          <div class='form-group'>
+            <label for='text-input'>Text Input:</label>
+            <input type='text' id='text-input' name='text' placeholder='Enter text'>
+          </div>
+          <div class='form-group'>
+            <label for='email-input'>Email:</label>
+            <input type='email' id='email-input' name='email' placeholder='email@example.com'>
+          </div>
+          <div class='form-group'>
+            <label for='select-input'>Select:</label>
+            <select id='select-input' name='select'>
+              <option value=''>Choose...</option>
+              <option value='option1'>Option 1</option>
+              <option value='option2'>Option 2</option>
+              <option value='option3'>Option 3</option>
+            </select>
+          </div>
+          <div class='form-group'>
+            <label>
+              <input type='checkbox' id='checkbox-input' name='checkbox'> Accept terms
+            </label>
+          </div>
+          <button type='submit'>Submit Form</button>
+        </form>
+        <div class='result' id='form-result'></div>
+        <script>
+          document.getElementById('control-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var text = document.getElementById('text-input').value;
+            var email = document.getElementById('email-input').value;
+            var select = document.getElementById('select-input').value;
+            var checkbox = document.getElementById('checkbox-input').checked;
+            document.getElementById('form-result').textContent = 'Submitted: ' + JSON.stringify({text: text, email: email, select: select, checkbox: checkbox});
+          });
+        </script>
+      </body>
+      </html>
+    "></iframe>
+  </div>
+
+  <script>
+    // Main frame button handler
+    document.getElementById('main-btn').addEventListener('click', function() {
+      document.getElementById('main-result').textContent = 'Main button clicked at ' + new Date().toLocaleTimeString();
+    });
+  </script>
+</body>
+</html>

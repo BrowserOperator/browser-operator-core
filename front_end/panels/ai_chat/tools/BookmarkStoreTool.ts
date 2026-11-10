@@ -2,13 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as SDK from '../../../core/sdk/sdk.js';
-import * as Utils from '../common/utils.js';
 import { createLogger } from '../core/Logger.js';
 import { HTMLToMarkdownTool } from './HTMLToMarkdownTool.js';
 import { VectorDBClient, type VectorDocument, type VectorStoreResponse } from './VectorDBClient.js';
 import type { Tool, LLMContext } from './Tools.js';
 import { integer } from '../../../generated/protocol.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only SDK dependency
+let SDK: typeof import('../../../core/sdk/sdk.js') | null = null;
+let sdkLoaded = false;
+
+async function ensureSDK(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (!sdkLoaded) {
+    sdkLoaded = true;
+    try { SDK = await import('../../../core/sdk/sdk.js'); }
+    catch { return false; }
+  }
+  return SDK !== null;
+}
 
 const logger = createLogger('Tool:BookmarkStore');
 
@@ -77,6 +92,12 @@ export class BookmarkStoreTool implements Tool<BookmarkStoreArgs, BookmarkStoreR
 
     try {
       // Get the current page target
+      if (!(await ensureSDK()) || !SDK) {
+        return {
+          success: false,
+          error: 'SDK not available (Node.js environment)'
+        };
+      }
       const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
       if (!target) {
         return {
@@ -166,12 +187,15 @@ export class BookmarkStoreTool implements Tool<BookmarkStoreArgs, BookmarkStoreR
   /**
    * Get current page URL and title
    */
-  private async getCurrentPageInfo(target: SDK.Target.Target): Promise<{
+  private async getCurrentPageInfo(target: any): Promise<{
     url: string;
     pageTitle: string;
   }> {
     try {
       // Get the runtime model to execute JavaScript
+      if (!SDK) {
+        throw new Error('SDK not available');
+      }
       const runtimeModel = target.model(SDK.RuntimeModel.RuntimeModel);
       if (!runtimeModel) {
         throw new Error('Runtime model not available');

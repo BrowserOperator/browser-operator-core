@@ -98,8 +98,14 @@ export class Logger {
    * Check if we're in development mode
    */
   static isDevelopment(): boolean {
+    // Node.js environment (eval runner, tests)
+    if (typeof location === 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const proc = (globalThis as any).process;
+      return proc?.env?.NODE_ENV !== 'production';
+    }
     // Check for development indicators
-    return location.hostname === 'localhost' || 
+    return location.hostname === 'localhost' ||
            location.hostname.includes('127.0.0.1') ||
            location.port === '8090' ||
            location.port === '8000';

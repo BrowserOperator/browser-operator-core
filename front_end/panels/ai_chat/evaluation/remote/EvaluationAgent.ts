@@ -11,7 +11,7 @@ import { ToolRegistry, ConfigurableAgentTool } from '../../agent_framework/Confi
 import { AgentService } from '../../core/AgentService.js';
 import { AIChatPanel } from '../../ui/AIChatPanel.js';
 import { createLogger } from '../../core/Logger.js';
-import { createTracingProvider, withTracingContext, isTracingEnabled, getTracingConfig } from '../../tracing/TracingConfig.js';
+import { createTracingProvider, withTracingContext, isTracingEnabled, getTracingConfig, setTracingConfig, refreshTracingProvider } from '../../tracing/TracingConfig.js';
 import { AgentDescriptorRegistry, type AgentDescriptor } from '../../core/AgentDescriptorRegistry.js';
 import '../../core/BaseOrchestratorAgent.js';
 import type { TracingProvider, TracingContext } from '../../tracing/TracingProvider.js';
@@ -29,11 +29,13 @@ import {
   EvaluationErrorResponse,
   LLMConfigurationRequest,
   LLMConfigurationResponse,
+  ToolExecutionRequest,
   ErrorCodes,
   isWelcomeMessage,
   isRegistrationAckMessage,
   isEvaluationRequest,
   isLLMConfigurationRequest,
+  isToolExecutionRequest,
   isPongMessage,
   createRegisterMessage,
   createReadyMessage,
@@ -41,7 +43,9 @@ import {
   createStatusMessage,
   createSuccessResponse,
   createErrorResponse,
-  createLLMConfigurationResponse
+  createLLMConfigurationResponse,
+  createToolExecutionSuccessResponse,
+  createToolExecutionErrorResponse
 } from './EvaluationProtocol.js';
 
 const logger = createLogger('EvaluationAgent');
@@ -197,6 +201,9 @@ export class EvaluationAgent {
       }
       else if (isLLMConfigurationRequest(message)) {
         await this.handleLLMConfigurationRequest(message);
+      }
+      else if (isToolExecutionRequest(message)) {
+        await this.handleToolExecutionRequest(message);
       }
       else if (isPongMessage(message)) {
         logger.debug('Received pong');
@@ -426,13 +433,54 @@ export class EvaluationAgent {
       tool: params.tool
     });
 
-    // Create a trace for this evaluation
-    const traceId = `eval-${params.evaluationId}-${Date.now()}`;
-    const sessionId = `eval-session-${Date.now()}`;
-    const tracingContext: TracingContext = { 
-      traceId, 
+    // Use tracing metadata from request params (from eval framework via api-server)
+    // The tracing field is now properly forwarded through BrowserAgentServer.executeRequest()
+    const requestTracing = params.tracing || {};
+    logger.info('Tracing metadata received:', {
+      hasTracing: !!params.tracing,
+      tracingKeys: Object.keys(requestTracing),
+      sessionId: requestTracing.session_id,
+      traceId: requestTracing.trace_id,
+      hasLangfuseCredentials: !!(requestTracing.langfuse_endpoint && requestTracing.langfuse_public_key && requestTracing.langfuse_secret_key)
+    });
+
+    // Auto-configure Langfuse tracing from request if credentials provided and not already enabled
+    if (requestTracing.langfuse_endpoint &&
+        requestTracing.langfuse_public_key &&
+        requestTracing.langfuse_secret_key &&
+        !isTracingEnabled()) {
+      logger.info('Auto-configuring DevTools Langfuse tracing from request', {
+        endpoint: requestTracing.langfuse_endpoint,
+        hasPublicKey: true,
+        hasSecretKey: true
+      });
+
+      setTracingConfig({
+        provider: 'langfuse',
+        endpoint: requestTracing.langfuse_endpoint,
+        publicKey: requestTracing.langfuse_public_key,
+        secretKey: requestTracing.langfuse_secret_key
+      });
+
+      // Refresh the tracing provider to pick up new configuration
+      await refreshTracingProvider();
+
+      // Update this instance's tracing provider
+      this.tracingProvider = createTracingProvider();
+
+      logger.info('DevTools Langfuse tracing configured successfully from request');
+    }
+
+
+    // Create a trace for this evaluation - use tracing from request if available
+    const traceId = requestTracing.trace_id || `eval-${params.evaluationId}-${Date.now()}`;
+    const sessionId = requestTracing.session_id || `eval-session-${Date.now()}`;
+    const tracingContext: TracingContext = {
+      traceId,
       sessionId,
-      parentObservationId: undefined 
+      parentObservationId: undefined,
+      // Include full tracing metadata for LLM calls (session grouping in Langfuse)
+      metadata: requestTracing
     };
     const orchestratorDescriptor = await this.orchestratorDescriptorPromise;
     
@@ -1302,6 +1350,89 @@ export class EvaluationAgent {
           error: error instanceof Error ? error.message : String(error),
           timestamp: new Date().toISOString()
         }
+      );
+
+      if (this.client) {
+        this.client.send(errorResponse);
+      }
+    }
+  }
+
+  /**
+   * Handle direct tool execution requests without LLM orchestration
+   */
+  private async handleToolExecutionRequest(request: ToolExecutionRequest): Promise<void> {
+    const { params, id } = request;
+    const startTime = Date.now();
+
+    logger.info('Received tool execution request', {
+      tool: params.tool,
+      hasArgs: !!params.args,
+      timeout: params.timeout || 30000
+    });
+
+    try {
+      // Get the tool from registry
+      const tool = ToolRegistry.getRegisteredTool(params.tool);
+      if (!tool) {
+        const errorResponse = createToolExecutionErrorResponse(
+          id,
+          ErrorCodes.INVALID_PARAMS,
+          `Tool not found: ${params.tool}`,
+          params.tool,
+          `Tool '${params.tool}' is not registered`
+        );
+        if (this.client) {
+          this.client.send(errorResponse);
+        }
+        logger.error('Tool not found', { tool: params.tool });
+        return;
+      }
+
+      // Execute the tool with timeout
+      const timeout = params.timeout || 30000;
+      const result = await this.executeToolWithTimeout(
+        tool,
+        params.args || {},
+        timeout,
+        undefined,
+        params.tool
+      );
+
+      const executionTime = Date.now() - startTime;
+
+      // Send success response
+      const successResponse = createToolExecutionSuccessResponse(
+        id,
+        params.tool,
+        result,
+        executionTime
+      );
+
+      if (this.client) {
+        this.client.send(successResponse);
+      }
+
+      logger.info('Tool execution completed', {
+        tool: params.tool,
+        executionTime,
+        hasResult: !!result
+      });
+
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      logger.error('Tool execution failed', {
+        tool: params.tool,
+        error: error instanceof Error ? error.message : String(error),
+        executionTime
+      });
+
+      const errorResponse = createToolExecutionErrorResponse(
+        id,
+        ErrorCodes.INTERNAL_ERROR,
+        'Tool execution failed',
+        params.tool,
+        error instanceof Error ? error.message : String(error)
       );
 
       if (this.client) {

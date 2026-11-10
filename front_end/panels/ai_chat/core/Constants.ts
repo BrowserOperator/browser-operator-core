@@ -61,10 +61,6 @@ export const DEFAULTS = {
 
 // Regular expressions
 export const REGEX_PATTERNS = {
-  // XML parsing patterns
-  REASONING_TAG: /<reasoning>\s*([\s\S]*?)\s*<\/reasoning>/,
-  MARKDOWN_REPORT_TAG: /<markdown_report>\s*([\s\S]*?)\s*<\/markdown_report>/,
-  
   // Markdown patterns
   HEADING: /^#{1,6}\s+.+$/gm,
   LIST_ITEM: /^[\*\-]\s+.+$/gm,

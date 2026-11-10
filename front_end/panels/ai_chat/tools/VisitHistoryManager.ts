@@ -433,5 +433,7 @@ export class VisitHistoryManager {
   }
 }
 
-// Initialize VisitHistoryManager
-VisitHistoryManager.getInstance();
+// Initialize VisitHistoryManager only in browser environment
+if (typeof indexedDB !== 'undefined') {
+  VisitHistoryManager.getInstance();
+}

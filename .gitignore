@@ -1,4 +1,5 @@
 .DS_Store
+.env
 .git_cl_description_backup
 *.ctc.json
 *.Makefile
@@ -63,3 +64,5 @@ node_modules/
 # Ephemeral public endpoint/key; regenerate for each temporary cloud test.
 /config/updater/macos-cloud-test.generated.gni
 **/__pycache__/
+node_modules/**
+eval-logs/**

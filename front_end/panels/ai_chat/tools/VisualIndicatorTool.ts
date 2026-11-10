@@ -2,10 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as Common from '../../../core/common/common.js';
-import * as SDK from '../../../core/sdk/sdk.js';
 import { createLogger } from '../core/Logger.js';
 import { AgentRunnerEventBus, type AgentRunnerProgressEvent } from '../agent_framework/AgentRunnerEventBus.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only dependencies
+let Common: typeof import('../../../core/common/common.js') | null = null;
+let SDK: typeof import('../../../core/sdk/sdk.js') | null = null;
+let browserDepsLoaded = false;
+
+async function ensureBrowserDeps(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (!browserDepsLoaded) {
+    browserDepsLoaded = true;
+    try {
+      const [commonModule, sdkModule] = await Promise.all([
+        import('../../../core/common/common.js'),
+        import('../../../core/sdk/sdk.js'),
+      ]);
+      Common = commonModule;
+      SDK = sdkModule;
+    } catch { return false; }
+  }
+  return SDK !== null && Common !== null;
+}
 
 const logger = createLogger('VisualIndicatorTool');
 
@@ -69,7 +91,12 @@ export class VisualIndicatorManager {
   /**
    * Setup listener for page navigation events to re-inject indicators
    */
-  private setupNavigationListener(): void {
+  private async setupNavigationListener(): Promise<void> {
+    if (!(await ensureBrowserDeps()) || !SDK) {
+      logger.warn('[VisualIndicator] Browser deps not available for navigation listener');
+      this.needsNavigationListenerSetup = true;
+      return;
+    }
     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!target) {
       logger.warn('[VisualIndicator] No primary page target available for navigation listener');
@@ -95,7 +122,7 @@ export class VisualIndicatorManager {
   /**
    * Handle frame navigation events - re-inject indicators if active
    */
-  private async handleFrameNavigated(event: Common.EventTarget.EventTargetEvent<SDK.ResourceTreeModel.ResourceTreeFrame>): Promise<void> {
+  private async handleFrameNavigated(event: any): Promise<void> {
     const frame = event.data;
 
     // Only handle main frame navigations (ignore iframes)
@@ -148,8 +175,8 @@ export class VisualIndicatorManager {
   /**
    * Handle agent progress events and update visual indicators
    */
-  private async handleProgressEvent(event: Common.EventTarget.EventTargetEvent<AgentRunnerProgressEvent>): Promise<void> {
-    const progressEvent = event.data;
+  private async handleProgressEvent(event: any): Promise<void> {
+    const progressEvent = event.data as AgentRunnerProgressEvent;
 
     logger.info('[VisualIndicator] Progress event received:', {
       type: progressEvent.type,
@@ -248,6 +275,10 @@ export class VisualIndicatorManager {
     const maxRetries = 5;
     const retryDelay = Math.min(100 * Math.pow(2, retryCount), 2000); // 100ms, 200ms, 400ms, 800ms, 1600ms, 2000ms
 
+    if (!(await ensureBrowserDeps()) || !SDK) {
+      logger.warn('[VisualIndicator] Browser deps not available');
+      return;
+    }
     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!target) {
       logger.warn('[VisualIndicator] No primary page target available');
@@ -464,6 +495,9 @@ export class VisualIndicatorManager {
       return;
     }
 
+    if (!(await ensureBrowserDeps()) || !SDK) {
+      return;
+    }
     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!target) {
       return;
@@ -633,6 +667,9 @@ export class VisualIndicatorManager {
     this.isActive = false;
     this.currentSessionId = null;
 
+    if (!(await ensureBrowserDeps()) || !SDK) {
+      return;
+    }
     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!target) {
       return;

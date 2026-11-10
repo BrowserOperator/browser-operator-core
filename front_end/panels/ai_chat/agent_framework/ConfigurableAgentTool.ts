@@ -10,6 +10,8 @@ import { getCurrentTracingContext } from '../tracing/TracingConfig.js';
 import { MODEL_SENTINELS } from '../core/Constants.js';
 import type { AgentSession } from './AgentSessionTypes.js';
 import type { LLMProvider } from '../LLM/LLMTypes.js';
+import type { CDPSessionAdapter } from '../cdp/CDPSessionAdapter.js';
+import { getRuntime } from './RuntimeContext.js';
 
 const logger = createLogger('ConfigurableAgentTool');
 const DEFAULT_AGENT_TOOL_VERSION = '2025-09-17';
@@ -32,6 +34,17 @@ export interface CallCtx {
   agentDescriptor?: AgentDescriptor,
   /** If true, don't emit UI progress events (for background agents) */
   background?: boolean,
+  /**
+   * CDP session adapter for browser interactions.
+   * When provided, tools use this adapter instead of the global SDK.Target.
+   * This enables running agents from contexts outside DevTools (e.g., eval runner).
+   */
+  cdpAdapter?: CDPSessionAdapter,
+  /**
+   * Called before each tool execution (for logging/debugging).
+   * Useful for capturing screenshots or state before actions.
+   */
+  onBeforeToolExecution?: (toolName: string, toolArgs: unknown) => Promise<void>,
 }
 
 /**
@@ -265,6 +278,13 @@ export class ToolRegistry {
     }
     return instance;
   }
+
+  /**
+   * Get all registered tool names
+   */
+  static getRegisteredToolNames(): string[] {
+    return Array.from(this.registeredTools.keys());
+  }
 }
 
 /**
@@ -474,10 +494,10 @@ export class ConfigurableAgentTool implements Tool<ConfigurableAgentArgs, Config
         agentName: this.name,
         agentQuery: args.query,
         agentReasoning: args.reasoning,
-        sessionId: crypto.randomUUID(),
+        sessionId: getRuntime().generateId(),
         status: 'error',
-        startTime: new Date(),
-        endTime: new Date(),
+        startTime: getRuntime().now(),
+        endTime: getRuntime().now(),
         messages: [],
         nestedSessions: [],
         tools: [],
@@ -562,6 +582,8 @@ export class ConfigurableAgentTool implements Tool<ConfigurableAgentArgs, Config
       getVisionCapability: callCtx.getVisionCapability ?? (() => false),
       miniModel: callCtx.miniModel,
       nanoModel: callCtx.nanoModel,
+      cdpAdapter: callCtx.cdpAdapter,
+      onBeforeToolExecution: callCtx.onBeforeToolExecution,
     };
 
     const descriptor = await AgentDescriptorRegistry.getDescriptor(this.name);

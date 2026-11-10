@@ -43,15 +43,27 @@ RUN /workspace/depot_tools/ensure_bootstrap
 RUN npm run build
 
 # Add Browser Operator fork and switch to it
+# Branch is configurable via build arg (default: main)
+ARG BROWSER_OPERATOR_BRANCH=main
 RUN git remote add upstream https://github.com/BrowserOperator/browser-operator-core.git
 RUN git fetch upstream
-RUN git checkout upstream/main
+RUN git checkout upstream/${BROWSER_OPERATOR_BRANCH}
 
-# Force automated mode (matches parent Dockerfile.devtools approach - rock-solid)
-RUN sed -i 's/AUTOMATED_MODE: false/AUTOMATED_MODE: true/' \
-    front_end/panels/ai_chat/core/BuildConfig.ts || true
+# Copy local LLM changes on top of the upstream code
+# This allows iterative development of LLM providers without rebuilding everything
+COPY front_end/panels/ai_chat/LLM /workspace/devtools/devtools-frontend/front_end/panels/ai_chat/LLM
 
-# Build Browser Operator version with current changes
+# Regenerate GN build files
+RUN gn gen out/Default
+
+# AUTOMATED_MODE: Default true for API mode (Type 2/3). Override with --build-arg AUTOMATED_MODE=false for Type 1.
+ARG AUTOMATED_MODE=true
+RUN if [ "$AUTOMATED_MODE" = "true" ]; then \
+      sed -i 's/AUTOMATED_MODE: false/AUTOMATED_MODE: true/' \
+      front_end/panels/ai_chat/core/BuildConfig.ts; \
+    fi
+
+# Build Browser Operator version with local changes (fresh GN generation)
 RUN npm run build
 
 # ==============================================================================

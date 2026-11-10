@@ -17,6 +17,7 @@ import { GenericOpenAIProvider } from './GenericOpenAIProvider.js';
 import { CustomProviderManager } from '../core/CustomProviderManager.js';
 import { LLMResponseParser } from './LLMResponseParser.js';
 import { createLogger } from '../core/Logger.js';
+import { getCurrentTracingContext } from '../tracing/TracingConfig.js';
 
 const logger = createLogger('LLMClient');
 
@@ -48,6 +49,7 @@ export interface LLMCallRequest {
   temperature?: number;
   retryConfig?: Partial<RetryConfig>;
   agentName?: string; // Name of the calling agent for provider-specific routing
+  tracingMetadata?: Record<string, any>; // Explicit tracing metadata for Langfuse integration
 }
 
 /**
@@ -205,6 +207,38 @@ export class LLMClient {
     // Forward agent name for provider-specific routing
     if ((request as any).agentName) {
       options.agentName = (request as any).agentName;
+    }
+
+    // Get tracing metadata - prefer explicit request metadata over global context
+    // This ensures metadata flows correctly even when async context is lost
+    let tracingMetadata = request.tracingMetadata;
+
+    if (!tracingMetadata || Object.keys(tracingMetadata).length === 0) {
+      // Fall back to global tracing context
+      const tracingContext = getCurrentTracingContext();
+      logger.info('LLMClient.call() - Checking tracing context (fallback):', {
+        hasContext: !!tracingContext,
+        hasMetadata: !!tracingContext?.metadata,
+        metadataKeys: tracingContext?.metadata ? Object.keys(tracingContext.metadata) : [],
+        sessionId: tracingContext?.metadata?.session_id,
+        traceId: tracingContext?.metadata?.trace_id
+      });
+      if (tracingContext?.metadata && Object.keys(tracingContext.metadata).length > 0) {
+        tracingMetadata = tracingContext.metadata;
+      }
+    } else {
+      logger.info('LLMClient.call() - Using explicit tracingMetadata from request:', {
+        metadataKeys: Object.keys(tracingMetadata),
+        sessionId: tracingMetadata.session_id,
+        traceId: tracingMetadata.trace_id
+      });
+    }
+
+    if (tracingMetadata && Object.keys(tracingMetadata).length > 0) {
+      options.tracingMetadata = tracingMetadata;
+      logger.info('Passing tracing metadata to provider:', tracingMetadata);
+    } else {
+      logger.info('No tracing metadata available');
     }
 
     return provider.callWithMessages(request.model, messages, options);

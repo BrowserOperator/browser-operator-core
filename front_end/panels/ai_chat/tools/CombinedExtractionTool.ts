@@ -2,9 +2,34 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as SDK from '../../../core/sdk/sdk.js';
-import { AgentService } from '../core/AgentService.js';
 import { createLogger } from '../core/Logger.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only dependencies
+let SDK: typeof import('../../../core/sdk/sdk.js') | null = null;
+let AgentService: typeof import('../core/AgentService.js').AgentService | null = null;
+let browserDepsLoaded = false;
+
+async function ensureBrowserDeps(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (browserDepsLoaded) {
+    return SDK !== null;
+  }
+  try {
+    const [sdkModule, agentServiceModule] = await Promise.all([
+      import('../../../core/sdk/sdk.js'),
+      import('../core/AgentService.js'),
+    ]);
+    SDK = sdkModule;
+    AgentService = agentServiceModule.AgentService;
+    browserDepsLoaded = true;  // Only set after successful import
+  } catch {
+    return false;
+  }
+  return SDK !== null;
+}
 
 import {
   HTMLToMarkdownTool,
@@ -81,8 +106,12 @@ export class CombinedExtractionTool implements Tool<CombinedExtractionArgs, Comb
   async execute(args: CombinedExtractionArgs, ctx?: LLMContext): Promise<CombinedExtractionResult | ErrorResult> {
     logger.info('Executing with args', { args });
     const { url, schema, markdownResponse, reasoning, extractionInstruction } = args;
-    const agentService = AgentService.getInstance();
-    const apiKey = agentService.getApiKey();
+
+    // Get API key from context first, fallback to AgentService in browser
+    let apiKey = ctx?.apiKey;
+    if (!apiKey && !isNodeEnvironment && AgentService) {
+      apiKey = AgentService.getInstance().getApiKey() ?? undefined;
+    }
 
     // Get provider from context
     const provider = ctx?.provider;
@@ -125,6 +154,13 @@ export class CombinedExtractionTool implements Tool<CombinedExtractionArgs, Comb
       };
 
       // STEP 2: Wait for target availability
+      if (!(await ensureBrowserDeps()) || !SDK) {
+        return {
+          success: false,
+          url,
+          error: 'SDK not available (Node.js environment)'
+        };
+      }
       const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
       if (!target) {
         return {

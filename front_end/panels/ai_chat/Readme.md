@@ -71,6 +71,7 @@ fetch devtools-frontend
 # Build steps
 cd devtools-frontend
 gclient sync
+cd devtools-frontend
 npm run build
 ```
 

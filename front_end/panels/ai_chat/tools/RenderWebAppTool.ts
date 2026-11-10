@@ -2,9 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as SDK from '../../../core/sdk/sdk.js';
 import { createLogger } from '../core/Logger.js';
 import type { Tool, LLMContext, ErrorResult } from './Tools.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only SDK dependency
+let SDK: typeof import('../../../core/sdk/sdk.js') | null = null;
+let sdkLoaded = false;
+
+async function ensureSDK(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (!sdkLoaded) {
+    sdkLoaded = true;
+    try { SDK = await import('../../../core/sdk/sdk.js'); }
+    catch { return false; }
+  }
+  return SDK !== null;
+}
 
 const logger = createLogger('RenderWebAppTool');
 
@@ -56,6 +72,9 @@ export class RenderWebAppTool implements Tool<RenderWebAppArgs, RenderWebAppResu
     }
 
     // Get the primary page target
+    if (!(await ensureSDK()) || !SDK) {
+      return { error: 'SDK not available (Node.js environment)' };
+    }
     const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
     if (!target) {
       logger.error('No primary page target available');

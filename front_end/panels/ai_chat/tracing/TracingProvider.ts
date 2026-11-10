@@ -18,6 +18,16 @@ export interface TracingContext {
     agentType: string;
     iterationCount?: number;
   };
+  // Tracing metadata from eval framework for Langfuse integration
+  metadata?: {
+    session_id?: string;
+    trace_id?: string;
+    eval_id?: string;
+    eval_name?: string;
+    category?: string;
+    tags?: string[];
+    [key: string]: any;
+  };
 }
 
 export interface TraceMetadata {

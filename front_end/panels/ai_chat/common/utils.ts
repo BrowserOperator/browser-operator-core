@@ -7,6 +7,22 @@
 // Use of this source code is governed by the MIT license that can be
 // found in the LICENSE file at https://github.com/browserbase/stagehand/blob/main/LICENSE
 
+/**
+ * @deprecated This file is deprecated. Use utils-universal.ts instead.
+ *
+ * This SDK-only implementation is being phased out in favor of the universal
+ * adapter-based utilities in utils-universal.ts, which work in both DevTools
+ * and eval runner (Node.js) contexts.
+ *
+ * Migration guide:
+ * - Replace: import * as Utils from './utils.js'
+ * - With:    import * as UtilsUniversal from './utils-universal.js'
+ * - Replace: Utils.getAccessibilityTree(target)
+ * - With:    UtilsUniversal.getAccessibilityTree(adapter)
+ *
+ * Use getAdapter(ctx) from '../cdp/getAdapter.js' to get the CDP adapter.
+ */
+
 import type * as SDK from '../../../core/sdk/sdk.js';
 import * as Protocol from '../../../generated/protocol.js';
 import { createLogger } from '../core/Logger.js';
@@ -14,6 +30,7 @@ import { createLogger } from '../core/Logger.js';
 const logger = createLogger('utils');
 
 import type { AccessibilityNode, IFrameAccessibilityNode, TreeResult, BackendIdMaps } from './context.js';
+import { XPATH_BUILDER_FUNCTION_STRING } from './xpath-builder.js';
 
 // Parser function for str output
 export function formatSimplifiedTree(
@@ -632,58 +649,6 @@ export async function getAccessibilityTree(
   }
 }
 
-// This function is wrapped into a string and sent as a CDP command
-// It is not meant to be actually executed here
-const functionString = `
-function getNodePath(el) {
-  if (!el || (el.nodeType !== Node.ELEMENT_NODE && el.nodeType !== Node.TEXT_NODE)) {
-    logger.info("el is not a valid node type");
-    return "";
-  }
-
-  const parts = [];
-  let current = el;
-
-  while (current && (current.nodeType === Node.ELEMENT_NODE || current.nodeType === Node.TEXT_NODE)) {
-    let index = 0;
-    let hasSameTypeSiblings = false;
-    const siblings = current.parentElement
-      ? Array.from(current.parentElement.childNodes)
-      : [];
-
-    for (let i = 0; i < siblings.length; i++) {
-      const sibling = siblings[i];
-      if (
-        sibling.nodeType === current.nodeType &&
-        sibling.nodeName === current.nodeName
-      ) {
-        index = index + 1;
-        hasSameTypeSiblings = true;
-        if (sibling.isSameNode(current)) {
-          break;
-        }
-      }
-    }
-
-    if (!current || !current.parentNode) break;
-    if (current.nodeName.toLowerCase() === "html"){
-      parts.unshift("html");
-      break;
-    }
-
-    // text nodes are handled differently in XPath
-    if (current.nodeName !== "#text") {
-      const tagName = current.nodeName.toLowerCase();
-      const pathIndex = hasSameTypeSiblings ? \`[\${index}]\` : "";
-      parts.unshift(\`\${tagName}\${pathIndex}\`);
-    }
-
-    current = current.parentElement;
-  }
-
-  return parts.length ? \`/\${parts.join("/")}\` : "";
-}`;
-
 export async function getXPathByResolvedObjectId(
   target: SDK.Target.Target,
   resolvedObjectId: string,
@@ -692,7 +657,7 @@ export async function getXPathByResolvedObjectId(
   const response = await runtimeAgent.invoke_callFunctionOn({
     objectId: resolvedObjectId as Protocol.Runtime.RemoteObjectId,
     functionDeclaration: `function() {
-      ${functionString}
+      ${XPATH_BUILDER_FUNCTION_STRING}
       return getNodePath(this);
     }`,
     returnByValue: true,
@@ -1114,6 +1079,76 @@ export async function performAction(
         type: Protocol.Input.DispatchMouseEventRequestType.MouseMoved,
         x,
         y
+      });
+    } else if (method === 'drag') {
+      // Get element coordinates
+      const nodeResponse = await domAgent.invoke_describeNode({ objectId });
+      if (!nodeResponse.node.backendNodeId) {
+        throw new Error('Could not get backend node ID for element');
+      }
+
+      const boxModel = await domAgent.invoke_getBoxModel({
+        backendNodeId: nodeResponse.node.backendNodeId as Protocol.DOM.BackendNodeId
+      });
+
+      if (!boxModel.model) {
+        throw new Error('Could not get box model for element');
+      }
+
+      // Calculate center point of element (start position)
+      const contentQuad = boxModel.model.content;
+      const startX = (contentQuad[0] + contentQuad[2] + contentQuad[4] + contentQuad[6]) / 4;
+      const startY = (contentQuad[1] + contentQuad[3] + contentQuad[5] + contentQuad[7]) / 4;
+
+      // Get drag offset from args
+      const dragArgs = args[0] as { offsetX?: number; offsetY?: number; toX?: number; toY?: number };
+      let endX: number;
+      let endY: number;
+
+      if (dragArgs.toX !== undefined && dragArgs.toY !== undefined) {
+        // Absolute position
+        endX = dragArgs.toX;
+        endY = dragArgs.toY;
+      } else {
+        // Relative offset (default)
+        endX = startX + (dragArgs.offsetX || 0);
+        endY = startY + (dragArgs.offsetY || 0);
+      }
+
+      // Mouse down at start position
+      await inputAgent.invoke_dispatchMouseEvent({
+        type: Protocol.Input.DispatchMouseEventRequestType.MousePressed,
+        x: startX,
+        y: startY,
+        button: Protocol.Input.MouseButton.Left,
+        clickCount: 1
+      });
+
+      // Move in steps for smoother dragging
+      const steps = 10;
+      for (let i = 1; i <= steps; i++) {
+        const progress = i / steps;
+        const currentX = startX + (endX - startX) * progress;
+        const currentY = startY + (endY - startY) * progress;
+
+        await inputAgent.invoke_dispatchMouseEvent({
+          type: Protocol.Input.DispatchMouseEventRequestType.MouseMoved,
+          x: currentX,
+          y: currentY,
+          button: Protocol.Input.MouseButton.Left
+        });
+
+        // Small delay between moves
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      // Mouse up at end position
+      await inputAgent.invoke_dispatchMouseEvent({
+        type: Protocol.Input.DispatchMouseEventRequestType.MouseReleased,
+        x: endX,
+        y: endY,
+        button: Protocol.Input.MouseButton.Left,
+        clickCount: 1
       });
     } else if (method === 'fill' || method === 'type') {
       const text = String(args[0] || '');

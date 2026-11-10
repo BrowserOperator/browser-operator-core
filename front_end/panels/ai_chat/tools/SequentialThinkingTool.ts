@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as SDK from '../../../core/sdk/sdk.js';
 import type { Tool, LLMContext } from './Tools.js';
 import { TakeScreenshotTool } from './Tools.js';
 import { GetAccessibilityTreeTool } from './Tools.js';
@@ -10,6 +9,23 @@ import { createLogger } from '../core/Logger.js';
 import { LLMClient } from '../LLM/LLMClient.js';
 import { LLMResponseParser } from '../LLM/LLMResponseParser.js';
 import { LLMRetryManager } from '../LLM/LLMErrorHandler.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only SDK dependency
+let SDK: typeof import('../../../core/sdk/sdk.js') | null = null;
+let sdkLoaded = false;
+
+async function ensureSDK(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (!sdkLoaded) {
+    sdkLoaded = true;
+    try { SDK = await import('../../../core/sdk/sdk.js'); }
+    catch { return false; }
+  }
+  return SDK !== null;
+}
 
 const logger = createLogger('SequentialThinkingTool');
 
@@ -131,6 +147,9 @@ export class SequentialThinkingTool implements Tool<SequentialThinkingArgs, Sequ
       }
 
       // Get page metadata
+      if (!(await ensureSDK()) || !SDK) {
+        return { error: 'SDK not available (Node.js environment)' };
+      }
       const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
       if (!target) {
         return { error: 'No page target available' };

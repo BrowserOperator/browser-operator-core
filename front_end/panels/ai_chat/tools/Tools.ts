@@ -2,40 +2,144 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as Common from '../../../core/common/common.js'; // Import Common for EventTarget promises
-import * as SDK from '../../../core/sdk/sdk.js';
-import type * as Protocol from '../../../generated/protocol.js';
-import * as Logs from '../../../models/logs/logs.js';
-import { createLogger } from '../core/Logger.js';
+import type * as Protocol from "../../../generated/protocol.js";
+import { createLogger } from "../core/Logger.js";
+import {
+  getAdapter,
+  preloadBrowserDeps,
+  type AdapterContext,
+} from "../cdp/getAdapter.js";
+import type { CDPSessionAdapter } from "../cdp/CDPSessionAdapter.js";
+import {
+  isEncodedId,
+  parseEncodedId,
+  type EncodedId,
+} from "../common/context.js";
+import { ResolveEncodedIdTool } from "./HybridAccessibilityTreeTool.js";
+import {
+  captureHybridSnapshotUniversal,
+  type HybridSnapshot,
+} from "../a11y/HybridSnapshotUniversal.js";
+import {
+  searchAccessibilityTree as searchAccessibilityTreeImpl,
+  type ScoredSearchMatch,
+} from "../common/accessibility-tree-search.js";
 
-const logger = createLogger('Tools');
+const logger = createLogger("Tools");
 
-// Removed createToolTracingObservation - tool tracing is now handled centrally in ToolExecutorNode
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment =
+  typeof window === "undefined" || typeof document === "undefined";
+
+// Lazy-loaded browser-only dependencies
+let SDK: typeof import("../../../core/sdk/sdk.js") | null = null;
+let Common: typeof import("../../../core/common/common.js") | null = null;
+let Logs: typeof import("../../../models/logs/logs.js") | null = null;
+let Utils: typeof import("../common/utils.js") | null = null;
+let AgentService: typeof import("../core/AgentService.js").AgentService | null =
+  null;
+let browserDepsLoaded = false;
+
+/**
+ * Ensures browser dependencies (SDK, Common, Logs, Utils) are loaded.
+ * Returns false in Node.js environment or if loading fails.
+ */
+async function ensureToolsBrowserDeps(): Promise<boolean> {
+  if (isNodeEnvironment) {
+    return false;
+  }
+  if (!browserDepsLoaded) {
+    browserDepsLoaded = true;
+    try {
+      // Also ensure the CDP adapter deps are loaded
+      await preloadBrowserDeps();
+      const [
+        sdkModule,
+        commonModule,
+        logsModule,
+        utilsModule,
+        agentServiceModule,
+      ] = await Promise.all([
+        import("../../../core/sdk/sdk.js"),
+        import("../../../core/common/common.js"),
+        import("../../../models/logs/logs.js"),
+        import("../common/utils.js"),
+        import("../core/AgentService.js"),
+      ]);
+      SDK = sdkModule;
+      Common = commonModule;
+      Logs = logsModule;
+      Utils = utilsModule;
+      AgentService = agentServiceModule.AgentService;
+    } catch {
+      return false;
+    }
+  }
+  return SDK !== null;
+}
 
 // Value imports first, then types, ordered correctly
-import type { AccessibilityNode } from '../common/context.js';
-import type { LogLine } from '../common/log.js';
-import * as Utils from '../common/utils.js';
-import { getXPathByBackendNodeId } from '../common/utils.js';
-import { AgentService } from '../core/AgentService.js';
-import type { DevToolsContext } from '../core/State.js';
-import { LLMClient } from '../LLM/LLMClient.js';
-import type { LLMProvider } from '../LLM/LLMTypes.js';
-import { ChatMessageEntity } from '../models/ChatTypes.js';
+import type { AccessibilityNode } from "../common/context.js";
+import type { LogLine } from "../common/log.js";
+import * as UtilsUniversal from "../common/utils-universal.js";
+// Note: Utils is now lazy-loaded above for browser/Node.js portability
+// Use UtilsUniversal for adapter-compatible functions that work in both environments
+import type { DevToolsContext } from "../core/State.js";
+import { LLMClient } from "../LLM/LLMClient.js";
+import type { LLMProvider } from "../LLM/LLMTypes.js";
+import { ChatMessageEntity } from "../models/ChatTypes.js";
 
 // Type imports
 
-import { CombinedExtractionTool, type CombinedExtractionResult } from './CombinedExtractionTool.js';
-import { FetcherTool, type FetcherToolResult, type FetcherToolArgs } from './FetcherTool.js';
-import { FinalizeWithCritiqueTool, type FinalizeWithCritiqueResult } from './FinalizeWithCritiqueTool.js';
-import { FullPageAccessibilityTreeToMarkdownTool, type FullPageAccessibilityTreeToMarkdownResult } from './FullPageAccessibilityTreeToMarkdownTool.js';
-import { HTMLToMarkdownTool, type HTMLToMarkdownResult } from './HTMLToMarkdownTool.js';
-import { SchemaBasedExtractorTool, type SchemaExtractionResult, type SchemaDefinition } from './SchemaBasedExtractorTool.js';
-import { VisitHistoryManager, type VisitData } from './VisitHistoryManager.js';
-import { SequentialThinkingTool, type SequentialThinkingResult, type SequentialThinkingArgs, type ExecutedStep } from './SequentialThinkingTool.js';
-import { RenderWebAppTool, type RenderWebAppArgs, type RenderWebAppResult } from './RenderWebAppTool.js';
-import { GetWebAppDataTool, type GetWebAppDataArgs, type GetWebAppDataResult } from './GetWebAppDataTool.js';
-import { RemoveWebAppTool, type RemoveWebAppArgs, type RemoveWebAppResult } from './RemoveWebAppTool.js';
+import {
+  CombinedExtractionTool,
+  type CombinedExtractionResult,
+} from "./CombinedExtractionTool.js";
+import {
+  FetcherTool,
+  type FetcherToolResult,
+  type FetcherToolArgs,
+} from "./FetcherTool.js";
+import {
+  FinalizeWithCritiqueTool,
+  type FinalizeWithCritiqueResult,
+} from "./FinalizeWithCritiqueTool.js";
+import {
+  FullPageAccessibilityTreeToMarkdownTool,
+  type FullPageAccessibilityTreeToMarkdownResult,
+} from "./FullPageAccessibilityTreeToMarkdownTool.js";
+import {
+  HTMLToMarkdownTool,
+  type HTMLToMarkdownResult,
+} from "./HTMLToMarkdownTool.js";
+import {
+  SchemaBasedExtractorTool,
+  type SchemaExtractionResult,
+  type SchemaDefinition,
+} from "./SchemaBasedExtractorTool.js";
+import { VisitHistoryManager, type VisitData } from "./VisitHistoryManager.js";
+import {
+  SequentialThinkingTool,
+  type SequentialThinkingResult,
+  type SequentialThinkingArgs,
+  type ExecutedStep,
+} from "./SequentialThinkingTool.js";
+import {
+  RenderWebAppTool,
+  type RenderWebAppArgs,
+  type RenderWebAppResult,
+} from "./RenderWebAppTool.js";
+import {
+  GetWebAppDataTool,
+  type GetWebAppDataArgs,
+  type GetWebAppDataResult,
+} from "./GetWebAppDataTool.js";
+import {
+  RemoveWebAppTool,
+  type RemoveWebAppArgs,
+  type RemoveWebAppResult,
+} from "./RemoveWebAppTool.js";
+import { ContentChunker } from "../utils/ContentChunker.js";
 
 /**
  * Base interface for all tools
@@ -45,16 +149,17 @@ export interface Tool<TArgs = Record<string, unknown>, TResult = unknown> {
   description: string;
   execute: (args: TArgs, ctx?: LLMContext) => Promise<TResult>;
   schema: {
-    type: string,
-    properties: Record<string, unknown>,
-    required?: string[],
+    type: string;
+    properties: Record<string, unknown>;
+    required?: string[];
   };
 }
 
 /**
  * Context passed into tools for LLM-related choices without relying on UI.
+ * Extends AdapterContext to allow passing a CDP adapter for eval runner compatibility.
  */
-export interface LLMContext {
+export interface LLMContext extends AdapterContext {
   apiKey?: string;
   provider: LLMProvider;
   model: string;
@@ -76,12 +181,12 @@ export interface ElementInspectionResult {
   classList?: string[];
   attributes?: Record<string, string>;
   boundingRect?: {
-    top: number,
-    right: number,
-    bottom: number,
-    left: number,
-    width: number,
-    height: number,
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+    width: number;
+    height: number;
   };
   styles?: Record<string, string>;
 }
@@ -100,11 +205,11 @@ export interface JavaScriptExecutionResult {
  */
 export interface ConsoleLogsResult {
   messages: Array<{
-    text: string,
-    level: string,
-    timestamp: number,
-    url?: string,
-    lineNumber?: number,
+    text: string;
+    level: string;
+    timestamp: number;
+    url?: string;
+    lineNumber?: number;
   }>;
   total: number;
 }
@@ -121,15 +226,15 @@ export interface ErrorResult {
  */
 export interface NetworkAnalysisResult {
   requests: Array<{
-    url: string,
-    method: string,
-    status: number,
-    statusText: string,
-    headers: Record<string, string>,
+    url: string;
+    method: string;
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
     response: {
-      headers: Record<string, string>,
-      body: string,
-    },
+      headers: Record<string, string>;
+      body: string;
+    };
   }>;
 }
 
@@ -139,7 +244,7 @@ export interface NetworkAnalysisResult {
 export interface NavigationResult {
   url: string;
   message: string;
-  metadata?: { url: string, title: string };
+  metadata?: { url: string; title: string };
 }
 
 /**
@@ -150,15 +255,15 @@ export interface PageHTMLResult {
   documentTitle: string;
   url: string;
   metadata?: {
-    description?: string,
-    keywords?: string,
-    author?: string,
-    [key: string]: string | undefined,
+    description?: string;
+    keywords?: string;
+    author?: string;
+    [key: string]: string | undefined;
   };
   structure?: {
-    headings: Array<{ level: number, text: string }>,
-    mainContent?: string,
-    navigation?: string,
+    headings: Array<{ level: number; text: string }>;
+    mainContent?: string;
+    navigation?: string;
   };
 }
 
@@ -168,9 +273,9 @@ export interface PageHTMLResult {
 export interface ClickElementResult {
   message: string;
   elementInfo?: {
-    tagName: string,
-    text?: string,
-    href?: string,
+    tagName: string;
+    text?: string;
+    href?: string;
   };
 }
 
@@ -179,12 +284,12 @@ export interface ClickElementResult {
  */
 export interface SearchContentResult {
   matches: Array<{
-    text: string,
-    context: string,
+    text: string;
+    context: string;
     elementInfo: {
-      tagName: string,
-      selector: string,
-    },
+      tagName: string;
+      selector: string;
+    };
   }>;
   totalMatches: number;
 }
@@ -196,12 +301,12 @@ export interface ScrollResult {
   success: boolean;
   message: string;
   position?: {
-    x: number,
-    y: number,
+    x: number;
+    y: number;
   };
-  viewportHeight?: number;  // Height of the viewport in pixels
-  scrollHeight?: number;     // Total scrollable height of the document
-  scrolledPages?: number;    // Number of pages scrolled (if using pages parameter)
+  viewportHeight?: number; // Height of the viewport in pixels
+  scrollHeight?: number; // Total scrollable height of the document
+  scrolledPages?: number; // Number of pages scrolled (if using pages parameter)
 }
 
 /**
@@ -211,7 +316,7 @@ export interface ScrollResult {
  * Interface for tool results that can include image data
  */
 export interface ImageToolResult {
-  imageData?: string;  // Base64 data URL for sending to LLM
+  imageData?: string; // Base64 data URL for sending to LLM
   error?: string;
 }
 
@@ -228,16 +333,16 @@ export interface ScreenshotResult extends ImageToolResult {
 export interface AccessibilityTreeResult {
   simplified: string;
   iframes?: Array<{
-    role: string,
-    nodeId?: string,
+    role: string;
+    nodeId?: string;
     contentTree?: Array<{
-      role: string,
-      name?: string,
-      description?: string,
-      nodeId?: string,
-      children?: any[],
-    }>,
-    contentSimplified?: string,
+      role: string;
+      name?: string;
+      description?: string;
+      nodeId?: string;
+      children?: any[];
+    }>;
+    contentSimplified?: string;
   }>;
   /**
    * Raw accessibility nodes from the tree for direct node manipulation
@@ -258,6 +363,34 @@ export interface AccessibilityTreeResult {
 }
 
 /**
+ * Element state verification result - returned after state-changing actions
+ * to confirm the action actually succeeded.
+ */
+export interface ElementStateVerification {
+  /** Whether verification was performed */
+  verified: boolean;
+  /** The action method that was performed */
+  actionMethod: string;
+  /** Current state of the element after action */
+  currentState?: {
+    /** For checkbox/radio: whether element is checked */
+    checked?: boolean;
+    /** For input/textarea: current value */
+    value?: string;
+    /** For select: currently selected option text */
+    selectedOption?: string;
+    /** For select: currently selected option value */
+    selectedValue?: string;
+    /** Element type (checkbox, radio, text, select, etc.) */
+    elementType?: string;
+  };
+  /** Whether the state matches expected outcome */
+  stateConfirmed: boolean;
+  /** Human-readable summary of verification */
+  summary: string;
+}
+
+/**
  * Type for perform action result
  */
 export interface PerformActionResult extends ImageToolResult {
@@ -275,6 +408,8 @@ export interface PerformActionResult extends ImageToolResult {
     };
   };
   visualCheck?: string; // LLM's assessment of success
+  /** Element state verification for state-changing actions (check, fill, select, etc.) */
+  stateVerification?: ElementStateVerification;
 }
 
 /**
@@ -284,19 +419,19 @@ export interface ObjectiveDrivenActionResult {
   success: boolean;
   message: string;
   finalAction?: {
-    method: string,
-    nodeId: number,
-    args?: unknown,
-    xpath?: string,
+    method: string;
+    nodeId: string;
+    args?: unknown;
+    xpath?: string;
   };
   method: string;
-  nodeId: number;
+  nodeId: string;
   args?: unknown;
   xpath?: string;
   processedLength: number;
   totalLength: number;
   truncated: boolean;
-  metadata?: { url: string, title: string };
+  metadata?: { url: string; title: string };
   treeDiff?: {
     hasChanges: boolean;
     summary: string;
@@ -316,8 +451,8 @@ export interface ObjectiveDrivenActionResult {
  */
 export interface NodeIDsToURLsResult {
   urls: Array<{
-    nodeId: number,
-    url?: string,
+    nodeId: string;
+    url?: string;
   }>;
 }
 
@@ -331,7 +466,7 @@ export interface SchemaBasedDataExtractionResult {
   processedLength: number;
   totalLength: number;
   truncated: boolean;
-  metadata?: { url: string, title: string };
+  metadata?: { url: string; title: string };
 }
 
 /**
@@ -347,32 +482,41 @@ export interface WaitResult {
 /**
  * Tool for executing JavaScript in the page context
  */
-export class ExecuteJavaScriptTool implements Tool<{ code: string }, JavaScriptExecutionResult | ErrorResult> {
-  name = 'execute_javascript';
-  description = 'Executes JavaScript code in the page context';
+export class ExecuteJavaScriptTool implements Tool<
+  { code: string },
+  JavaScriptExecutionResult | ErrorResult
+> {
+  name = "execute_javascript";
+  description = "Executes JavaScript code in the page context";
 
-  async execute(args: { code: string }, _ctx?: LLMContext): Promise<JavaScriptExecutionResult | ErrorResult> {
-    logger.info('execute_javascript', args);
+  async execute(
+    args: { code: string },
+    ctx?: LLMContext,
+  ): Promise<JavaScriptExecutionResult | ErrorResult> {
+    logger.info("execute_javascript", args);
     const code = args.code;
-    if (typeof code !== 'string') {
-      return { error: 'Code must be a string' };
+    if (typeof code !== "string") {
+      return { error: "Code must be a string" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Get adapter from context or fall back to SDK.Target
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
       // Execute the JavaScript in the page context
-      const result = await target.runtimeAgent().invoke_evaluate({
+      const result = await adapter.runtimeAgent().invoke<{
+        result: { value: unknown; type: string };
+        exceptionDetails?: { text: string };
+      }>("evaluate", {
         expression: code,
         returnByValue: true,
         generatePreview: true,
       });
 
-      logger.info('execute_javascript result', result);
+      logger.info("execute_javascript result", result);
 
       if (result.exceptionDetails) {
         return {
@@ -386,75 +530,101 @@ export class ExecuteJavaScriptTool implements Tool<{ code: string }, JavaScriptE
         type: result.result.type,
       };
     } catch (error) {
-      return { error: `Failed to execute JavaScript: ${error.message}` };
+      return {
+        error: `Failed to execute JavaScript: ${(error as Error).message}`,
+      };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       code: {
-        type: 'string',
-        description: 'JavaScript code to execute in the page context',
+        type: "string",
+        description: "JavaScript code to execute in the page context",
       },
     },
-    required: ['code'],
+    required: ["code"],
   };
 }
 
 /**
  * Tool for analyzing network requests
  */
-export class NetworkAnalysisTool implements Tool<{ url?: string, limit?: number }, NetworkAnalysisResult | ErrorResult> {
-  name = 'analyze_network';
-  description = 'Analyzes network requests, optionally filtered by URL pattern';
+export class NetworkAnalysisTool implements Tool<
+  { url?: string; limit?: number },
+  NetworkAnalysisResult | ErrorResult
+> {
+  name = "analyze_network";
+  description = "Analyzes network requests, optionally filtered by URL pattern";
 
-  async execute(args: { url?: string, limit?: number }, _ctx?: LLMContext): Promise<NetworkAnalysisResult | ErrorResult> {
+  async execute(
+    args: { url?: string; limit?: number },
+    ctx?: LLMContext,
+  ): Promise<NetworkAnalysisResult | ErrorResult> {
     const url = args.url;
     const limit = args.limit || 10;
 
+    // NetworkAnalysisTool depends on DevTools NetworkLog which tracks requests over time
+    // This is only available in DevTools browser context, not in eval runner / Node.js
+    if (isNodeEnvironment) {
+      return {
+        error:
+          "Network analysis requires DevTools NetworkLog and is only available in browser context",
+      };
+    }
+
+    // Ensure browser dependencies are loaded
+    await ensureToolsBrowserDeps();
+    if (!SDK || !Logs) {
+      return { error: "Network analysis is only available in browser context" };
+    }
+
     try {
       // Get network manager
-      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
+      const target =
+        SDK.TargetManager.TargetManager.instance().primaryPageTarget();
       if (!target) {
-        return { error: 'Primary page target not available' };
+        return { error: "Primary page target not available" };
       }
 
       const networkManager = target.model(SDK.NetworkManager.NetworkManager);
       if (!networkManager) {
-        return { error: 'Network manager not available' };
+        return { error: "Network manager not available" };
       }
 
       // Get network requests from NetworkLog
       const requests = Logs.NetworkLog.NetworkLog.instance().requests();
 
       // Filter by URL if provided
-      const filteredRequests = url ? requests.filter(request => request.url().includes(url)) : requests;
+      const filteredRequests = url
+        ? requests.filter((request: any) => request.url().includes(url))
+        : requests;
 
       // Take only the specified limit
       const limitedRequests = filteredRequests.slice(-limit);
 
       // Map to simplified objects
-      const mappedRequests =
-        await Promise.all(limitedRequests.map(async (request: SDK.NetworkRequest.NetworkRequest) => {
+      const mappedRequests = await Promise.all(
+        limitedRequests.map(async (request: any) => {
           const requestHeaders = request.requestHeaders();
           const responseHeaders = request.responseHeaders;
 
           const requestHeadersMap: Record<string, string> = {};
           const responseHeadersMap: Record<string, string> = {};
 
-          requestHeaders.forEach((header: SDK.NetworkRequest.NameValue) => {
+          requestHeaders.forEach((header: any) => {
             requestHeadersMap[header.name] = header.value;
           });
 
-          responseHeaders.forEach((header: SDK.NetworkRequest.NameValue) => {
+          responseHeaders.forEach((header: any) => {
             responseHeadersMap[header.name] = header.value;
           });
 
-          let responseBody = '';
+          let responseBody = "";
           try {
             const contentData = await request.requestContentData();
-            if ('error' in contentData) {
+            if ("error" in contentData) {
               responseBody = contentData.error;
             } else {
               responseBody = contentData.text;
@@ -474,7 +644,8 @@ export class NetworkAnalysisTool implements Tool<{ url?: string, limit?: number 
               body: responseBody,
             },
           };
-        }));
+        }),
+      );
 
       return {
         requests: mappedRequests,
@@ -485,15 +656,15 @@ export class NetworkAnalysisTool implements Tool<{ url?: string, limit?: number 
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       url: {
-        type: 'string',
-        description: 'URL pattern to filter requests (optional)',
+        type: "string",
+        description: "URL pattern to filter requests (optional)",
       },
       limit: {
-        type: 'number',
-        description: 'Maximum number of requests to return (default: 10)',
+        type: "number",
+        description: "Maximum number of requests to return (default: 10)",
       },
     },
   };
@@ -509,7 +680,7 @@ export interface NavigateBackResult {
   success: boolean;
   message: string;
   steps: number;
-  metadata?: { url: string, title: string };
+  metadata?: { url: string; title: string };
 }
 
 /**
@@ -517,18 +688,31 @@ export interface NavigateBackResult {
  * @param target The SDK.Target.Target to monitor.
  * @param timeoutMs The timeout duration in milliseconds.
  * @returns A promise that resolves when the load event occurs or rejects on timeout/error.
+ * @note This function requires browser context (SDK, Common must be loaded).
  */
-export async function waitForPageLoad(target: SDK.Target.Target, timeoutMs: number): Promise<void> {
-  const resourceTreeModel = target.model(SDK.ResourceTreeModel.ResourceTreeModel);
+export async function waitForPageLoad(
+  target: any,
+  timeoutMs: number,
+): Promise<void> {
+  // Ensure browser dependencies are loaded
+  if (!SDK || !Common) {
+    throw new Error(
+      "waitForPageLoad requires browser context (SDK not available)",
+    );
+  }
+
+  const resourceTreeModel = target.model(
+    SDK.ResourceTreeModel.ResourceTreeModel,
+  );
   if (!resourceTreeModel) {
-    throw new Error('ResourceTreeModel not found for target.');
+    throw new Error("ResourceTreeModel not found for target.");
   }
   const runtimeAgent = target.runtimeAgent();
   if (!runtimeAgent) {
-    throw new Error('RuntimeAgent not found for target.');
+    throw new Error("RuntimeAgent not found for target.");
   }
 
-  let lifecycleEventListener: Common.EventTarget.EventDescriptor | null = null;
+  let lifecycleEventListener: any | null = null;
   let overallTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   try {
@@ -538,23 +722,25 @@ export async function waitForPageLoad(target: SDK.Target.Target, timeoutMs: numb
     // 1. Overall Timeout Promise
     const timeoutPromise = new Promise<never>((_, reject) => {
       overallTimeoutId = setTimeout(() => {
-        logger.warn(`waitForPageLoad: Overall timeout reached after ${timeoutMs}ms`);
+        logger.warn(
+          `waitForPageLoad: Overall timeout reached after ${timeoutMs}ms`,
+        );
         reject(new Error(`Page load timed out after ${timeoutMs}ms (Overall)`));
       }, timeoutMs);
     });
 
     // 2. Network Almost Idle Promise (via lifecycle events)
-    const networkIdlePromise = new Promise<void>(resolve => {
+    const networkIdlePromise = new Promise<void>((resolve) => {
       lifecycleEventListener = resourceTreeModel.addEventListener(
-        SDK.ResourceTreeModel.Events.LifecycleEvent,
-        (event: Common.EventTarget.EventTargetEvent<{frameId: Protocol.Page.FrameId, name: string}>) => {
-          const {name} = event.data;
+        SDK!.ResourceTreeModel.Events.LifecycleEvent,
+        (event: any) => {
+          const { name } = event.data;
           // networkAlmostIdle means ≤2 network connections for 500ms
-          if (name === 'networkAlmostIdle' || name === 'networkIdle') {
+          if (name === "networkAlmostIdle" || name === "networkIdle") {
             logger.info(`waitForPageLoad: ${name} lifecycle event received.`);
             resolve();
           }
-        }
+        },
       );
     });
 
@@ -590,7 +776,7 @@ export async function waitForPageLoad(target: SDK.Target.Target, timeoutMs: numb
         })
       `;
       try {
-        logger.info('waitForPageLoad: Starting LCP observer...');
+        logger.info("waitForPageLoad: Starting LCP observer...");
         const result = await runtimeAgent.invoke_evaluate({
           expression,
           awaitPromise: true, // Wait for the script's promise
@@ -599,39 +785,49 @@ export async function waitForPageLoad(target: SDK.Target.Target, timeoutMs: numb
         });
 
         if (result.exceptionDetails) {
-          logger.warn(`waitForPageLoad: LCP observer script failed evaluation: ${result.exceptionDetails.text}`);
+          logger.warn(
+            `waitForPageLoad: LCP observer script failed evaluation: ${result.exceptionDetails.text}`,
+          );
           // Evaluation failed, LCP won't resolve successfully.
           // Return a promise that never resolves to take it out of the race.
-          return new Promise(() => { });
+          return new Promise(() => {});
         }
 
         const lcpStatus = result.result.value as string;
-        if (lcpStatus === 'LCP detected') {
-          logger.info('waitForPageLoad: LCP detected via observer.');
+        if (lcpStatus === "LCP detected") {
+          logger.info("waitForPageLoad: LCP detected via observer.");
           // Resolve the outer lcpPromise successfully
           return Promise.resolve();
         }
-          // LCP observer timed out internally or failed setup
-          logger.warn(`waitForPageLoad: LCP observer finished with status: "${lcpStatus}"`);
-          // Return a promise that never resolves.
-          return new Promise(() => { });
-
+        // LCP observer timed out internally or failed setup
+        logger.warn(
+          `waitForPageLoad: LCP observer finished with status: "${lcpStatus}"`,
+        );
+        // Return a promise that never resolves.
+        return new Promise(() => {});
       } catch (error) {
         // Catch errors invoking evaluate itself
-        logger.warn(`waitForPageLoad: Error invoking LCP observer script: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warn(
+          `waitForPageLoad: Error invoking LCP observer script: ${error instanceof Error ? error.message : String(error)}`,
+        );
         // Invocation failed, LCP won't resolve. Return a promise that never resolves.
-        return await new Promise(() => { });
+        return await new Promise(() => {});
       }
     })();
 
     // 4. Race the promises: Wait for the first of networkIdle, LCP, or timeout
-    logger.info(`waitForPageLoad: Waiting for networkIdle, LCP, or timeout (${timeoutMs}ms)...`);
+    logger.info(
+      `waitForPageLoad: Waiting for networkIdle, LCP, or timeout (${timeoutMs}ms)...`,
+    );
     await Promise.race([networkIdlePromise, lcpPromise, timeoutPromise]);
-    logger.info('waitForPageLoad: Race finished (networkIdle, LCP, or Timeout).');
-
+    logger.info(
+      "waitForPageLoad: Race finished (networkIdle, LCP, or Timeout).",
+    );
   } catch (error) {
     // This catch block will primarily handle the overall timeout rejection
-    logger.error(`waitForPageLoad: Wait failed - ${error instanceof Error ? error.message : String(error)}`);
+    logger.error(
+      `waitForPageLoad: Wait failed - ${error instanceof Error ? error.message : String(error)}`,
+    );
     // Rethrow the error (likely the timeout error)
     throw error;
   } finally {
@@ -639,86 +835,103 @@ export async function waitForPageLoad(target: SDK.Target.Target, timeoutMs: numb
     if (overallTimeoutId !== null) {
       clearTimeout(overallTimeoutId);
     }
-    if (lifecycleEventListener) {
+    if (lifecycleEventListener && Common) {
       Common.EventTarget.removeEventListeners([lifecycleEventListener]);
-      logger.info('waitForPageLoad: Lifecycle event listener removed.');
+      logger.info("waitForPageLoad: Lifecycle event listener removed.");
     }
     // The LCP observer should disconnect itself within the injected script.
   }
 }
 
-export class NavigateURLTool implements Tool<{ url: string, reasoning: string }, NavigationResult | ErrorResult> {
-  name = 'navigate_url';
-  description = 'Navigates the page to a specified URL and waits for it to load';
+export class NavigateURLTool implements Tool<
+  { url: string; reasoning: string },
+  NavigationResult | ErrorResult
+> {
+  name = "navigate_url";
+  description =
+    "Navigates the page to a specified URL and waits for it to load";
 
-  constructor() {
-  }
+  constructor() {}
 
-  async execute(args: { url: string, reasoning: string /* Add reasoning to signature */ }, ctx?: LLMContext): Promise<NavigationResult | ErrorResult> {
-    logger.info('navigate_url', args);
+  async execute(
+    args: { url: string; reasoning: string /* Add reasoning to signature */ },
+    ctx?: LLMContext,
+  ): Promise<NavigationResult | ErrorResult> {
+    logger.info("navigate_url", args);
     const url = args.url;
     const LOAD_TIMEOUT_MS = 30000; // 30 seconds timeout for page load
 
-    if (typeof url !== 'string') {
-      return { error: 'URL must be a string' };
+    if (typeof url !== "string") {
+      return { error: "URL must be a string" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Use getAdapter pattern - works in both DevTools and eval runner contexts
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
-      // Use the page agent to navigate to the URL
-      const pageAgent = target.pageAgent();
-      if (!pageAgent) {
-        return { error: 'Page agent not available' };
+      logger.info(`Initiating navigation to: ${url}`);
+
+      // Perform the navigation using CDP Page.navigate
+      const result = await adapter
+        .pageAgent()
+        .invoke<{
+          frameId: string;
+          loaderId?: string;
+          errorText?: string;
+        }>("navigate", { url });
+
+      if (result.errorText) {
+        logger.error(`Navigation invocation failed: ${result.errorText}`);
+        return { error: `Navigation invocation failed: ${result.errorText}` };
       }
+      logger.info("Navigation initiated successfully.");
 
-      logger.info('Initiating navigation to: ${url}');
-      // Perform the navigation
-      const result = await pageAgent.invoke_navigate({ url });
-
-      if (result.getError()) {
-        logger.error(`Navigation invocation failed: ${result.getError()}`);
-        return { error: `Navigation invocation failed: ${result.getError()}` };
-      }
-      logger.info('Navigation initiated successfully.');
-
-      // *** Add wait for page load ***
+      // Wait for page load by polling document.readyState
       try {
-        await waitForPageLoad(target, LOAD_TIMEOUT_MS);
-        logger.info('Page load confirmed or timeout reached.');
+        await this.waitForPageLoadViaAdapter(adapter, LOAD_TIMEOUT_MS);
+        logger.info("Page load confirmed or timeout reached.");
       } catch (loadError: any) {
         logger.error(`Error waiting for page load: ${loadError.message}`);
       }
-      // *****************************
 
       // Fetch page metadata AFTER waiting
-      logger.info('Fetching page metadata...');
-      const metadataEval = await target.runtimeAgent().invoke_evaluate({
-        expression: '({ url: window.location.href, title: document.title })',
+      logger.info("Fetching page metadata...");
+      const metadataEval = await adapter.runtimeAgent().invoke<{
+        result: { value: { url: string; title: string } };
+        exceptionDetails?: { text: string };
+      }>("evaluate", {
+        expression: "({ url: window.location.href, title: document.title })",
         returnByValue: true,
       });
 
       // Handle potential errors during metadata evaluation
       if (metadataEval.exceptionDetails) {
-        logger.error(`Error fetching metadata: ${metadataEval.exceptionDetails.text}`);
-        // Proceed but without metadata, perhaps? Or return error?
-        // Let's return success but indicate metadata failure.
+        logger.error(
+          `Error fetching metadata: ${metadataEval.exceptionDetails.text}`,
+        );
         return {
-          url: target.inspectedURL() || url, // Use inspectedURL as fallback
-          message: `Successfully navigated to ${target.inspectedURL() || url}, but failed to fetch metadata: ${metadataEval.exceptionDetails.text}`,
+          url: adapter.inspectedURL() || url,
+          message: `Successfully navigated to ${adapter.inspectedURL() || url}, but failed to fetch metadata: ${metadataEval.exceptionDetails.text}`,
           metadata: undefined,
         };
       }
 
-      const metadata = metadataEval.result.value as { url: string, title: string };
-      logger.info('Metadata fetched:', metadata);
+      const metadata = metadataEval.result.value as {
+        url: string;
+        title: string;
+      };
+      logger.info("Metadata fetched:", metadata);
+
+      // Update adapter URL after navigation
+      if ("updateURL" in adapter && typeof adapter.updateURL === "function") {
+        adapter.updateURL(metadata.url);
+      }
 
       // *** Add 404 detection heuristic ***
-      const is404Result = await this.check404Status(target, metadata, ctx);
+      const is404Result = await this.check404Status(adapter, metadata, ctx);
       if (is404Result.is404) {
         return {
           error: `Page not found (404): ${is404Result.reason}`,
@@ -735,7 +948,9 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
         try {
           const urlObj = new URL(urlStr);
           // Keep protocol, hostname, pathname. Remove trailing slash from pathname.
-          const pathname = urlObj.pathname.endsWith('/') ? urlObj.pathname.slice(0, -1) : urlObj.pathname;
+          const pathname = urlObj.pathname.endsWith("/")
+            ? urlObj.pathname.slice(0, -1)
+            : urlObj.pathname;
           return `${urlObj.protocol}//${urlObj.hostname}${pathname}${urlObj.search}${urlObj.hash}`;
         } catch (e) {
           // If URL parsing fails, return original string (lowercased for consistency)
@@ -746,20 +961,26 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
       const normalizedIntendedUrl = normalizeUrl(intendedUrl);
       const normalizedFinalUrl = normalizeUrl(finalUrl);
 
-      let verificationMessage = '';
+      let verificationMessage = "";
       let navigationVerified = normalizedIntendedUrl === normalizedFinalUrl;
 
       // Allow for HTTP -> HTTPS redirect as a valid case
-      if (!navigationVerified && normalizedIntendedUrl.startsWith('http://') && normalizedFinalUrl.startsWith('https://')) {
-        const intendedHttps = 'https' + normalizedIntendedUrl.substring(4);
+      if (
+        !navigationVerified &&
+        normalizedIntendedUrl.startsWith("http://") &&
+        normalizedFinalUrl.startsWith("https://")
+      ) {
+        const intendedHttps = "https" + normalizedIntendedUrl.substring(4);
         if (intendedHttps === normalizedFinalUrl) {
           navigationVerified = true;
-          verificationMessage = ' (Redirected to HTTPS)';
+          verificationMessage = " (Redirected to HTTPS)";
         }
       }
 
       if (!navigationVerified) {
-        logger.warn(`URL mismatch after navigation. Intended: ${intendedUrl}, Final: ${finalUrl}`);
+        logger.warn(
+          `URL mismatch after navigation. Intended: ${intendedUrl}, Final: ${finalUrl}`,
+        );
         // Return an error or modify success message?
         // Let's modify the message but still return success=true, as the page *did* load.
         return {
@@ -781,63 +1002,113 @@ export class NavigateURLTool implements Tool<{ url: string, reasoning: string },
     }
   }
 
-  private async check404Status(target: SDK.Target.Target, metadata: { url: string, title: string }, ctx?: LLMContext): Promise<{ is404: boolean, reason?: string }> {
+  /**
+   * Wait for page load by polling document.readyState via the adapter.
+   * This works in both DevTools and eval runner contexts.
+   */
+  private async waitForPageLoadViaAdapter(
+    adapter: CDPSessionAdapter,
+    timeoutMs: number,
+  ): Promise<void> {
+    const startTime = Date.now();
+    const pollInterval = 100; // Poll every 100ms
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        const result = await adapter.runtimeAgent().invoke<{
+          result: { value: string };
+          exceptionDetails?: { text: string };
+        }>("evaluate", {
+          expression: "document.readyState",
+          returnByValue: true,
+        });
+
+        if (result.result?.value === "complete") {
+          logger.info("Page load complete (document.readyState = complete)");
+          return;
+        }
+
+        // Wait before next poll
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      } catch (error) {
+        // If evaluation fails, the page might be navigating - wait and retry
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      }
+    }
+
+    logger.warn("Page load timeout reached");
+  }
+
+  private async check404Status(
+    adapter: CDPSessionAdapter,
+    metadata: { url: string; title: string },
+    ctx?: LLMContext,
+  ): Promise<{ is404: boolean; reason?: string }> {
     try {
       // Basic heuristic checks first
       const title = metadata.title.toLowerCase();
-      const url = metadata.url.toLowerCase();
-      
+
       // Common 404 indicators in title
       const titleIndicators = [
-        '404', 'not found', 'page not found', 'file not found',
-        'error 404', '404 error', 'page cannot be found',
-        'the page you requested was not found', 'page does not exist'
+        "404",
+        "not found",
+        "page not found",
+        "file not found",
+        "error 404",
+        "404 error",
+        "page cannot be found",
+        "the page you requested was not found",
+        "page does not exist",
       ];
-      
-      const hasTitle404 = titleIndicators.some(indicator => title.includes(indicator));
-      
-      // If obvious 404 indicators, get page content for LLM confirmation
+
+      const hasTitle404 = titleIndicators.some((indicator) =>
+        title.includes(indicator),
+      );
+
+      // If obvious 404 indicators, return true (skip LLM confirmation for adapter context)
       if (hasTitle404) {
-        logger.info('Potential 404 detected in title, getting page content for LLM confirmation');
-        
-        // Get accessibility tree for better semantic analysis
-        const treeResult = await Utils.getAccessibilityTree(target);
-        const pageContent = treeResult.simplified;
-        const is404Confirmed = await this.confirmWith404LLM(metadata.url, metadata.title, pageContent, ctx);
-        
-        if (is404Confirmed) {
-          return { 
-            is404: true, 
-            reason: 'Page content indicates this is a 404 error page' 
-          };
-        }
+        logger.info("404 detected based on page title");
+        return {
+          is404: true,
+          reason: "Page title indicates this is a 404 error page",
+        };
       }
-      
+
       return { is404: false };
     } catch (error: any) {
-      logger.error('Error checking 404 status:', error);
+      logger.error("Error checking 404 status:", error);
       return { is404: false };
     }
   }
 
-  private async confirmWith404LLM(url: string, title: string, content: string, ctx?: LLMContext): Promise<boolean> {
+  private async confirmWith404LLM(
+    url: string,
+    title: string,
+    content: string,
+    ctx?: LLMContext,
+  ): Promise<boolean> {
     try {
-      const agentService = AgentService.getInstance();
-      const apiKey = agentService.getApiKey();
-      
+      // Get API key from context first (for eval runner), fallback to AgentService
+      let apiKey = ctx?.apiKey;
+      if (!apiKey && !isNodeEnvironment) {
+        await ensureToolsBrowserDeps();
+        if (AgentService) {
+          apiKey = AgentService.getInstance().getApiKey() ?? undefined;
+        }
+      }
       if (!apiKey) {
-        logger.warn('No API key available for 404 confirmation');
+        logger.warn("No API key available for 404 confirmation");
         return false;
       }
 
       if (!ctx?.provider || !ctx.nanoModel) {
-        logger.warn('Missing LLM context for 404 confirmation');
+        logger.warn("Missing LLM context for 404 confirmation");
         return false;
       }
       const provider = ctx.provider;
       const model = ctx.nanoModel;
       const llm = LLMClient.getInstance();
-      
+
       const systemPrompt = `You are analyzing web page content to determine if it represents a 404 "Page Not Found" error page.
 Return ONLY "true" if this is definitely a 404 error page, or "false" if it's a legitimate page with content.`;
 
@@ -852,98 +1123,106 @@ Is this a 404 error page? Answer only "true" or "false".`;
       const response = await llm.call({
         provider,
         model,
-        messages: [
-          { role: 'user', content: userPrompt }
-        ],
+        messages: [{ role: "user", content: userPrompt }],
         systemPrompt,
         temperature: 0.1,
       });
 
       const result = response.text?.trim().toLowerCase();
-      return result === 'true';
-      
+      return result === "true";
     } catch (error: any) {
-      logger.error('Error confirming 404 with LLM:', error);
+      logger.error("Error confirming 404 with LLM:", error);
       return false;
     }
   }
 
-
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       url: {
-        type: 'string',
-        description: 'URL to navigate to',
+        type: "string",
+        description: "URL to navigate to",
       },
       reasoning: {
-        type: 'string',
-        description: 'Reasoning for the action. This is a free form text field that will be used to explain the action to the user.'
-      }
+        type: "string",
+        description:
+          "Reasoning for the action. This is a free form text field that will be used to explain the action to the user.",
+      },
     },
-    required: ['url', 'reasoning']
+    required: ["url", "reasoning"],
   };
 }
 
 /**
  * Tool for navigating back in browser history
  */
-export class NavigateBackTool implements Tool<{ steps: number, reasoning: string }, NavigateBackResult | ErrorResult> {
-  name = 'navigate_back';
-  description = 'Navigates back in browser history by a specified number of steps';
+export class NavigateBackTool implements Tool<
+  { steps: number; reasoning: string },
+  NavigateBackResult | ErrorResult
+> {
+  name = "navigate_back";
+  description =
+    "Navigates back in browser history by a specified number of steps";
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       steps: {
-        type: 'number',
-        description: 'Number of pages to go back in browser history',
+        type: "number",
+        description: "Number of pages to go back in browser history",
       },
       reasoning: {
-        type: 'string',
-        description: 'Reasoning for the action. This is a free form text field that will be used to explain the action to the user.'
-      }
+        type: "string",
+        description:
+          "Reasoning for the action. This is a free form text field that will be used to explain the action to the user.",
+      },
     },
-    required: ['steps', 'reasoning'],
+    required: ["steps", "reasoning"],
   };
 
-  async execute(args: { steps: number, reasoning: string }, ctx?: LLMContext): Promise<NavigateBackResult | ErrorResult> {
-    logger.error('navigate_back', args);
+  async execute(
+    args: { steps: number; reasoning: string },
+    ctx?: LLMContext,
+  ): Promise<NavigateBackResult | ErrorResult> {
+    logger.info("navigate_back", args);
     const steps = args.steps;
-    if (typeof steps !== 'number' || steps <= 0) {
-      return { error: 'Steps must be a positive number' };
+    if (typeof steps !== "number" || steps <= 0) {
+      return { error: "Steps must be a positive number" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Use getAdapter pattern - works in both DevTools and eval runner contexts
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
-      // Use JavaScript to navigate back in history
-      const runtimeAgent = target.runtimeAgent();
-      if (!runtimeAgent) {
-        return { error: 'Runtime agent not available' };
-      }
-
       // First, check if we can go back that many steps
-      const historyLengthResult = await runtimeAgent.invoke_evaluate({
-        expression: 'window.history.length',
+      const historyLengthResult = await adapter.runtimeAgent().invoke<{
+        result: { value: number };
+        exceptionDetails?: { text: string };
+      }>("evaluate", {
+        expression: "window.history.length",
         returnByValue: true,
       });
 
       if (historyLengthResult.exceptionDetails) {
-        return { error: `Failed to check history length: ${historyLengthResult.exceptionDetails.text}` };
+        return {
+          error: `Failed to check history length: ${historyLengthResult.exceptionDetails.text}`,
+        };
       }
 
-      const historyLength = historyLengthResult.result.value as number;
+      const historyLength = historyLengthResult.result.value;
       if (historyLength <= steps) {
-        return { error: `Cannot go back ${steps} pages. History only contains ${historyLength} entries.` };
+        return {
+          error: `Cannot go back ${steps} pages. History only contains ${historyLength} entries.`,
+        };
       }
 
       // Execute history.go(-steps) to go back
-      const result = await runtimeAgent.invoke_evaluate({
+      const result = await adapter.runtimeAgent().invoke<{
+        exceptionDetails?: { text: string };
+      }>("evaluate", {
         expression: `window.history.go(-${steps})`,
         returnByValue: true,
       });
@@ -959,51 +1238,64 @@ export class NavigateBackTool implements Tool<{ steps: number, reasoning: string
 
       const signal = ctx?.abortSignal;
       // Poll until navigation completes, cancels, or times out
-      while (!isNavigationComplete && (Date.now() - startTime) < timeoutMs) {
+      while (!isNavigationComplete && Date.now() - startTime < timeoutMs) {
         if (signal?.aborted) {
-          throw new DOMException('The operation was aborted', 'AbortError');
+          throw new DOMException("The operation was aborted", "AbortError");
         }
         // Short delay between checks
         await abortableSleep(100, signal);
 
         // Check if navigation is complete by testing document readyState
         try {
-          const readyStateResult = await runtimeAgent.invoke_evaluate({
-            expression: 'document.readyState',
+          const readyStateResult = await adapter.runtimeAgent().invoke<{
+            result: { value: string };
+            exceptionDetails?: { text: string };
+          }>("evaluate", {
+            expression: "document.readyState",
             returnByValue: true,
           });
 
-          if (readyStateResult && !readyStateResult.exceptionDetails &&
-            readyStateResult.result.value === 'complete') {
+          if (
+            readyStateResult &&
+            !readyStateResult.exceptionDetails &&
+            readyStateResult.result.value === "complete"
+          ) {
             isNavigationComplete = true;
-            // Only use supported console methods
-            logger.error('Navigation completed, document ready state is complete');
+            logger.info(
+              "Navigation completed, document ready state is complete",
+            );
           }
         } catch {
           // If we can't evaluate yet, navigation is still in progress
-          logger.error('Still waiting for navigation to complete...');
+          logger.info("Still waiting for navigation to complete...");
         }
       }
 
       if (!isNavigationComplete) {
-        logger.error('Navigation timed out after waiting for document ready state');
+        logger.warn(
+          "Navigation timed out after waiting for document ready state",
+        );
       }
 
       // Fetch page metadata
-      const metadataEval = await runtimeAgent.invoke_evaluate({
-        expression: '({ url: window.location.href, title: document.title })',
+      const metadataEval = await adapter.runtimeAgent().invoke<{
+        result: { value: { url: string; title: string } };
+      }>("evaluate", {
+        expression: "({ url: window.location.href, title: document.title })",
         returnByValue: true,
       });
-      const metadata = metadataEval.result.value as { url: string, title: string };
+      const metadata = metadataEval.result.value;
 
       return {
         success: true,
         steps,
-        message: `Successfully navigated back ${steps} page${steps > 1 ? 's' : ''}`,
+        message: `Successfully navigated back ${steps} page${steps > 1 ? "s" : ""}`,
         metadata,
       };
     } catch (error: unknown) {
-      return { error: `Failed to navigate back: ${error instanceof Error ? error.message : String(error)}` };
+      return {
+        error: `Failed to navigate back: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
   }
 }
@@ -1011,20 +1303,30 @@ export class NavigateBackTool implements Tool<{ steps: number, reasoning: string
 /**
  * Tool for getting the HTML contents of the current page
  */
-export class GetPageHTMLTool implements Tool<Record<string, unknown>, PageHTMLResult | ErrorResult> {
-  name = 'get_page_html';
-  description = 'Gets the HTML contents and structure of the current page for analysis and summarization with CSS, JavaScript, and other non-essential content removed';
+export class GetPageHTMLTool implements Tool<
+  Record<string, unknown>,
+  PageHTMLResult | ErrorResult
+> {
+  name = "get_page_html";
+  description =
+    "Gets the HTML contents and structure of the current page for analysis and summarization with CSS, JavaScript, and other non-essential content removed";
 
-  async execute(_args: Record<string, unknown>, _ctx?: LLMContext): Promise<PageHTMLResult | ErrorResult> {
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+  async execute(
+    _args: Record<string, unknown>,
+    ctx?: LLMContext,
+  ): Promise<PageHTMLResult | ErrorResult> {
+    // Use getAdapter pattern - works in both DevTools and eval runner contexts
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
       // Use the runtime agent to get the page HTML and additional information
-      const result = await target.runtimeAgent().invoke_evaluate({
+      const result = await adapter.runtimeAgent().invoke<{
+        result: { value: PageHTMLResult };
+        exceptionDetails?: { text?: string };
+      }>("evaluate", {
         expression: `(() => {
           // Function to get simplified text content from HTML
           function getSimplifiedHTML() {
@@ -1105,17 +1407,19 @@ export class GetPageHTMLTool implements Tool<Record<string, unknown>, PageHTMLRe
       });
 
       if (result.exceptionDetails) {
-        return { error: `Failed to get page HTML: ${result.exceptionDetails.text || JSON.stringify(result.exceptionDetails)}` };
+        return {
+          error: `Failed to get page HTML: ${result.exceptionDetails.text || JSON.stringify(result.exceptionDetails)}`,
+        };
       }
 
-      return result.result.value as PageHTMLResult;
+      return result.result.value;
     } catch (error) {
       return { error: `Failed to get page HTML, error: ${error}` };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {},
   };
 }
@@ -1123,26 +1427,33 @@ export class GetPageHTMLTool implements Tool<Record<string, unknown>, PageHTMLRe
 /**
  * Tool for clicking elements on the page
  */
-export class ClickElementTool implements Tool<{ selector: string }, ClickElementResult | ErrorResult> {
-  name = 'click_element';
-  description = 'Clicks on an element identified by a CSS selector';
+export class ClickElementTool implements Tool<
+  { selector: string },
+  ClickElementResult | ErrorResult
+> {
+  name = "click_element";
+  description = "Clicks on an element identified by a CSS selector";
 
-  async execute(args: { selector: string }, _ctx?: LLMContext): Promise<ClickElementResult | ErrorResult> {
-    
+  async execute(
+    args: { selector: string },
+    ctx?: LLMContext,
+  ): Promise<ClickElementResult | ErrorResult> {
     const selector = args.selector;
-    if (typeof selector !== 'string') {
-      return { error: 'Selector must be a string' };
+    if (typeof selector !== "string") {
+      return { error: "Selector must be a string" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Get adapter from context or fall back to SDK.Target
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
       // Execute the click operation in the page context
-      const result = await target.runtimeAgent().invoke_evaluate({
+      const result = await adapter.runtimeAgent().invoke<{
+        result: { value: ClickElementResult | ErrorResult };
+      }>("evaluate", {
         expression: `(() => {
           const element = document.querySelector("${selector}");
           if (!element) {
@@ -1178,47 +1489,55 @@ export class ClickElementTool implements Tool<{ selector: string }, ClickElement
 
       return result.result.value;
     } catch (error) {
-      return { error: `Failed to click element: ${error.message}` };
+      return { error: `Failed to click element: ${(error as Error).message}` };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       selector: {
-        type: 'string',
-        description: 'CSS selector of the element to click',
+        type: "string",
+        description: "CSS selector of the element to click",
       },
     },
-    required: ['selector'],
+    required: ["selector"],
   };
 }
 
 /**
  * Tool for searching content on the page
  */
-export class SearchContentTool implements Tool<{ query: string, limit?: number }, SearchContentResult | ErrorResult> {
-  name = 'search_content';
-  description = 'Searches for text content on the page and returns matching elements';
+export class SearchContentTool implements Tool<
+  { query: string; limit?: number },
+  SearchContentResult | ErrorResult
+> {
+  name = "search_content";
+  description =
+    "Searches for text content on the page and returns matching elements";
 
-  async execute(args: { query: string, limit?: number }, _ctx?: LLMContext): Promise<SearchContentResult | ErrorResult> {
-    
+  async execute(
+    args: { query: string; limit?: number },
+    ctx?: LLMContext,
+  ): Promise<SearchContentResult | ErrorResult> {
     const query = args.query;
     const limit = args.limit || 5;
 
-    if (typeof query !== 'string') {
-      return { error: 'Query must be a string' };
+    if (typeof query !== "string") {
+      return { error: "Query must be a string" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Get adapter from context or fall back to SDK.Target
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
       // Execute the search in the page context
-      const result = await target.runtimeAgent().invoke_evaluate({
+      const result = await adapter.runtimeAgent().invoke<{
+        result: { value: SearchContentResult };
+      }>("evaluate", {
         expression: `(() => {
           const query = "${query}";
           const limit = ${limit};
@@ -1317,70 +1636,90 @@ export class SearchContentTool implements Tool<{ query: string, limit?: number }
 
       return result.result.value;
     } catch (error) {
-      return { error: `Failed to search content: ${error.message}` };
+      return { error: `Failed to search content: ${(error as Error).message}` };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       query: {
-        type: 'string',
-        description: 'Text to search for on the page',
+        type: "string",
+        description: "Text to search for on the page",
       },
       limit: {
-        type: 'number',
-        description: 'Maximum number of matches to return (default: 5)',
+        type: "number",
+        description: "Maximum number of matches to return (default: 5)",
       },
     },
-    required: ['query'],
+    required: ["query"],
   };
 }
 
 /**
  * Tool for scrolling the page
  */
-export class ScrollPageTool implements Tool<{ position?: { x: number, y: number }, direction?: string, amount?: number, pages?: number }, ScrollResult | ErrorResult> {
-  name = 'scroll_page';
-  description = 'Scrolls the page to a specific position, in a direction, or by viewport pages. Use pages parameter for predictable scrolling (e.g., pages: 1 scrolls down one full viewport height, pages: -1 scrolls up).';
+export class ScrollPageTool implements Tool<
+  {
+    position?: { x: number; y: number };
+    direction?: string;
+    amount?: number;
+    pages?: number;
+  },
+  ScrollResult | ErrorResult
+> {
+  name = "scroll_page";
+  description =
+    "Scrolls the page to a specific position, in a direction, or by viewport pages. Use pages parameter for predictable scrolling (e.g., pages: 1 scrolls down one full viewport height, pages: -1 scrolls up).";
 
-  async execute(args: { position?: { x: number, y: number }, direction?: string, amount?: number, pages?: number }, _ctx?: LLMContext): Promise<ScrollResult | ErrorResult> {
+  async execute(
+    args: {
+      position?: { x: number; y: number };
+      direction?: string;
+      amount?: number;
+      pages?: number;
+    },
+    ctx?: LLMContext,
+  ): Promise<ScrollResult | ErrorResult> {
     const position = args.position;
     const pages = args.pages;
     const direction = args.direction;
-    const amount = args.amount || 300;  // Default scroll amount
+    const amount = args.amount || 300; // Default scroll amount
 
     // Priority: position > pages > direction
     if (!position && pages === undefined && !direction) {
-      return { error: 'Either position, pages, or direction must be provided' };
+      return { error: "Either position, pages, or direction must be provided" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Get adapter from context or fall back to SDK.Target
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
       // Execute the scroll operation in the page context
-      const result = await target.runtimeAgent().invoke_evaluate({
+      const result = await adapter.runtimeAgent().invoke<{
+        result: { value: ScrollResult };
+      }>("evaluate", {
         expression: `(() => {
-          ${position ?
-            `// Scroll to specific position
+          ${
+            position
+              ? `// Scroll to specific position
             window.scrollTo({
               left: ${position.x || 0},
               top: ${position.y || 0},
               behavior: 'smooth'
-            });` :
-          pages !== undefined ?
-            `// Scroll by viewport heights
+            });`
+              : pages !== undefined
+                ? `// Scroll by viewport heights
             const viewportHeight = window.innerHeight;
             const scrollAmount = viewportHeight * ${pages};
             window.scrollBy({
               top: scrollAmount,
               behavior: 'smooth'
-            });` :
-            `// Scroll in direction
+            });`
+                : `// Scroll in direction
             const direction = "${direction}";
             const amount = ${amount};
 
@@ -1417,39 +1756,42 @@ export class ScrollPageTool implements Tool<{ position?: { x: number, y: number 
 
       return result.result.value;
     } catch (error) {
-      return { error: `Failed to scroll page: ${error.message}` };
+      return { error: `Failed to scroll page: ${(error as Error).message}` };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       position: {
-        type: 'object',
-        description: 'Specific position to scroll to (x and y coordinates)',
+        type: "object",
+        description: "Specific position to scroll to (x and y coordinates)",
         properties: {
           x: {
-            type: 'number',
-            description: 'X coordinate to scroll to',
+            type: "number",
+            description: "X coordinate to scroll to",
           },
           y: {
-            type: 'number',
-            description: 'Y coordinate to scroll to',
+            type: "number",
+            description: "Y coordinate to scroll to",
           },
         },
       },
       pages: {
-        type: 'number',
-        description: 'Number of viewport heights to scroll. Positive scrolls down, negative scrolls up. Examples: 1 (one page down), 0.5 (half page down), -1 (one page up), 2 (two pages down). This is the recommended way to scroll for content extraction workflows.',
+        type: "number",
+        description:
+          "Number of viewport heights to scroll. Positive scrolls down, negative scrolls up. Examples: 1 (one page down), 0.5 (half page down), -1 (one page up), 2 (two pages down). This is the recommended way to scroll for content extraction workflows.",
       },
       direction: {
-        type: 'string',
-        description: 'Direction to scroll (up, down, left, right, top, bottom). Use pages parameter instead for more predictable scrolling.',
-        enum: ['up', 'down', 'left', 'right', 'top', 'bottom'],
+        type: "string",
+        description:
+          "Direction to scroll (up, down, left, right, top, bottom). Use pages parameter instead for more predictable scrolling.",
+        enum: ["up", "down", "left", "right", "top", "bottom"],
       },
       amount: {
-        type: 'number',
-        description: 'Amount to scroll in pixels when using direction (default: 300). Use pages parameter instead for viewport-relative scrolling.',
+        type: "number",
+        description:
+          "Amount to scroll in pixels when using direction (default: 300). Use pages parameter instead for viewport-relative scrolling.",
       },
     },
   };
@@ -1458,54 +1800,76 @@ export class ScrollPageTool implements Tool<{ position?: { x: number, y: number 
 /**
  * Tool for waiting a specified duration
  */
-export class WaitTool implements Tool<{ seconds?: number, duration?: number, reason?: string, reasoning?: string }, WaitResult | ErrorResult> {
-  name = 'wait_for_page_load';
-  description = 'Waits for a specified number of seconds to allow page content to load, animations to complete, or dynamic content to appear. After waiting, returns a summary of what is currently visible in the viewport to help determine if additional waiting is needed. Provide the number of seconds to wait and an optional reasoning for waiting.';
+export class WaitTool implements Tool<
+  { seconds?: number; duration?: number; reason?: string; reasoning?: string },
+  WaitResult | ErrorResult
+> {
+  name = "wait_for_page_load";
+  description =
+    "Waits for a specified number of seconds to allow page content to load, animations to complete, or dynamic content to appear. After waiting, returns a summary of what is currently visible in the viewport to help determine if additional waiting is needed. Provide the number of seconds to wait and an optional reasoning for waiting.";
 
-  async execute(args: { seconds?: number, duration?: number, reason?: string, reasoning?: string }, ctx?: LLMContext): Promise<WaitResult | ErrorResult> {
+  async execute(
+    args: {
+      seconds?: number;
+      duration?: number;
+      reason?: string;
+      reasoning?: string;
+    },
+    ctx?: LLMContext,
+  ): Promise<WaitResult | ErrorResult> {
     const signal = ctx?.abortSignal;
-    const sleep = (ms: number) => new Promise<void>((resolve, reject) => {
-      if (!ms) return resolve();
-      const timer = setTimeout(() => {
-        cleanup();
-        resolve();
-      }, ms);
-      const onAbort = () => {
-        clearTimeout(timer);
-        cleanup();
-        reject(new DOMException('The operation was aborted', 'AbortError'));
-      };
-      const cleanup = () => {
-        signal?.removeEventListener('abort', onAbort);
-      };
-      if (signal) {
-        if (signal.aborted) {
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        if (!ms) return resolve();
+        const timer = setTimeout(() => {
+          cleanup();
+          resolve();
+        }, ms);
+        const onAbort = () => {
           clearTimeout(timer);
           cleanup();
-          return reject(new DOMException('The operation was aborted', 'AbortError'));
+          reject(new DOMException("The operation was aborted", "AbortError"));
+        };
+        const cleanup = () => {
+          signal?.removeEventListener("abort", onAbort);
+        };
+        if (signal) {
+          if (signal.aborted) {
+            clearTimeout(timer);
+            cleanup();
+            return reject(
+              new DOMException("The operation was aborted", "AbortError"),
+            );
+          }
+          signal.addEventListener("abort", onAbort, { once: true });
         }
-        signal.addEventListener('abort', onAbort, { once: true });
-      }
-    });
+      });
     // Handle both 'seconds' and 'duration' parameter names for flexibility
     const waitTime = args.seconds ?? args.duration;
     const waitReason = args.reason ?? args.reasoning;
-    
+
     // Validate input
-    if (typeof waitTime !== 'number') {
-      return { error: 'Must provide either "seconds" or "duration" parameter as a number' };
+    if (typeof waitTime !== "number") {
+      return {
+        error:
+          'Must provide either "seconds" or "duration" parameter as a number',
+      };
     }
-    
+
     if (waitTime < 0.1) {
-      return { error: 'Wait time must be at least 0.1 seconds' };
+      return { error: "Wait time must be at least 0.1 seconds" };
     }
-    
+
     if (waitTime > 300) {
-      return { error: 'Wait time cannot exceed 300 seconds (5 minutes) for safety' };
+      return {
+        error: "Wait time cannot exceed 300 seconds (5 minutes) for safety",
+      };
     }
 
     // Log the wait reason if provided
-    logger.info(`Waiting for ${waitTime} seconds${waitReason ? `: ${waitReason}` : ''}`);
+    logger.info(
+      `Waiting for ${waitTime} seconds${waitReason ? `: ${waitReason}` : ""}`,
+    );
 
     // Wait for the specified duration (abortable)
     await sleep(waitTime * 1000);
@@ -1513,26 +1877,29 @@ export class WaitTool implements Tool<{ seconds?: number, duration?: number, rea
     // Get viewport summary after waiting
     let viewportSummary: string | undefined;
     try {
-      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-      if (target) {
-        // Get visible accessibility tree
-        const treeResult = await Utils.getVisibleAccessibilityTree(target);
-        
+      // Get adapter from context (works in both DevTools and eval runner)
+      const adapter = await getAdapter(ctx);
+      if (adapter) {
+        // Get visible accessibility tree using universal utils
+        const treeResult = await UtilsUniversal.getAccessibilityTree(adapter);
+
         // Generate summary using LLM if ctx is available
         if (ctx?.provider && ctx.nanoModel) {
           const provider = ctx.provider;
           const model = ctx.nanoModel;
           const llm = LLMClient.getInstance();
-        
-        const reasonContext = waitReason ? `The wait was specifically for: ${waitReason}` : 'No specific reason was provided for the wait.';
-        
-        const systemPrompt = `You are analyzing the visible content of a webpage after a wait period. ${reasonContext}
+
+          const reasonContext = waitReason
+            ? `The wait was specifically for: ${waitReason}`
+            : "No specific reason was provided for the wait.";
+
+          const systemPrompt = `You are analyzing the visible content of a webpage after a wait period. ${reasonContext}
 
 Provide a concise summary of what's currently visible in the viewport, paying special attention to elements related to the wait reason.
 
 Focus on:
 - Main content elements (headings, buttons, forms, text)
-- Loading indicators or spinners  
+- Loading indicators or spinners
 - Error messages or notifications
 - Whether the page appears fully loaded or still loading
 - Any animations or transitions in progress
@@ -1540,13 +1907,13 @@ Focus on:
 
 Keep the summary to 2-3 sentences maximum.`;
 
-        const userPrompt = `Analyze this viewport content and provide a brief summary${waitReason ? `, focusing on elements related to: ${waitReason}` : ''}:
+          const userPrompt = `Analyze this viewport content and provide a brief summary${waitReason ? `, focusing on elements related to: ${waitReason}` : ""}:
 ${treeResult.simplified}`;
 
           const response = await llm.call({
             provider,
             model,
-            messages: [{ role: 'user', content: userPrompt }],
+            messages: [{ role: "user", content: userPrompt }],
             systemPrompt,
             temperature: 0.1,
           });
@@ -1556,40 +1923,42 @@ ${treeResult.simplified}`;
       }
     } catch (error) {
       // Non-critical error - just log and continue
-      logger.warn('Failed to generate viewport summary:', error);
+      logger.warn("Failed to generate viewport summary:", error);
     }
 
     return {
       waited: waitTime,
-      reason: waitReason || 'Waiting for page to settle',
+      reason: waitReason || "Waiting for page to settle",
       completed: true,
-      viewportSummary
+      viewportSummary,
     };
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       seconds: {
-        type: 'number',
-        description: 'Number of seconds to wait (minimum 0.1, maximum 300)',
+        type: "number",
+        description: "Number of seconds to wait (minimum 0.1, maximum 300)",
         minimum: 0.1,
-        maximum: 300
+        maximum: 300,
       },
       duration: {
-        type: 'number',
-        description: 'Alternative to seconds - number of seconds to wait (minimum 0.1, maximum 300)',
+        type: "number",
+        description:
+          "Alternative to seconds - number of seconds to wait (minimum 0.1, maximum 300)",
         minimum: 0.1,
-        maximum: 300
+        maximum: 300,
       },
       reasoning: {
-        type: 'string',
-        description: 'Optional reasoning for waiting (e.g., "for animation to complete", "for content to load")'
+        type: "string",
+        description:
+          'Optional reasoning for waiting (e.g., "for animation to complete", "for content to load")',
       },
       reason: {
-        type: 'string',
-        description: 'Alternative to reasoning - optional reason for waiting'
-      }
+        type: "string",
+        description: "Alternative to reasoning - optional reason for waiting",
+      },
     },
   };
 }
@@ -1597,90 +1966,298 @@ ${treeResult.simplified}`;
 /**
  * Tool for taking screenshots of the page
  */
-export class TakeScreenshotTool implements Tool<{fullPage?: boolean}, ScreenshotResult|ErrorResult> {
-  name = 'take_screenshot';
-  description = 'Takes a screenshot of the current page view or the entire page. The image can be used for analyzing the page layout, content, and visual elements. Always specify whether to capture the full page or just the viewport and the reasoning behind it.';
+export class TakeScreenshotTool implements Tool<
+  { fullPage?: boolean },
+  ScreenshotResult | ErrorResult
+> {
+  name = "take_screenshot";
+  description =
+    "Takes a screenshot of the current page view or the entire page. The image can be used for analyzing the page layout, content, and visual elements. Always specify whether to capture the full page or just the viewport and the reasoning behind it.";
 
-  async execute(args: {fullPage?: boolean}, _ctx?: LLMContext): Promise<ScreenshotResult|ErrorResult> {
+  async execute(
+    args: { fullPage?: boolean },
+    ctx?: LLMContext,
+  ): Promise<ScreenshotResult | ErrorResult> {
     const fullPage = args.fullPage || false;
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return {error: 'No page target available'};
+    // Get adapter from context or fall back to SDK.Target
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
     try {
-      // Use the page agent to capture a screenshot
-      const pageAgent = target.pageAgent();
-      if (!pageAgent) {
-        return {error: 'Page agent not available'};
-      }
-
-      // Take the screenshot
-      const result = await pageAgent.invoke_captureScreenshot({
-        format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
+      // Take the screenshot using page agent
+      const result = await adapter.pageAgent().invoke<{
+        data: string;
+      }>("captureScreenshot", {
+        format: "png",
         captureBeyondViewport: fullPage,
       });
 
-      if (result.getError()) {
-        return {error: `Screenshot failed: ${result.getError()}`};
-      }
+      const imageData = `data:image/png;base64,${result.data}`;
 
-      // Get base64 data from result
-      const data = result.data;
-
-      const imageData = `data:image/png;base64,${data}`;
-      
       return {
-        imageData: imageData
+        imageData: imageData,
       };
     } catch (error) {
-      return {error: `Failed to take screenshot: ${error.message}`};
+      return {
+        error: `Failed to take screenshot: ${(error as Error).message}`,
+      };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       fullPage: {
-        type: 'boolean',
-        description: 'Whether to capture the entire page or just the viewport (default: false)',
+        type: "boolean",
+        description:
+          "Whether to capture the entire page or just the viewport (default: false)",
       },
       reasoning: {
-        type: 'string',
-        description: 'Optional reasoning for taking the screenshot (e.g., "for visual analysis", "to capture layout")'
-      }
+        type: "string",
+        description:
+          'Optional reasoning for taking the screenshot (e.g., "for visual analysis", "to capture layout")',
+      },
     },
   };
 }
 
 /**
- * Tool for getting the accessibility tree including reasoning
+ * Static cache for HybridSnapshot from multi-frame accessibility tree.
+ * Used by perform_action to resolve EncodedId nodeIds to XPaths.
  */
-export class GetAccessibilityTreeTool implements Tool<{ reasoning: string }, AccessibilityTreeResult | ErrorResult> {
-  name = 'get_page_content';
-  description = 'Gets the accessibility tree of the current page, providing a hierarchical structure of all accessible elements.';
+let cachedHybridSnapshot: HybridSnapshot | null = null;
 
-  async execute(args: { reasoning: string }, _ctx?: LLMContext): Promise<AccessibilityTreeResult | ErrorResult> {
+/**
+ * Result type for accessibility tree search
+ */
+export interface SearchMatch {
+  id: string;
+  role: string;
+  name: string;
+  context?: string;
+  score?: number;
+  matchType?: 'role' | 'name' | 'both';
+}
+
+/**
+ * Extended result type for get_page_content with chunking support
+ */
+export interface ChunkedAccessibilityTreeResult extends AccessibilityTreeResult {
+  chunkIndex?: number;
+  totalChunks?: number;
+  truncated?: boolean;
+  focusElementId?: string;
+  matches?: SearchMatch[];
+  totalMatches?: number;
+}
+
+/**
+ * Search accessibility tree for elements matching query (relevance-ranked)
+ * Uses AccessibilityTreeSearcher with weighted scoring for relevance.
+ * @param tree The accessibility tree string
+ * @param query Search query to match against role/name/text
+ * @param maxResults Maximum results (default: 20, max: 100)
+ * @returns Array of matching elements sorted by relevance score
+ */
+function searchAccessibilityTree(tree: string, query: string, maxResults: number = 20): SearchMatch[] {
+  // ScoredSearchMatch is structurally compatible with SearchMatch
+  return searchAccessibilityTreeImpl(tree, query, maxResults);
+}
+
+/**
+ * Extract subtree starting from specific element (element + descendants only)
+ * @param tree The full accessibility tree string
+ * @param focusId The EncodedId of the element to focus on
+ * @returns Subtree string containing only the focused element and its descendants (empty if not found)
+ */
+function extractSubtree(tree: string, focusId: string): string {
+  const lines = tree.split("\n");
+  const result: string[] = [];
+  let capturing = false;
+  let baseIndent = 0;
+
+  for (const line of lines) {
+    if (line.includes(`[${focusId}]`)) {
+      capturing = true;
+      baseIndent = line.search(/\S/);
+      result.push(line);
+    } else if (capturing) {
+      // Skip empty lines - only check non-empty for subtree boundaries
+      if (line.trim() === "") {
+        continue;
+      }
+      const indent = line.search(/\S/);
+      // Continue capturing if deeper indent (child of focused element)
+      if (indent > baseIndent) {
+        result.push(line);
+      } else {
+        // Hit a sibling or ancestor - exited subtree, stop capturing
+        break;
+      }
+    }
+  }
+  return result.join("\n");
+}
+
+/**
+ * Get the cached HybridSnapshot (for use by perform_action).
+ */
+export function getCachedHybridSnapshot(): HybridSnapshot | null {
+  return cachedHybridSnapshot;
+}
+
+/**
+ * Arguments for get_page_content tool
+ */
+interface GetPageContentArgs {
+  reasoning: string;
+  chunkIndex?: number;
+  fullPage?: boolean;
+  focusElementId?: string;
+  searchQuery?: string;
+  maxResults?: number;
+}
+
+/**
+ * Tool for getting the accessibility tree with chunking, search, and focus support.
+ *
+ * Modes:
+ * 1. searchQuery: Search for elements by role/name/text, returns matching IDs only (lightweight)
+ * 2. focusElementId: Get subtree of specific element only
+ * 3. Default: Get viewport-only tree, chunked if > 40k tokens
+ * 4. fullPage: Get full page tree (may be chunked)
+ */
+export class GetAccessibilityTreeTool implements Tool<
+  GetPageContentArgs,
+  ChunkedAccessibilityTreeResult | ErrorResult
+> {
+  name = "get_page_content_v1";
+  description =
+    "Gets the accessibility tree of the current page. By default returns viewport-only content. Use searchQuery to find elements by role/name/text (lightweight). Use focusElementId to get subtree of a specific element. Large trees are automatically chunked (~30k tokens per chunk).";
+
+  private readonly MAX_TOKENS_PER_CHUNK = 30000;
+
+  async execute(
+    args: GetPageContentArgs,
+    ctx?: LLMContext,
+  ): Promise<ChunkedAccessibilityTreeResult | ErrorResult> {
     try {
-      // Log reasoning for this action (addresses unused args warning)
       logger.warn(`Getting accessibility tree: ${args.reasoning}`);
-      // Get the main target
-      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-      if (!target) {
-        return { error: 'No page target available' };
+
+      const adapter = await getAdapter(ctx);
+      if (!adapter) {
+        return { error: "No browser connection available" };
       }
 
-      // Get the accessibility tree using the utility function
-      const treeResult = await Utils.getAccessibilityTree(target);
+      // MODE 1: Search - lightweight element finding with relevance ranking
+      if (args.searchQuery) {
+        // Use cached snapshot if available, otherwise capture new one
+        const snapshot =
+          cachedHybridSnapshot ||
+          (await captureHybridSnapshotUniversal(adapter));
+        cachedHybridSnapshot = snapshot;
+
+        // Use configurable maxResults (default 20, max 100)
+        const maxResults = Math.min(Math.max(args.maxResults || 20, 1), 100);
+        const matches = searchAccessibilityTree(
+          snapshot.combinedTree,
+          args.searchQuery,
+          maxResults,
+        );
+        return {
+          simplified: `Found ${matches.length} elements matching "${args.searchQuery}" (ranked by relevance)`,
+          matches,
+          totalMatches: matches.length,
+        };
+      }
+
+      // MODE 2: Focus on specific element subtree
+      if (args.focusElementId) {
+        // Use cached snapshot if available, otherwise capture new one
+        const snapshot =
+          cachedHybridSnapshot ||
+          (await captureHybridSnapshotUniversal(adapter));
+        cachedHybridSnapshot = snapshot;
+
+        const subtree = extractSubtree(
+          snapshot.combinedTree,
+          args.focusElementId,
+        );
+        if (!subtree || subtree.trim() === "") {
+          return {
+            error: `Element with ID ${args.focusElementId} not found in accessibility tree`,
+          };
+        }
+        return {
+          simplified: subtree,
+          focusElementId: args.focusElementId,
+          idToUrl: snapshot.combinedUrlMap,
+        };
+      }
+
+      // MODE 3: Full/viewport tree with automatic chunking
+      let snapshot: HybridSnapshot;
+      if (args.fullPage) {
+        // Full page tree
+        snapshot = await captureHybridSnapshotUniversal(adapter);
+      } else {
+        // Viewport-only tree (default)
+        const treeResult = await UtilsUniversal.getAccessibilityTree(adapter);
+        // Create a minimal HybridSnapshot-compatible structure for viewport tree
+        snapshot = {
+          combinedTree: treeResult.simplified,
+          combinedXpathMap: treeResult.xpathMap
+            ? Object.fromEntries(
+                Object.entries(treeResult.xpathMap).map(([k, v]) => [
+                  `0-${k}`,
+                  v,
+                ]),
+              )
+            : {},
+          combinedUrlMap: {},
+          perFrame: [],
+        };
+        // Note: cachedHybridSnapshot is populated lazily when perform_action needs it
+      }
+
+      // Cache the snapshot for perform_action to use
+      if (args.fullPage) {
+        cachedHybridSnapshot = snapshot;
+      }
+
+      const tree = snapshot.combinedTree;
+      const tokenEstimate = ContentChunker.estimateTokenCount(tree);
+
+      // Chunk if exceeds token limit
+      if (tokenEstimate > this.MAX_TOKENS_PER_CHUNK) {
+        const chunker = new ContentChunker();
+        const chunks = chunker.chunk(tree, {
+          strategy: "accessibility-tree",
+          maxTokensPerChunk: this.MAX_TOKENS_PER_CHUNK,
+        });
+
+        const chunkIndex = args.chunkIndex || 0;
+        if (chunkIndex >= chunks.length) {
+          return {
+            error: `Chunk index ${chunkIndex} out of range. Total chunks: ${chunks.length}`,
+          };
+        }
+
+        return {
+          simplified: chunks[chunkIndex].content,
+          chunkIndex,
+          totalChunks: chunks.length,
+          truncated: true,
+          idToUrl: snapshot.combinedUrlMap,
+        };
+      }
 
       return {
-        simplified: treeResult.simplified,
-        // iframes: treeResult.iframes,
-        idToUrl: treeResult.idToUrl,
-        // xpathMap: treeResult.xpathMap,
-        // tagNameMap: treeResult.tagNameMap,
+        simplified: tree,
+        idToUrl: snapshot.combinedUrlMap,
       };
     } catch (error) {
       return { error: `Failed to get accessibility tree: ${String(error)}` };
@@ -1688,990 +2265,382 @@ export class GetAccessibilityTreeTool implements Tool<{ reasoning: string }, Acc
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       reasoning: {
-        type: 'string',
-        description: 'The reasoning behind why the accessibility tree is needed',
+        type: "string",
+        description:
+          "The reasoning behind why the accessibility tree is needed",
+      },
+      searchQuery: {
+        type: "string",
+        description:
+          "Search for elements by role, name, or text content. Returns matching elements ranked by relevance (lightweight). Use this to find specific elements without loading the full tree.",
+      },
+      maxResults: {
+        type: "number",
+        description:
+          "Maximum number of search results to return (default: 20, max: 100). Only applies when searchQuery is used. Higher values may include less relevant matches.",
+        minimum: 1,
+        maximum: 100,
+      },
+      focusElementId: {
+        type: "string",
+        description:
+          'EncodedId (e.g., "0-123") of an element to focus on. Returns only that element and its descendants.',
+      },
+      chunkIndex: {
+        type: "number",
+        description:
+          "Which chunk to retrieve (0-indexed). Only needed when the tree was truncated. Default: 0",
+      },
+      fullPage: {
+        type: "boolean",
+        description:
+          "Get the full page tree instead of viewport-only. May result in larger output. Default: false",
       },
     },
-    required: ['reasoning'],
+    required: ["reasoning"],
   };
 }
 
 /**
  * Tool for getting the visible accessibility tree (only elements in the viewport)
  */
-export class GetVisibleAccessibilityTreeTool implements Tool<{ reasoning: string }, AccessibilityTreeResult | ErrorResult> {
-  name = 'get_visible_content';
-  description = 'Gets the accessibility tree of only the visible content in the viewport, providing a focused view of what the user can currently see.';
+export class GetVisibleAccessibilityTreeTool implements Tool<
+  { reasoning: string },
+  AccessibilityTreeResult | ErrorResult
+> {
+  name = "get_visible_content";
+  description =
+    "Gets the accessibility tree of only the visible content in the viewport, providing a focused view of what the user can currently see.";
 
-  async execute(args: { reasoning: string }, _ctx?: LLMContext): Promise<AccessibilityTreeResult | ErrorResult> {
+  async execute(
+    args: { reasoning: string },
+    ctx?: LLMContext,
+  ): Promise<AccessibilityTreeResult | ErrorResult> {
     try {
       // Log reasoning for this action
       logger.warn(`Getting visible accessibility tree: ${args.reasoning}`);
-      // Get the main target
-      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-      if (!target) {
-        return { error: 'No page target available' };
+
+      // Get adapter from context (works in both DevTools and eval runner)
+      const adapter = await getAdapter(ctx);
+      if (!adapter) {
+        return { error: "No browser connection available" };
       }
 
-      try {
-        // Get only the visible accessibility tree using the utility function
-        const treeResult = await Utils.getVisibleAccessibilityTree(target);
-
-        // Convert the enhanced iframes to the expected format
-        const enhancedIframes = treeResult.iframes.map(iframe => ({
-          role: iframe.role,
-          nodeId: iframe.nodeId,
-          contentTree: iframe.contentTree,
-          contentSimplified: iframe.contentSimplified
-        }));
-
-        return {
-          simplified: treeResult.simplified,
-          iframes: enhancedIframes,
-        };
-      } catch (visibleTreeError) {
-        // Handle specific errors from the visible tree function
-        return {
-          error: `Unable to get visible content: ${String(visibleTreeError)}`
-        };
-      }
+      // Use universal utils with adapter
+      const treeResult = await UtilsUniversal.getAccessibilityTree(adapter);
+      return {
+        simplified: treeResult.simplified,
+        iframes: [],
+      };
     } catch (error) {
-      return { error: `Failed to process visible accessibility tree request: ${String(error)}` };
+      return {
+        error: `Failed to get visible accessibility tree: ${String(error)}`,
+      };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       reasoning: {
-        type: 'string',
-        description: 'The reasoning behind why the visible accessibility tree is needed',
+        type: "string",
+        description:
+          "The reasoning behind why the visible accessibility tree is needed",
       },
     },
-    required: ['reasoning'],
+    required: ["reasoning"],
   };
 }
 
 /**
  * Tool for performing actions on DOM elements
  */
-export class PerformActionTool implements Tool<{ method: string, nodeId: number | string, reasoning: string, args?: Record<string, unknown> | unknown[] }, PerformActionResult | ErrorResult> {
-  name = 'perform_action';
-  description = 'Performs an action on a DOM element identified by NodeID';
+export class PerformActionTool implements Tool<
+  {
+    method: string;
+    nodeId: string;
+    reasoning: string;
+    args?: Record<string, unknown> | unknown[];
+  },
+  PerformActionResult | ErrorResult
+> {
+  name = "perform_action";
+  description = "Performs an action on a DOM element identified by NodeID";
 
-  async execute(args: { method: string, nodeId: number | string, reasoning: string, args?: Record<string, unknown> | unknown[] }, ctx?: LLMContext): Promise<PerformActionResult | ErrorResult> {
-    logger.info('Executing with args:', JSON.stringify(args));
+  async execute(
+    args: {
+      method: string;
+      nodeId: string;
+      reasoning: string;
+      args?: Record<string, unknown> | unknown[];
+    },
+    ctx?: LLMContext,
+  ): Promise<PerformActionResult | ErrorResult> {
+    logger.info("Executing with args:", JSON.stringify(args));
     const method = args.method;
     const nodeId = args.nodeId;
-    const reasoning = args.reasoning;
+
+    if (typeof method !== "string") {
+      logger.info("Error: Method must be a string");
+      return { error: "Method must be a string" };
+    }
+
+    if (typeof nodeId !== "string") {
+      logger.info("Error: NodeID must be a string (EncodedId format)");
+      return {
+        error: 'NodeID must be a string in EncodedId format (e.g., "0-123")',
+      };
+    }
+
+    // Get adapter (works in both DevTools and eval runner)
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
+    }
+
+    return await this.executeWithAdapter(adapter, args);
+  }
+
+  /**
+   * Execute action using CDP adapter (for eval runner / Node.js context)
+   */
+  private async executeWithAdapter(
+    adapter: import("../cdp/CDPSessionAdapter.js").CDPSessionAdapter,
+    args: {
+      method: string;
+      nodeId: string;
+      reasoning: string;
+      args?: Record<string, unknown> | unknown[];
+    },
+  ): Promise<PerformActionResult | ErrorResult> {
+    const { method, nodeId, reasoning } = args;
     let actionArgsArray: unknown[] = [];
 
-    if (typeof method !== 'string') {
-      logger.info('Error: Method must be a string');
-      return { error: 'Method must be a string' };
-    }
+    logger.info(
+      `PerformActionTool.executeWithAdapter: ${method} on ${nodeId} - ${reasoning}`,
+    );
 
-    if (typeof nodeId !== 'number' && typeof nodeId !== 'string') {
-      logger.info('Error: NodeID must be a number or string');
-      return { error: 'NodeID must be a number or string' };
-    }
-
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      logger.info('Error: No primary page target found');
-      return { error: 'No page target available' };
-    }
-
-    // Declare variables needed across different branches
-    let initialUrl: string | undefined;
-    let isLikelyNavigationElement = false;
-    let xpath: string = '';
-    let isContentEditableElement = false;
-
-    // Process arguments
+    // Process args (same as existing code)
     if (args.args) {
       if (Array.isArray(args.args)) {
         actionArgsArray = args.args;
+      } else if (method === "fill" || method === "type") {
+        actionArgsArray = [(args.args as { text: string }).text];
+      } else if (method === "selectOption") {
+        actionArgsArray = [(args.args as { text: string }).text];
+      } else if (method === "setChecked") {
+        actionArgsArray = [(args.args as { checked: boolean }).checked];
+      } else if (method === "setValue") {
+        actionArgsArray = [(args.args as { value: number }).value];
+      } else if (method === "drag") {
+        actionArgsArray = [args.args];
       } else {
         actionArgsArray = [args.args];
       }
-      logger.info('Processed action args:', JSON.stringify(actionArgsArray));
     }
 
-    let iframeNodeId: string | undefined;
-    let elementNodeId: string | undefined;
-    let treeResult: any = null; // Cache the tree result to avoid multiple calls
-    
+    // Validate EncodedId format (e.g., "0-123" for main frame, "1-456" for iframe)
+    if (!isEncodedId(nodeId)) {
+      return {
+        error: `Invalid nodeId format: "${nodeId}". Use EncodedId format (e.g., "0-123" for main frame, "1-456" for iframe) from the accessibility tree.`,
+      };
+    }
+
+    const parsed = parseEncodedId(nodeId);
+    if (!parsed) {
+      return { error: `Invalid EncodedId format: ${nodeId}` };
+    }
+
+    logger.info(
+      `Executing action on EncodedId ${nodeId}: frame=${parsed.frameOrdinal}, backendNodeId=${parsed.backendNodeId}`,
+    );
+
     try {
-      // Check if nodeId is from an iframe (has prefix)
-      const isIframeNodeId = typeof nodeId === 'string' && nodeId.startsWith('iframe_');
-      
-      if (isIframeNodeId) {
-        // Handle iframe nodeId - extract iframe nodeId and element nodeId
-        const match = (nodeId as string).match(/^iframe_(\d+)_(.+)$/);
-        if (!match) {
-          logger.info('Error: Invalid iframe nodeId format:', nodeId);
-          return { error: `Invalid iframe nodeId format: ${nodeId}` };
-        }
-        
-        iframeNodeId = match[1];
-        elementNodeId = match[2];
-        logger.info(`Iframe action detected - iframeNodeId: ${iframeNodeId}, elementNodeId: ${elementNodeId}`);
-        
-        // For iframe elements, we don't need xpath - we'll use the nodeId directly
-        // The performAction function will handle finding the element within the iframe
-        xpath = elementNodeId; // Pass the element nodeId as xpath placeholder
-      } else {
-        // Handle regular nodeId
-        logger.info('Getting XPath for nodeId:', nodeId);
-        
-        // Get the accessibility tree once for potential reuse
-        treeResult = await Utils.getAccessibilityTree(target);
-        if (treeResult.xpathMap && treeResult.xpathMap[nodeId as number]) {
-          xpath = treeResult.xpathMap[nodeId as number];
-          logger.info('Found XPath from xpathMap:', xpath);
-        } else {
-          // Fallback to CDP call
-          xpath = await Utils.getXPathByBackendNodeId(target, nodeId as Protocol.DOM.BackendNodeId);
-          if (!xpath || xpath === '') {
-            logger.info('Error: Could not determine XPath for NodeID:', nodeId);
-            return { error: `Could not determine XPath for NodeID: ${nodeId}` };
-          }
-          logger.info('Found XPath via CDP fallback:', xpath);
-        }
-      }
-
-      // Pre-action checks
-      if (method === 'fill' || method === 'type') {
-        logger.info('Performing fill/type pre-action checks');
-        if (typeof args.args !== 'object' || args.args === null || Array.isArray(args.args) || typeof (args.args as Record<string, unknown>).text !== 'string') {
-          logger.info('Error: Missing or invalid args for fill/type action');
-          return { error: `Missing or invalid args for action '${method}' on NodeID ${nodeId}. Expected an object with a string property 'text'. Example: { "text": "your value" }` };
-        }
-        const textValue = (args.args as { text: string }).text;
-        actionArgsArray = [textValue]; // Prepare array for utility function
-        logger.info('Text value for fill/type:', textValue);
-
-        // Get tree result again for the tagNameMap (only if not iframe)
-        let elementTagName: string | undefined;
-        if (!iframeNodeId) {
-          const treeResult = await Utils.getAccessibilityTree(target);
-          if (treeResult.tagNameMap && treeResult.tagNameMap[nodeId as number]) {
-            elementTagName = treeResult.tagNameMap[nodeId as number];
-            logger.info('Found element tagName from tagNameMap:', elementTagName);
-          }
-        }
-
-        const suitabilityResult = await target.runtimeAgent().invoke_evaluate({
-          expression: `(() => {
-              const xpath = ${JSON.stringify(xpath)}; // Use JSON.stringify for safe injection
-              const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-              if (!element || !(element instanceof Element)) return { suitable: false, reason: 'Element not found or not an Element type' };
-              const tagName = element.tagName.toLowerCase();
-              const isInput = tagName === 'input';
-              const isTextArea = tagName === 'textarea';
-              // Removed 'as HTMLElement'
-              const isContentEditable = element.isContentEditable;
-
-              // Specific check for input types that accept text
-              let isSuitableInputType = true;
-              let inputElementType = '';
-              if (isInput) {
-                  // Removed 'as HTMLInputElement', added safe check for element.type
-                  inputElementType = typeof element.type === 'string' ? element.type.toLowerCase() : '';
-                  isSuitableInputType = !['button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file', 'hidden', 'color', 'range'].includes(inputElementType);
-              }
-
-              const suitable = (isInput && isSuitableInputType) || isTextArea || isContentEditable;
-              let reason = '';
-              if (!suitable) {
-                  if (isInput && !isSuitableInputType) reason = 'Input element type \\'' + inputElementType + '\\' cannot be filled or typed into';
-                  else if (!isInput && !isTextArea && !isContentEditable) reason = 'Element tagName \\'' + tagName + '\\' is not suitable for text input';
-                  else if (!isContentEditable) reason = 'Element is not content-editable';
-                  else reason = 'Element not suitable for text input'; // Fallback
-              }
-              return { suitable, reason };
-            })()`,
-          returnByValue: true,
-        });
-
-        // Handle suitability check errors
-        if (suitabilityResult.exceptionDetails) {
-          // Log detailed error for debugging
-          const errorDetailsText = suitabilityResult.exceptionDetails.text ||
-            (suitabilityResult.exceptionDetails.exception ? suitabilityResult.exceptionDetails.exception.description : 'Unknown evaluation error');
-          logger.info('Error checking element suitability:', errorDetailsText);
-          return { error: `Failed to check element suitability for '${method}' on NodeID ${nodeId}: ${errorDetailsText}. XPath used: ${xpath}` }; // Include xpath
-        }
-        if (!suitabilityResult.result?.value?.suitable) {
-          const reason = suitabilityResult.result?.value?.reason || 'Element not suitable for text input';
-          logger.info('Element not suitable for text input:', reason);
-          return { error: `Cannot perform '${method}' on NodeID ${nodeId}: ${reason}. Final XPath used: ${xpath}. Please try a different NodeID.` }; // Include xpath
-        }
-        logger.info('Element suitable for text input');
-
-        // Assign based on suitability check result
-        isContentEditableElement = suitabilityResult.result?.value?.reason === 'Content-editable element is suitable';
-
-      } else if (method === 'selectOption') {
-        logger.info('Performing selectOption pre-action checks');
-        if (typeof args.args !== 'object' || args.args === null || Array.isArray(args.args) || typeof (args.args as Record<string, unknown>).text !== 'string') {
-          logger.info('Error: Missing or invalid args for selectOption action');
-          return { error: `Missing or invalid args for action '${method}' on NodeID ${nodeId}. Expected an object with a string property 'text'. Example: { "text": "option_value" }` };
-        }
-        const optionValue = (args.args as { text: string }).text;
-        actionArgsArray = [optionValue]; // Prepare array for utility function
-        logger.info('Option value for selectOption:', optionValue);
-      } else if (method === 'setChecked') {
-        logger.info('Performing setChecked pre-action checks');
-        if (typeof args.args !== 'object' || args.args === null || Array.isArray(args.args) || typeof (args.args as Record<string, unknown>).checked !== 'boolean') {
-          logger.info('Error: Missing or invalid args for setChecked action');
-          return { error: `Missing or invalid args for action '${method}' on NodeID ${nodeId}. Expected an object with a boolean property 'checked'. Example: { "checked": true }` };
-        }
-        const checkedValue = (args.args as { checked: boolean }).checked;
-        actionArgsArray = [checkedValue]; // Prepare array for utility function
-        logger.info('Checked value for setChecked:', checkedValue);
-      } else if (method === 'click') {
-        logger.info('Performing click pre-action checks');
-        const detailsResult = await target.runtimeAgent().invoke_evaluate({
-          expression: `(() => {
-            // Ensure XPath is properly escaped for use in a string literal
-            const escapedXPath = "${xpath.replace(/\"/g, '\\"')}";
-            const element = document.evaluate(escapedXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-            if (!element || !(element instanceof Element)) return { url: window.location.href, isLinkOrButton: false, tagName: null };
-            const tagName = element.tagName.toLowerCase();
-            const isLink = tagName === 'a' && element.hasAttribute('href');
-            // Check common button types and roles
-            const isButton = tagName === 'button' ||
-                             (tagName === 'input' && ['button', 'submit', 'reset'].includes(element.getAttribute('type') || '')) ||
-                             element.getAttribute('role') === 'button';
-            return {
-              url: window.location.href,
-              isLinkOrButton: isLink || isButton,
-              tagName: tagName
-            };
-          })()`,
-          returnByValue: true,
-        });
-
-        if (detailsResult.exceptionDetails) {
-          logger.info('Could not get element details before click:', detailsResult.exceptionDetails.text);
-          // Fallback: try getting just the URL
-          const urlOnlyResult = await target.runtimeAgent().invoke_evaluate({ expression: 'window.location.href', returnByValue: true });
-          initialUrl = urlOnlyResult.result?.value;
-        } else if (detailsResult.result?.value) {
-          initialUrl = detailsResult.result.value.url;
-          isLikelyNavigationElement = detailsResult.result.value.isLinkOrButton;
-          logger.info('Click element details', {
-            tagName: detailsResult.result.value.tagName,
-            isLinkOrButton: isLikelyNavigationElement,
-            initialUrl
-          });
-        }
-      }
-      // Handle args for other methods if needed
-      else if (Array.isArray(args.args)) {
-        actionArgsArray = args.args;
-      }
-
-      // --- Capture tree state before action ---
-      let treeBeforeAction = '';
-      let treeAfterAction = '';
-      let treeDiff: { hasChanges: boolean; added: string[]; removed: string[]; modified: string[]; summary: string; } | null = null;
-
-      try {
-        const beforeTreeResult = await Utils.getAccessibilityTree(target);
-        treeBeforeAction = beforeTreeResult.simplified;
-        logger.debug('Captured accessibility tree before action');
-      } catch (error) {
-        logger.warn('Failed to capture tree before action:', error);
-      }
-
-      // --- Capture screenshot before action ---
-      let beforeScreenshotData: string | undefined;
-      try {
-        const beforeScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
-          format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
-          captureBeyondViewport: false
-        });
-        beforeScreenshotData = beforeScreenshotResult.data;
-        logger.info('Captured before screenshot');
-      } catch (error) {
-        logger.warn('Failed to capture before screenshot:', error);
-      }
-
-      // --- Perform Action (Do this BEFORE verification) ---
-      logger.info(`Executing Utils.performAction('${method}', args: ${JSON.stringify(actionArgsArray)}, xpath: '${xpath}', iframeNodeId: '${iframeNodeId || 'none'}')`);
-      await Utils.performAction(target, method, actionArgsArray, xpath, iframeNodeId);
-
-      // --- Wait for DOM to stabilize after action ---
-      await this.waitForDOMStability(target, method, isLikelyNavigationElement, (ctx as LLMContext | undefined)?.abortSignal);
-
-      // --- Capture tree state after action and generate diff ---
-      try {
-        if (treeBeforeAction) {
-          const afterTreeResult = await Utils.getAccessibilityTree(target);
-          treeAfterAction = afterTreeResult.simplified;
-          
-          // Generate tree diff
-          treeDiff = this.getTreeDiff(treeBeforeAction, treeAfterAction);
-          
-          logger.info(`Tree diff after ${method}:`, treeDiff.summary);
-          if (treeDiff.hasChanges) {
-            logger.debug('Tree changes:', {
-              added: treeDiff.added.slice(0, 3),
-              removed: treeDiff.removed.slice(0, 3),
-              modified: treeDiff.modified.slice(0, 3)
-            });
-          } else {
-            logger.warn(`No tree changes detected after ${method} - action may have failed or had no visible effect`);
-          }
-        }
-      } catch (error) {
-        logger.warn('Failed to capture tree after action:', error);
-      }
-
-      // --- Post-action verification ONLY for fill/type ---
-      let verificationMessage = '';
-      if (method === 'fill' || method === 'type') {
-        logger.info('Performing post-action verification for fill/type');
-        const expectedValue = (args.args as { text: string }).text;
-        try {
-          const verifyResult = await target.runtimeAgent().invoke_evaluate({
-            expression: `(() => {
-              const xpath = "${xpath.replace(/\"/g, '\\"')}";
-              const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-              if (!element) return { error: 'Element not found during verification' };
-
-              // Get the actual value from the element
-              let currentValue;
-              if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-                currentValue = element.value;
-              } else if (element instanceof HTMLElement && element.isContentEditable) {
-                currentValue = element.textContent;
-              } else {
-                return { error: 'Element type not verifiable (not input, textarea, or contenteditable)' };
-              }
-              return { value: currentValue };
-            })()`,
-            returnByValue: true,
-          });
-
-          if (verifyResult.exceptionDetails) {
-            verificationMessage = ` (${method} verification failed: ${verifyResult.exceptionDetails.text})`;
-            logger.info('Verification failed:', verifyResult.exceptionDetails.text);
-          } else if (verifyResult.result?.value?.error) {
-            verificationMessage = ` (${method} verification failed: ${verifyResult.result.value.error})`;
-            logger.info('Verification failed:', verifyResult.result.value.error);
-          } else {
-            const actualValue = verifyResult.result?.value?.value;
-            const comparisonValue = isContentEditableElement ? actualValue?.trim() : actualValue;
-            if (comparisonValue !== expectedValue) {
-              verificationMessage = ` (${method} verification failed: Expected value "${expectedValue}" but got "${actualValue}")`;
-              logger.info(`Verification mismatch: Expected "${expectedValue}", Got "${actualValue}"`);
-            } else {
-              verificationMessage = ` (${method} action verified successfully)`;
-              logger.info('Verification successful');
-            }
-          }
-        } catch (verifyError) {
-          verificationMessage = ` (${method} verification encountered an error: ${verifyError instanceof Error ? verifyError.message : String(verifyError)})`;
-          logger.info('Verification error:', verifyError);
-        }
-      }
-
-      let navigationDetected = false;
-      let finalUrl = initialUrl; // Assume no navigation initially
-
-      // Check for navigation after 'click' on relevant elements
-      if (method === 'click' && isLikelyNavigationElement && initialUrl !== undefined) {
-        logger.info('Checking for navigation after click');
-        // Wait briefly for potential navigation (abortable)
-        await abortableSleep(1000, ctx?.abortSignal);
-
-        const urlResult = await target.runtimeAgent().invoke_evaluate({
-          expression: 'window.location.href',
-          returnByValue: true,
-        });
-
-        if (!urlResult.exceptionDetails && urlResult.result?.value !== undefined) {
-          finalUrl = urlResult.result.value;
-          navigationDetected = initialUrl !== finalUrl;
-          logger.info('Navigation check', {
-            initialUrl,
-            finalUrl,
-            navigationDetected
-          });
-        } else {
-          logger.info('Could not get URL after click:', urlResult.exceptionDetails?.text);
-        }
-      }
-
-      // Construct the result message, including verification status
-      let message = `Successfully performed '${method}' action on element with NodeID: ${nodeId}${verificationMessage}`;
-      if (method === 'click') {
-        if (isLikelyNavigationElement) {
-          message += navigationDetected ? ` (Navigation detected to: ${finalUrl})` : ' (No navigation detected)';
-        } else if (initialUrl !== undefined) {
-          // It was a click, but not on a typical navigation element
-          message += ' (Element not typically navigatable)';
-        }
-      }
-
-      // Visual verification using before/after screenshots and LLM
-      let visualCheck: string | undefined;
-      
-      // Check if current model supports vision via provided context
-      const currentModel = (ctx as any)?.model;
-      const isVisionCapable = (ctx as any)?.getVisionCapability ? await (ctx as any).getVisionCapability(currentModel) : false;
-      
-      if (!isVisionCapable) {
-        logger.info(`Model ${currentModel} does not support vision - using DOM-based verification`);
-        
-        // DOM-based verification for non-vision models
-        try {
-          // Get current (after action) content
-          let afterContent = '';
-          try {
-            const afterTreeResult = await Utils.getAccessibilityTree(target);
-            afterContent = afterTreeResult.simplified;
-          } catch (error) {
-            logger.warn('Failed to get after content for DOM verification:', error);
-            afterContent = 'Unable to retrieve page content';
-          }
-          
-          // Use LLM to analyze DOM changes
-          const llmClient = LLMClient.getInstance();
-          if (!(ctx as any)?.provider || !((ctx as any)?.nanoModel || (ctx as any)?.model)) {
-            visualCheck = 'Skipping DOM verification (missing LLM context)';
-          } else {
-            const provider = (ctx as any).provider;
-            const model = (ctx as any).nanoModel || (ctx as any).model;
-          const response = await llmClient.call({
-            provider,
-            model,
-            systemPrompt: 'You are a DOM verification assistant. Analyze page content and tree diff data to determine if actions succeeded.',
-            messages: [
-              {
-                role: 'user',
-                content: `Analyze the page content to determine if this ${method} action succeeded.
-
-ACTION DETAILS:
-- Method: ${method}
-- Target Element XPath: ${xpath}
-- Node ID: ${nodeId}
-- Arguments: ${JSON.stringify(actionArgsArray)}
-- Reasoning: ${reasoning}
-${verificationMessage ? `- Verification status: ${verificationMessage}` : ''}
-
-OBJECTIVE PAGE CHANGE EVIDENCE:
-${treeDiff ? `- Tree Changes Detected: ${treeDiff.hasChanges ? 'YES' : 'NO'}
-- Change Summary: ${treeDiff.summary}
-- Added Elements: ${treeDiff.added.length} (first few: ${JSON.stringify(treeDiff.added.slice(0, 25))})
-- Removed Elements: ${treeDiff.removed.length} (first few: ${JSON.stringify(treeDiff.removed.slice(0, 25))})
-- Modified Elements: ${treeDiff.modified.length} (first few: ${JSON.stringify(treeDiff.modified.slice(0, 25))})` : 'Tree diff not available'}
-
-CURRENT PAGE CONTENT (after action):
-${afterContent}
-
-IMPORTANT VERIFICATION RULES:
-1. If Tree Changes Detected = YES with significant modifications (e.g., 100+ modified elements, root node changed), the action was SUCCESSFUL
-2. Trust the objective pageChange data over subjective DOM analysis
-3. For navigation actions: Changed root node IDs indicate successful page navigation
-4. For click actions: Many DOM modifications suggest the action triggered UI changes
-
-Based on the objective evidence and page content, please describe:
-- What changes occurred according to the tree diff
-- Whether the OBJECTIVE evidence shows the action succeeded
-- Any error messages or unexpected behavior in the page content
-- Your assessment based primarily on the tree change metrics
-
-Provide a clear, concise response that prioritizes objective metrics.`
-              }
-            ],
-            temperature: 0
-          });
-          
-            visualCheck = response.text || 'No DOM verification response';
-          }
-          logger.info('DOM-based verification result:', visualCheck);
-        } catch (error) {
-          logger.warn('DOM-based verification failed:', error);
-          visualCheck = 'Unable to perform DOM-based verification';
-        }
-      } else {
-        try {
-          // Add some delay to allow UI to refresh (abortable)
-          await abortableSleep(300, (ctx as LLMContext | undefined)?.abortSignal);
-          
-          // Take after screenshot
-          const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
-          format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
-          captureBeyondViewport: false
-        });
-
-        if (afterScreenshotResult.data && beforeScreenshotData) {
-          // Get current page content for context
-          let currentPageContent = '';
-          try {
-            const currentTreeResult = await Utils.getAccessibilityTree(target);
-            currentPageContent = currentTreeResult.simplified;
-          } catch (error) {
-            logger.warn('Failed to get current page content for visual verification:', error);
-            currentPageContent = 'Page content unavailable';
-          }
-
-          // Ask LLM to verify using nano model for efficiency
-          const llmClient = LLMClient.getInstance();
-          if (!(ctx as any)?.provider || !((ctx as any)?.nanoModel || (ctx as any)?.model)) {
-            visualCheck = 'Skipping visual verification (missing LLM context)';
-          } else {
-            const provider = (ctx as any).provider;
-            const model = (ctx as any).nanoModel || (ctx as any).model;
-          const response = await llmClient.call({
-            provider,
-            model,
-            systemPrompt: 'You are a visual verification assistant. Compare before/after screenshots and tree diff data to determine if actions succeeded. Always prioritize objective tree change metrics over subjective visual analysis.',
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'text',
-                    text: `Analyze the before and after screenshots to determine if this ${method} action succeeded and describe what you observe.
-
-ACTION DETAILS:
-- Method: ${method}
-- Target Element XPath: ${xpath}
-- Node ID: ${nodeId}
-- Arguments: ${JSON.stringify(actionArgsArray)}
-- Reasoning: ${reasoning}
-
-OBJECTIVE PAGE CHANGE EVIDENCE:
-${treeDiff ? `- Tree Changes Detected: ${treeDiff.hasChanges ? 'YES' : 'NO'}
-- Change Summary: ${treeDiff.summary}
-- Added Elements: ${treeDiff.added.length} (first few: ${JSON.stringify(treeDiff.added.slice(0, 3))})
-- Removed Elements: ${treeDiff.removed.length} (first few: ${JSON.stringify(treeDiff.removed.slice(0, 3))})
-- Modified Elements: ${treeDiff.modified.length} (first few: ${JSON.stringify(treeDiff.modified.slice(0, 3))})` : 'Tree diff not available'}
-
-CURRENT PAGE CONTENT (visible elements):
-${currentPageContent}
-
-IMPORTANT VERIFICATION RULES:
-1. If Tree Changes Detected = YES with significant modifications (e.g., 100+ modified elements), the action was SUCCESSFUL
-2. Trust the objective tree change metrics over subjective visual interpretation
-3. For navigation: Changed root node IDs indicate successful page navigation even if screenshots look similar
-4. Visual similarities don't mean failure - focus on the objective tree diff data
-
-Please analyze and describe:
-- What the objective tree diff shows (this is the PRIMARY evidence)
-- What visual changes you observe in the screenshots (secondary evidence)
-- Your assessment based PRIMARILY on the tree change metrics
-- Whether the action succeeded based on objective evidence
-
-The first image shows the page BEFORE the action, the second image shows the page AFTER the action.
-
-Provide a clear response that prioritizes objective tree metrics over visual interpretation.`
-                  },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: `data:image/png;base64,${beforeScreenshotData}`
-                    }
-                  },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: `data:image/png;base64,${afterScreenshotResult.data}`
-                    }
-                  }
-                ]
-              }
-            ],
-            temperature: 0
-          });
-          
-            visualCheck = response.text || 'No response';
-          }
-          logger.info('Visual verification result:', visualCheck);
-        } else if (afterScreenshotResult.data && !beforeScreenshotData) {
-          // Fallback to single after screenshot if before screenshot failed
-          logger.warn('Before screenshot unavailable, using after screenshot only');
-          
-          // Get current page content for context
-          let currentPageContent = '';
-          try {
-            const currentTreeResult = await Utils.getAccessibilityTree(target);
-            currentPageContent = currentTreeResult.simplified;
-          } catch (error) {
-            logger.warn('Failed to get current page content for visual verification:', error);
-            currentPageContent = 'Page content unavailable';
-          }
-
-          const llmClient = LLMClient.getInstance();
-          if (!(ctx as any)?.provider || !((ctx as any)?.nanoModel || (ctx as any)?.model)) {
-            visualCheck = 'Skipping visual verification (missing LLM context)';
-          } else {
-            const provider = (ctx as any).provider;
-            const model = (ctx as any).nanoModel || (ctx as any).model;
-            const response = await llmClient.call({
-              provider,
-              model,
-              systemPrompt: 'You are a visual verification assistant. Analyze screenshots and tree diff data to determine if actions succeeded. Always prioritize objective tree change metrics over subjective visual analysis.',
-              messages: [
-                {
-                  role: 'user',
-                  content: [
-                  {
-                    type: 'text',
-                    text: `Analyze this screenshot to determine if the ${method} action succeeded and describe what you observe.
-
-ACTION DETAILS:
-- Method: ${method}
-- Target Element XPath: ${xpath}
-- Node ID: ${nodeId}
-- Arguments: ${JSON.stringify(actionArgsArray)}
-- Reasoning: ${reasoning}
-
-OBJECTIVE PAGE CHANGE EVIDENCE:
-${treeDiff ? `- Tree Changes Detected: ${treeDiff.hasChanges ? 'YES' : 'NO'}
-- Change Summary: ${treeDiff.summary}
-- Added Elements: ${treeDiff.added.length} (first few: ${JSON.stringify(treeDiff.added.slice(0, 3))})
-- Removed Elements: ${treeDiff.removed.length} (first few: ${JSON.stringify(treeDiff.removed.slice(0, 3))})
-- Modified Elements: ${treeDiff.modified.length} (first few: ${JSON.stringify(treeDiff.modified.slice(0, 3))})` : 'Tree diff not available'}
-
-CURRENT PAGE CONTENT (visible elements):
-${currentPageContent}
-
-IMPORTANT VERIFICATION RULES:
-1. If Tree Changes Detected = YES with significant modifications, the action was SUCCESSFUL
-2. Trust the objective tree change metrics as the PRIMARY indicator
-3. The screenshot provides additional context but is SECONDARY to tree diff data
-4. For navigation: Changed root node IDs indicate successful page navigation
-
-Please examine and describe:
-- What the objective tree diff shows (PRIMARY evidence)
-- What the screenshot reveals (secondary context)
-- Your assessment based PRIMARILY on the tree change metrics
-- Whether the action succeeded according to objective evidence
-
-Note: Only the after-action screenshot is available for visual analysis.
-
-Provide a clear response that prioritizes objective tree metrics.`
-                  },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: `data:image/png;base64,${afterScreenshotResult.data}`
-                    }
-                  }
-                ]
-              }
-            ],
-            temperature: 0
-          });
-          
-            visualCheck = response.text || 'No response';
-          }
-          logger.info('Visual verification result (after only):', visualCheck);
-        } else {
-          logger.error('Screenshot data is empty or undefined');
-        }
-        } catch (error) {
-          logger.warn('Visual verification failed:', error);
-          // Don't fail the action, just log the issue
-        }
-      }
-
-      // Get after-action screenshot data for returning to main LLM
-      let afterActionImageData: string | undefined;
-      try {
-        const afterScreenshotResult = await target.pageAgent().invoke_captureScreenshot({
-          format: 'png' as Protocol.Page.CaptureScreenshotRequestFormat,
-          captureBeyondViewport: false
-        });
-        if (afterScreenshotResult.data) {
-          afterActionImageData = `data:image/png;base64,${afterScreenshotResult.data}`;
-        }
-      } catch (error) {
-        logger.warn('Failed to capture after-action image for main LLM:', error);
-      }
+      // Use backendNodeId-based action for cross-frame support
+      const actionResult = await UtilsUniversal.performActionByBackendNodeId(
+        adapter,
+        method,
+        actionArgsArray,
+        parsed.backendNodeId,
+        parsed.frameOrdinal,
+      );
 
       return {
-        xpath,
-        pageChange: treeDiff ? {
-          hasChanges: treeDiff.hasChanges,
-          summary: treeDiff.summary,
-          added: treeDiff.added.slice(0, 5),
-          removed: treeDiff.removed.slice(0, 5),
-          modified: treeDiff.modified.slice(0, 5),
-          hasMore: {
-            added: treeDiff.added.length > 5,
-            removed: treeDiff.removed.length > 5,
-            modified: treeDiff.modified.length > 5
-          }
-        } : {
-          hasChanges: false,
-          summary: "No changes detected",
+        xpath: `backendNodeId:${parsed.backendNodeId}`,
+        pageChange: {
+          hasChanges: true,
+          summary: `Performed ${method} action on element in frame ${parsed.frameOrdinal}`,
           added: [],
           removed: [],
           modified: [],
-          hasMore: { added: false, removed: false, modified: false }
+          hasMore: { added: false, removed: false, modified: false },
         },
-        visualCheck
+        // Include state verification for state-changing actions
+        stateVerification: actionResult?.verification,
       };
-    } catch (error: unknown) {
-      logger.info('Error during execution:', error instanceof Error ? error.message : String(error));
-      // Include XPath in the error message if it was determined before the error
-      const errorMessage = `Failed to perform action '${method}' on NodeID ${nodeId}${xpath ? ` (XPath: ${xpath})` : ' (XPath determination failed or did not run)'}: ${error instanceof Error ? error.message : String(error)}`;
-      return {
-        error: errorMessage
-      };
+    } catch (error) {
+      logger.error("Action failed for EncodedId:", error);
+      return { error: `Action failed for EncodedId ${nodeId}: ${error}` };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       method: {
-        type: 'string',
-        description: 'Action to perform (click, hover, fill, type, press, scrollIntoView, selectOption, check, uncheck, setChecked)',
-        enum: ['click', 'hover', 'fill', 'type', 'press', 'scrollIntoView', 'selectOption', 'check', 'uncheck', 'setChecked']
+        type: "string",
+        description:
+          "Action to perform (click, rightClick, hover, fill, type, press, focus, scrollIntoView, selectOption, check, uncheck, setChecked, drag, setValue)",
+        enum: [
+          "click",
+          "rightClick",
+          "hover",
+          "fill",
+          "type",
+          "press",
+          "focus",
+          "scrollIntoView",
+          "selectOption",
+          "check",
+          "uncheck",
+          "setChecked",
+          "drag",
+          "setValue",
+        ],
       },
       nodeId: {
-        oneOf: [
-          { type: 'number' },
-          { type: 'string' }
-        ],
-        description: 'NodeID of the element to perform the action on (number for main document, string with iframe_ prefix for iframe elements)'
+        type: "string",
+        description:
+          'EncodedId of the element from the accessibility tree (format: "frameOrdinal-backendNodeId", e.g., "0-123" for main frame, "1-456" for iframe). Always use the exact EncodedId shown in square brackets in the accessibility tree output.',
       },
       args: {
         oneOf: [
           {
-            type: 'object',
-            description: 'Arguments for the action. For "fill"/"type", requires an object like { "text": "value" }. For "selectOption", requires an object like { "text": "option_value" }. For "setChecked", requires an object like { "checked": true/false }. For "press", requires an array like ["key"]. Other methods (click, hover, check, uncheck, scrollIntoView) typically do not use args.',
+            type: "object",
+            description:
+              'Arguments for the action. For "fill"/"type", requires an object like { "text": "value" }. For "selectOption", requires an object like { "text": "option_value" }. For "setChecked", requires an object like { "checked": true/false }. For "setValue", requires an object like { "value": 75 } (numeric for sliders/range inputs). For "drag", requires an object with either relative offset { "offsetX": 100, "offsetY": 0 } or absolute position { "toX": 500, "toY": 200 }. For "press", requires an array like ["key"]. Other methods (click, hover, check, uncheck, scrollIntoView) typically do not use args.',
             properties: {
               text: {
-                type: 'string',
-                description: 'The text value to fill, type, or select option value.'
+                type: "string",
+                description:
+                  "The text value to fill, type, or select option value.",
               },
               checked: {
-                type: 'boolean',
-                description: 'For setChecked method - whether the checkbox should be checked (true) or unchecked (false).'
-              }
+                type: "boolean",
+                description:
+                  "For setChecked method - whether the checkbox should be checked (true) or unchecked (false).",
+              },
+              value: {
+                type: "number",
+                description:
+                  "For setValue method - the numeric value to set on a slider or range input. The value will be clamped to the element's min/max range.",
+              },
+              offsetX: {
+                type: "number",
+                description:
+                  "For drag method - horizontal offset in pixels (relative to element center). Positive moves right, negative moves left.",
+              },
+              offsetY: {
+                type: "number",
+                description:
+                  "For drag method - vertical offset in pixels (relative to element center). Positive moves down, negative moves up.",
+              },
+              toX: {
+                type: "number",
+                description:
+                  "For drag method - absolute X coordinate to drag to (alternative to offsetX).",
+              },
+              toY: {
+                type: "number",
+                description:
+                  "For drag method - absolute Y coordinate to drag to (alternative to offsetY).",
+              },
             },
           },
           {
-            type: 'array',
-            description: 'Arguments for the action. For "press", requires an array like ["key"].',
+            type: "array",
+            description:
+              'Arguments for the action. For "press", requires an array like ["key"].',
             items: {
-              type: 'string'
-            }
-          }
+              type: "string",
+            },
+          },
         ],
       },
       reasoning: {
-        type: 'string',
-        description: 'Reasoning for the action. This is a free form text field that will be used to explain the action to the user.'
-      }
+        type: "string",
+        description:
+          "Reasoning for the action. This is a free form text field that will be used to explain the action to the user.",
+      },
     },
-    required: ['method', 'nodeId', 'reasoning']
+    required: ["method", "nodeId", "reasoning"],
   };
 
-  // DOM stability waiting method
-  private async waitForDOMStability(target: SDK.Target.Target, method: string, isLikelyNavigationElement: boolean, signal?: AbortSignal): Promise<void> {
-    const maxWaitTime = isLikelyNavigationElement ? 5000 : 2000; // 5s for navigation, 2s for other actions
-    const startTime = Date.now();
-    
-    logger.debug(`Waiting for DOM stability after ${method} (max ${maxWaitTime}ms)`);
-    
-    try {
-      // For navigation elements, wait for document ready state
-      if (isLikelyNavigationElement) {
-        await this.waitForDocumentReady(target, maxWaitTime, signal);
-      }
-      
-      // Wait for DOM mutations to settle using polling approach
-      await this.waitForDOMMutationStability(target, maxWaitTime - (Date.now() - startTime), signal);
-      
-    } catch (error) {
-      logger.warn('Error waiting for DOM stability:', error);
-      // Fallback to minimal wait
-      await abortableSleep(300, signal);
-    }
-  }
-
-  private async waitForDocumentReady(target: SDK.Target.Target, maxWaitTime: number, signal?: AbortSignal): Promise<void> {
-    const startTime = Date.now();
-    const pollInterval = 100;
-    
-    while (Date.now() - startTime < maxWaitTime) {
-      if (signal?.aborted) {
-        throw new DOMException('The operation was aborted', 'AbortError');
-      }
-      try {
-        const readyStateResult = await target.runtimeAgent().invoke_evaluate({
-          expression: 'document.readyState',
-          returnByValue: true,
-        });
-        
-        if (!readyStateResult.exceptionDetails && readyStateResult.result.value === 'complete') {
-          logger.debug('Document ready state is complete');
-          return;
-        }
-        
-        await abortableSleep(pollInterval, signal);
-      } catch (error) {
-        logger.warn('Error checking document ready state:', error);
-        break;
-      }
-    }
-  }
-
-  private async waitForDOMMutationStability(target: SDK.Target.Target, maxWaitTime: number, signal?: AbortSignal): Promise<void> {
-    const startTime = Date.now();
-    const stabilityWindow = 800; // Longer stability window for complex content
-    const pollInterval = 100;
-    let lastTreeHash = '';
-    let lastChangeTime = startTime;
-    let consecutiveStableChecks = 0;
-    const requiredStableChecks = 3;
-    
-    while (Date.now() - startTime < maxWaitTime) {
-      if (signal?.aborted) {
-        throw new DOMException('The operation was aborted', 'AbortError');
-      }
-      try {
-        // Generic DOM stability detection
-        const currentTreeResult = await target.runtimeAgent().invoke_evaluate({
-          expression: `
-            (() => {
-              // Comprehensive DOM fingerprint
-              const elements = document.querySelectorAll('*');
-              let hash = elements.length.toString();
-              
-              // Track structural changes
-              const body = document.body;
-              if (body) {
-                hash += '|body:' + body.children.length;
-                hash += '|text:' + (body.textContent || '').length;
-              }
-              
-              // Generic loading indicators
-              const loadingSelectors = [
-                '[aria-busy="true"]', '[data-loading]', '[class*="loading"]', 
-                '[class*="spinner"]', '[class*="progress"]', '.loading'
-              ];
-              const loadingElements = document.querySelectorAll(loadingSelectors.join(', '));
-              hash += '|loading:' + loadingElements.length;
-              
-              // Check for images still loading
-              const images = document.querySelectorAll('img[src]');
-              let loadedImages = 0;
-              for (const img of images) {
-                if (img.complete && img.naturalHeight !== 0) loadedImages++;
-              }
-              hash += '|imgs:' + loadedImages + '/' + images.length;
-              
-              // Check for dynamic content containers
-              const dynamicContainers = document.querySelectorAll(
-                '[data-testid], [data-component], [data-async], [data-reactroot], ' +
-                '[ng-app], [ng-controller], [v-app], [data-vue]'
-              );
-              hash += '|dynamic:' + dynamicContainers.length;
-              
-              // Network/fetch activity detection
-              const busyElements = document.querySelectorAll('[aria-busy="true"], [data-fetching="true"]');
-              hash += '|busy:' + busyElements.length;
-              
-              return hash;
-            })()
-          `,
-          returnByValue: true,
-        });
-        
-        if (!currentTreeResult.exceptionDetails && currentTreeResult.result.value) {
-          const currentHash = currentTreeResult.result.value as string;
-          
-          if (currentHash !== lastTreeHash) {
-            lastTreeHash = currentHash;
-            lastChangeTime = Date.now();
-            consecutiveStableChecks = 0;
-          } else {
-            consecutiveStableChecks++;
-            if (consecutiveStableChecks >= requiredStableChecks && 
-                Date.now() - lastChangeTime >= stabilityWindow) {
-              logger.debug(`DOM stable for ${stabilityWindow}ms with ${consecutiveStableChecks} consecutive stable checks`);
-              return;
-            }
-          }
-        }
-        
-        await abortableSleep(pollInterval, signal);
-      } catch (error) {
-        logger.warn('Error checking DOM stability:', error);
-        break;
-      }
-    }
-    
-    logger.debug('DOM stability wait timeout reached');
-  }
-
   // Tree diff methods for action verification
-  private getTreeDiff(before: string, after: string): { hasChanges: boolean; added: string[]; removed: string[]; modified: string[]; summary: string; } {
+  private getTreeDiff(
+    before: string,
+    after: string,
+  ): {
+    hasChanges: boolean;
+    added: string[];
+    removed: string[];
+    modified: string[];
+    summary: string;
+  } {
     if (before === after) {
       return {
         hasChanges: false,
         added: [],
         removed: [],
         modified: [],
-        summary: "No changes detected in page structure"
+        summary: "No changes detected in page structure",
       };
     }
-    
-    const beforeLines = before.split('\n').filter(line => line.trim());
-    const afterLines = after.split('\n').filter(line => line.trim());
-    
+
+    const beforeLines = before.split("\n").filter((line) => line.trim());
+    const afterLines = after.split("\n").filter((line) => line.trim());
+
     const lcs = this.findLCS(beforeLines, afterLines);
-    
+
     const added: string[] = [];
     const removed: string[] = [];
     const modified: string[] = [];
-    
-    afterLines.forEach(line => {
+
+    afterLines.forEach((line) => {
       if (!lcs.includes(line)) {
         added.push(line);
       }
     });
-    
-    beforeLines.forEach(line => {
+
+    beforeLines.forEach((line) => {
       if (!lcs.includes(line)) {
         removed.push(line);
       }
     });
-    
+
     this.findModifications(beforeLines, afterLines, added, removed, modified);
-    
+
     const summary = `${added.length} added, ${removed.length} removed, ${modified.length} modified`;
-    
+
     return {
       hasChanges: true,
       added,
       removed,
       modified,
-      summary
+      summary,
     };
   }
 
   private findLCS(a: string[], b: string[]): string[] {
     const m = a.length;
     const n = b.length;
-    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    
+    const dp = Array(m + 1)
+      .fill(null)
+      .map(() => Array(n + 1).fill(0));
+
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
         if (a[i - 1] === b[j - 1]) {
@@ -2681,9 +2650,10 @@ Provide a clear response that prioritizes objective tree metrics.`
         }
       }
     }
-    
+
     const lcs: string[] = [];
-    let i = m, j = n;
+    let i = m,
+      j = n;
     while (i > 0 && j > 0) {
       if (a[i - 1] === b[j - 1]) {
         lcs.unshift(a[i - 1]);
@@ -2695,16 +2665,16 @@ Provide a clear response that prioritizes objective tree metrics.`
         j--;
       }
     }
-    
+
     return lcs;
   }
 
   private findModifications(
-    before: string[], 
-    after: string[], 
-    added: string[], 
-    removed: string[], 
-    modified: string[]
+    before: string[],
+    after: string[],
+    added: string[],
+    removed: string[],
+    modified: string[],
   ): void {
     for (const removedLine of [...removed]) {
       for (const addedLine of [...added]) {
@@ -2724,11 +2694,11 @@ Provide a clear response that prioritizes objective tree metrics.`
     const nodePattern = /\[(\d+)\]\s+(\w+)/;
     const match1 = line1.match(nodePattern);
     const match2 = line2.match(nodePattern);
-    
+
     if (match1 && match2) {
       return match1[2] === match2[2] && match1[1] !== match2[1];
     }
-    
+
     const similarity = this.calculateSimilarity(line1, line2);
     return similarity > 0.7;
   }
@@ -2737,21 +2707,23 @@ Provide a clear response that prioritizes objective tree metrics.`
     const len1 = str1.length;
     const len2 = str2.length;
     const maxLen = Math.max(len1, len2);
-    
+
     if (maxLen === 0) return 1;
-    
+
     const distance = this.editDistance(str1, str2);
-    return 1 - (distance / maxLen);
+    return 1 - distance / maxLen;
   }
 
   private editDistance(str1: string, str2: string): number {
     const m = str1.length;
     const n = str2.length;
-    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    
+    const dp = Array(m + 1)
+      .fill(null)
+      .map(() => Array(n + 1).fill(0));
+
     for (let i = 0; i <= m; i++) dp[i][0] = i;
     for (let j = 0; j <= n; j++) dp[0][j] = j;
-    
+
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
         if (str1[i - 1] === str2[j - 1]) {
@@ -2761,7 +2733,7 @@ Provide a clear response that prioritizes objective tree metrics.`
         }
       }
     }
-    
+
     return dp[m][n];
   }
 }
@@ -2778,9 +2750,18 @@ interface TreeDiffResult {
   summary: string;
 }
 
-export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offset?: number, chunkSize?: number, maxRetries?: number }, ObjectiveDrivenActionResult | ErrorResult> {
-  name = 'objective_driven_action';
-  description = 'Analyzes the page\'s accessibility tree to fulfill a delegated action objective. Performs actions (e.g., click, fill) using accessibility IDs. Identifies the best element to interact with based on the context and objectives. Acts as a specialized sub-agent with retries.';
+export class ObjectiveDrivenActionTool implements Tool<
+  {
+    objective: string;
+    offset?: number;
+    chunkSize?: number;
+    maxRetries?: number;
+  },
+  ObjectiveDrivenActionResult | ErrorResult
+> {
+  name = "objective_driven_action";
+  description =
+    "Analyzes the page's accessibility tree to fulfill a delegated action objective. Performs actions (e.g., click, fill) using accessibility IDs. Identifies the best element to interact with based on the context and objectives. Acts as a specialized sub-agent with retries.";
 
   // Tree diff methods
   private getTreeDiff(before: string, after: string): TreeDiffResult {
@@ -2790,46 +2771,46 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
         added: [],
         removed: [],
         modified: [],
-        summary: "No changes detected in page structure"
+        summary: "No changes detected in page structure",
       };
     }
-    
-    const beforeLines = before.split('\n').filter(line => line.trim());
-    const afterLines = after.split('\n').filter(line => line.trim());
-    
+
+    const beforeLines = before.split("\n").filter((line) => line.trim());
+    const afterLines = after.split("\n").filter((line) => line.trim());
+
     // Simple Myers-inspired diff using LCS (Longest Common Subsequence)
     const lcs = this.findLCS(beforeLines, afterLines);
-    
+
     // Find added and removed lines
     const added: string[] = [];
     const removed: string[] = [];
     const modified: string[] = [];
-    
+
     // Lines in 'after' but not in LCS are added
-    afterLines.forEach(line => {
+    afterLines.forEach((line) => {
       if (!lcs.includes(line)) {
         added.push(line);
       }
     });
-    
+
     // Lines in 'before' but not in LCS are removed
-    beforeLines.forEach(line => {
+    beforeLines.forEach((line) => {
       if (!lcs.includes(line)) {
         removed.push(line);
       }
     });
-    
+
     // Detect modifications (similar lines that changed)
     this.findModifications(beforeLines, afterLines, added, removed, modified);
-    
+
     const summary = `${added.length} added, ${removed.length} removed, ${modified.length} modified`;
-    
+
     return {
       hasChanges: true,
       added,
       removed,
       modified,
-      summary
+      summary,
     };
   }
 
@@ -2837,8 +2818,10 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
   private findLCS(a: string[], b: string[]): string[] {
     const m = a.length;
     const n = b.length;
-    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    
+    const dp = Array(m + 1)
+      .fill(null)
+      .map(() => Array(n + 1).fill(0));
+
     // Build LCS table
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
@@ -2849,10 +2832,11 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
         }
       }
     }
-    
+
     // Reconstruct LCS
     const lcs: string[] = [];
-    let i = m, j = n;
+    let i = m,
+      j = n;
     while (i > 0 && j > 0) {
       if (a[i - 1] === b[j - 1]) {
         lcs.unshift(a[i - 1]);
@@ -2864,17 +2848,17 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
         j--;
       }
     }
-    
+
     return lcs;
   }
 
   // Detect modifications (lines that are similar but changed)
   private findModifications(
-    before: string[], 
-    after: string[], 
-    added: string[], 
-    removed: string[], 
-    modified: string[]
+    before: string[],
+    after: string[],
+    added: string[],
+    removed: string[],
+    modified: string[],
   ): void {
     // Look for similar lines that might be modifications
     for (const removedLine of removed) {
@@ -2898,12 +2882,12 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
     const nodePattern = /\[(\d+)\]\s+(\w+)/;
     const match1 = line1.match(nodePattern);
     const match2 = line2.match(nodePattern);
-    
+
     if (match1 && match2) {
       // Same element type but different content might be a modification
       return match1[2] === match2[2] && match1[1] !== match2[1];
     }
-    
+
     // Fallback: check if lines are 70% similar
     const similarity = this.calculateSimilarity(line1, line2);
     return similarity > 0.7;
@@ -2913,22 +2897,24 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
     const len1 = str1.length;
     const len2 = str2.length;
     const maxLen = Math.max(len1, len2);
-    
+
     if (maxLen === 0) return 1;
-    
+
     // Simple edit distance calculation
     const distance = this.editDistance(str1, str2);
-    return 1 - (distance / maxLen);
+    return 1 - distance / maxLen;
   }
 
   private editDistance(str1: string, str2: string): number {
     const m = str1.length;
     const n = str2.length;
-    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    
+    const dp = Array(m + 1)
+      .fill(null)
+      .map(() => Array(n + 1).fill(0));
+
     for (let i = 0; i <= m; i++) dp[i][0] = i;
     for (let j = 0; j <= n; j++) dp[0][j] = j;
-    
+
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
         if (str1[i - 1] === str2[j - 1]) {
@@ -2938,7 +2924,7 @@ export class ObjectiveDrivenActionTool implements Tool<{ objective: string, offs
         }
       }
     }
-    
+
     return dp[m][n];
   }
 
@@ -2964,46 +2950,75 @@ Important guidelines:
 - Choose the most semantically appropriate element when multiple options exist.`;
   }
 
-
-  async execute(args: { objective: string, offset?: number, chunkSize?: number, maxRetries?: number }, ctx?: LLMContext): Promise<ObjectiveDrivenActionResult | ErrorResult> {
+  async execute(
+    args: {
+      objective: string;
+      offset?: number;
+      chunkSize?: number;
+      maxRetries?: number;
+    },
+    ctx?: LLMContext,
+  ): Promise<ObjectiveDrivenActionResult | ErrorResult> {
     const { objective, offset = 0, chunkSize = 60000, maxRetries = 1 } = args; // Default offset 0, chunkSize 60000, maxRetries 1
     let currentTry = 0;
     let lastError: string | null = null;
 
-    const agentService = AgentService.getInstance();
-    const apiKey = agentService.getApiKey();
+    // Get API key from context first (for eval runner), fallback to AgentService
+    let apiKey = ctx?.apiKey;
+    if (!apiKey && !isNodeEnvironment) {
+      await ensureToolsBrowserDeps();
+      if (AgentService) {
+        apiKey = AgentService.getInstance().getApiKey() ?? undefined;
+      }
+    }
     const providerForAction = ctx?.provider;
     const modelNameForAction = ctx?.miniModel || ctx?.model;
     if (!providerForAction || !modelNameForAction) {
-      return { error: 'Missing LLM context (provider/model) for ObjectiveDrivenActionTool' };
+      return {
+        error:
+          "Missing LLM context (provider/model) for ObjectiveDrivenActionTool",
+      };
     }
 
     // LiteLLM and BrowserOperator have optional API keys
-    const requiresApiKey = providerForAction !== 'litellm' && providerForAction !== 'browseroperator';
+    const requiresApiKey =
+      providerForAction !== "litellm" &&
+      providerForAction !== "browseroperator";
 
-    if (requiresApiKey && !apiKey) {return { error: 'API key not configured.' };}
-    if (typeof objective !== 'string' || objective.trim() === '') {
-      return { error: 'Objective must be a non-empty string' };
+    if (requiresApiKey && !apiKey) {
+      return { error: "API key not configured." };
+    }
+    if (typeof objective !== "string" || objective.trim() === "") {
+      return { error: "Objective must be a non-empty string" };
     }
 
     // --- Internal Agentic Loop ---
     while (currentTry <= maxRetries) {
       currentTry++;
-      logger.info(`ObjectiveDrivenActionTool: Attempt ${currentTry}/${maxRetries + 1} for objective: "${objective}"`);
+      logger.info(
+        `ObjectiveDrivenActionTool: Attempt ${currentTry}/${maxRetries + 1} for objective: "${objective}"`,
+      );
       let attemptError: Error | null = null; // Use Error object for better stack traces
 
       try {
         // --- Step 1: Get Tree ---
-        logger.info('ObjectiveDrivenActionTool: Getting Accessibility Tree...');
+        logger.info("ObjectiveDrivenActionTool: Getting Accessibility Tree...");
         const getAccTreeTool = new GetAccessibilityTreeTool();
-        const treeResult = await getAccTreeTool.execute({ reasoning: `Attempt ${currentTry} for objective: ${objective}` });
-        if ('error' in treeResult) {throw new Error(`Tree Error: ${treeResult.error}`);}
+        const treeResult = await getAccTreeTool.execute(
+          { reasoning: `Attempt ${currentTry} for objective: ${objective}` },
+          ctx,
+        );
+        if ("error" in treeResult) {
+          throw new Error(`Tree Error: ${treeResult.error}`);
+        }
         const accessibilityTreeString = treeResult.simplified;
-        if (!accessibilityTreeString || accessibilityTreeString.trim() === '') {throw new Error('Tree Error: Empty or blank tree content.');}
-        logger.info('ObjectiveDrivenActionTool: Got Accessibility Tree.');
+        if (!accessibilityTreeString || accessibilityTreeString.trim() === "") {
+          throw new Error("Tree Error: Empty or blank tree content.");
+        }
+        logger.info("ObjectiveDrivenActionTool: Got Accessibility Tree.");
 
         // --- Step 2: LLM - Determine Action (Method, Accessibility NodeID String, Args) ---
-        logger.info('ObjectiveDrivenActionTool: Determining Action via LLM...');
+        logger.info("ObjectiveDrivenActionTool: Determining Action via LLM...");
 
         // Create PerformActionTool to use its schema
         const performActionTool = new PerformActionTool();
@@ -3016,8 +3031,8 @@ Simplified Accessibility Tree Chunk:
 \`\`\`
 ${accessibilityTreeString.substring(offset, offset + chunkSize)}
 \`\`\`
-${accessibilityTreeString.length > offset + chunkSize ? `...(tree truncated at ${offset + chunkSize}/${accessibilityTreeString.length})...` : ''}
-${lastError ? `Previous attempt failed with this error: "${lastError}". Consider a different approach.` : ''}
+${accessibilityTreeString.length > offset + chunkSize ? `...(tree truncated at ${offset + chunkSize}/${accessibilityTreeString.length})...` : ""}
+${lastError ? `Previous attempt failed with this error: "${lastError}". Consider a different approach.` : ""}
 Based on the objective and the simplified accessibility tree chunk, determine the target element, the action method, the accessibility nodeId string, and any necessary arguments. Then respond using the provided tool format.
 
 Handling different action types:
@@ -3041,117 +3056,158 @@ Important guidelines:
           provider: providerForAction,
           model: modelNameForAction,
           messages: [
-            { role: 'system', content: this.getSystemPrompt() },
-            { role: 'user', content: promptGetAction }
+            { role: "system", content: this.getSystemPrompt() },
+            { role: "user", content: promptGetAction },
           ],
           systemPrompt: this.getSystemPrompt(),
-          tools: [{
-            type: 'function',
-            function: {
-              name: performActionTool.name,
-              description: performActionTool.description,
-              parameters: performActionTool.schema
-            }
-          }],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: performActionTool.name,
+                description: performActionTool.description,
+                parameters: performActionTool.schema,
+              },
+            },
+          ],
           temperature: 0.4,
-          retryConfig: { maxRetries: 3, baseDelayMs: 2000 }
+          retryConfig: { maxRetries: 3, baseDelayMs: 2000 },
         });
-        
+
         // Convert LLMResponse to expected format
         const response = {
           text: llmResponse.text,
-          functionCall: llmResponse.functionCall
+          functionCall: llmResponse.functionCall,
         };
 
         // --- Parse the Tool Call Response ---
-        if (!response.functionCall || response.functionCall.name !== performActionTool.name) {
-          logger.warn('LLM did not return the expected function call; this is likely an error', response);
-          const errorMessage = response.text || 'No function call returned - this tool requires a function call response.';
+        if (
+          !response.functionCall ||
+          response.functionCall.name !== performActionTool.name
+        ) {
+          logger.warn(
+            "LLM did not return the expected function call; this is likely an error",
+            response,
+          );
+          const errorMessage =
+            response.text ||
+            "No function call returned - this tool requires a function call response.";
 
           // Since this tool specifically handles actions, if we didn't get a function call
           // we should return an error instead of text content
           return {
-            error: `Failed to determine appropriate action: ${errorMessage}`
+            error: `Failed to determine appropriate action: ${errorMessage}`,
           };
         }
-        const { method: actionMethod, nodeId: accessibilityNodeId, args: actionArgs } = response.functionCall.arguments as {
-          method: string,
-          nodeId: number,
-          args?: Record<string, unknown> | unknown[],
+        const {
+          method: actionMethod,
+          nodeId: accessibilityNodeId,
+          args: actionArgs,
+        } = response.functionCall.arguments as {
+          method: string;
+          nodeId: string;
+          args?: Record<string, unknown> | unknown[];
         };
-        logger.info('Parsed Tool Arguments:', { actionMethod, accessibilityNodeId, actionArgs });
+        logger.info("Parsed Tool Arguments:", {
+          actionMethod,
+          accessibilityNodeId,
+          actionArgs,
+        });
 
-        const actionNodeId = accessibilityNodeId as Protocol.DOM.NodeId;
-        logger.info(`ObjectiveDrivenActionTool: Performing action '${actionMethod}' on potentially incorrect NodeID ${actionNodeId}...`);
+        const actionNodeId = String(accessibilityNodeId);
+        logger.info(
+          `ObjectiveDrivenActionTool: Performing action '${actionMethod}' on NodeID ${actionNodeId}...`,
+        );
 
         // --- Capture tree state before action ---
-        const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-        let treeBeforeAction = '';
-        let treeAfterAction = '';
+        const adapter = await getAdapter(ctx);
+        let treeBeforeAction = "";
+        let treeAfterAction = "";
         let treeDiff: TreeDiffResult | null = null;
 
         try {
-          if (target) {
-            const beforeTreeResult = await Utils.getAccessibilityTree(target);
+          if (adapter) {
+            const beforeTreeResult =
+              await UtilsUniversal.getAccessibilityTree(adapter);
             treeBeforeAction = beforeTreeResult.simplified;
-            logger.debug('Captured accessibility tree before action');
+            logger.debug("Captured accessibility tree before action");
           }
         } catch (error) {
-          logger.warn('Failed to capture tree before action:', error);
+          logger.warn("Failed to capture tree before action:", error);
         }
 
-        const performResult = await performActionTool.execute({
-          method: actionMethod,
-          nodeId: actionNodeId,
-          args: actionArgs,
-          reasoning: `Attempt ${currentTry} for objective: ${objective}`
-        });
-        if ('error' in performResult) {
+        const performResult = await performActionTool.execute(
+          {
+            method: actionMethod,
+            nodeId: actionNodeId,
+            args: actionArgs,
+            reasoning: `Attempt ${currentTry} for objective: ${objective}`,
+          },
+          ctx,
+        );
+        if ("error" in performResult) {
           // Throw error to be caught by the loop's catch block
-          throw new Error(`Action Error (NodeID ${actionNodeId}): ${performResult.error}`);
+          throw new Error(
+            `Action Error (NodeID ${actionNodeId}): ${performResult.error}`,
+          );
         }
 
         // --- Capture tree state after action and generate diff ---
         try {
-          if (target && treeBeforeAction) {
-            const afterTreeResult = await Utils.getAccessibilityTree(target);
+          if (adapter && treeBeforeAction) {
+            const afterTreeResult =
+              await UtilsUniversal.getAccessibilityTree(adapter);
             treeAfterAction = afterTreeResult.simplified;
-            
+
             // Generate tree diff
             treeDiff = this.getTreeDiff(treeBeforeAction, treeAfterAction);
-            
+
             logger.info(`Tree diff after ${actionMethod}:`, treeDiff.summary);
             if (treeDiff.hasChanges) {
-              logger.debug('Tree changes:', {
+              logger.debug("Tree changes:", {
                 added: treeDiff.added.slice(0, 3),
                 removed: treeDiff.removed.slice(0, 3),
-                modified: treeDiff.modified.slice(0, 3)
+                modified: treeDiff.modified.slice(0, 3),
               });
             } else {
-              logger.warn(`No tree changes detected after ${actionMethod} - action may have failed or had no visible effect`);
+              logger.warn(
+                `No tree changes detected after ${actionMethod} - action may have failed or had no visible effect`,
+              );
             }
           }
         } catch (error) {
-          logger.warn('Failed to capture tree after action:', error);
+          logger.warn("Failed to capture tree after action:", error);
         }
 
-        logger.info('ObjectiveDrivenActionTool: Action successful (but may have affected unexpected element).');
+        logger.info(
+          "ObjectiveDrivenActionTool: Action successful (but may have affected unexpected element).",
+        );
 
         // Fetch page metadata
-        let metadata: { url: string, title: string } | undefined;
-        const pageTarget = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-        if (pageTarget) {
-          const metadataEval = await pageTarget.runtimeAgent().invoke_evaluate({
-            expression: '({ url: window.location.href, title: document.title })',
+        let metadata: { url: string; title: string } | undefined;
+        if (adapter) {
+          const runtimeAgent = adapter.runtimeAgent();
+          const metadataEval = await runtimeAgent.invoke<{
+            result?: { value?: { url: string; title: string } };
+          }>("evaluate", {
+            expression:
+              "({ url: window.location.href, title: document.title })",
             returnByValue: true,
           });
-          metadata = metadataEval.result.value as { url: string, title: string };
+          metadata = metadataEval.result?.value as {
+            url: string;
+            title: string;
+          };
         }
 
         return {
           success: true,
           message: `Successfully executed action for objective "${objective}"`,
-          finalAction: { method: actionMethod, nodeId: actionNodeId, args: actionArgs },
+          finalAction: {
+            method: actionMethod,
+            nodeId: actionNodeId,
+            args: actionArgs,
+          },
           method: actionMethod,
           nodeId: actionNodeId,
           args: actionArgs,
@@ -3159,24 +3215,28 @@ Important guidelines:
           totalLength: accessibilityTreeString.length,
           truncated: accessibilityTreeString.length > offset + chunkSize,
           metadata,
-          treeDiff: treeDiff ? {
-            hasChanges: treeDiff.hasChanges,
-            summary: treeDiff.summary,
-            added: treeDiff.added.slice(0, 5),
-            removed: treeDiff.removed.slice(0, 5),
-            modified: treeDiff.modified.slice(0, 5),
-            hasMore: {
-              added: treeDiff.added.length > 5,
-              removed: treeDiff.removed.length > 5,
-              modified: treeDiff.modified.length > 5
-            }
-          } : null,
+          treeDiff: treeDiff
+            ? {
+                hasChanges: treeDiff.hasChanges,
+                summary: treeDiff.summary,
+                added: treeDiff.added.slice(0, 5),
+                removed: treeDiff.removed.slice(0, 5),
+                modified: treeDiff.modified.slice(0, 5),
+                hasMore: {
+                  added: treeDiff.added.length > 5,
+                  removed: treeDiff.removed.length > 5,
+                  modified: treeDiff.modified.length > 5,
+                },
+              }
+            : null,
         };
-
       } catch (error) {
         // Catch errors from any step within the try block
         attemptError = error as Error;
-        logger.warn(`ObjectiveDrivenActionTool: Attempt ${currentTry} failed:`, attemptError.message);
+        logger.warn(
+          `ObjectiveDrivenActionTool: Attempt ${currentTry} failed:`,
+          attemptError.message,
+        );
         lastError = attemptError.message; // Store error message for the next attempt's prompt
         // Optional: Add a small delay before retrying? await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -3184,100 +3244,132 @@ Important guidelines:
 
     // If loop finishes without success (i.e., all retries failed)
     return {
-      error: `Failed objective "${objective}" after ${currentTry} attempts. Last error: ${lastError || 'Unknown error during final attempt.'}`
+      error: `Failed objective "${objective}" after ${currentTry} attempts. Last error: ${lastError || "Unknown error during final attempt."}`,
     };
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       objective: {
-        type: 'string',
-        description: 'The high-level objective the user wants to achieve on the page (e.g., "click the login button", "fill the search box with \'test\' and press Enter"). Be specific.',
+        type: "string",
+        description:
+          'The high-level objective the user wants to achieve on the page (e.g., "click the login button", "fill the search box with \'test\' and press Enter"). Be specific.',
       },
       offset: {
-        type: 'number',
-        description: 'Offset for the accessibility tree chunk (default: 0)',
-        default: 0
+        type: "number",
+        description: "Offset for the accessibility tree chunk (default: 0)",
+        default: 0,
       },
       chunkSize: {
-        type: 'number',
-        description: 'Size of the accessibility tree chunk (default: 60000)',
-        default: 60000
+        type: "number",
+        description: "Size of the accessibility tree chunk (default: 60000)",
+        default: 60000,
       },
       maxRetries: {
-        type: 'number',
-        description: 'Maximum number of retries if an attempt fails (default: 1, meaning 2 total attempts).',
+        type: "number",
+        description:
+          "Maximum number of retries if an attempt fails (default: 1, meaning 2 total attempts).",
         default: 1,
-      }
+      },
     },
-    required: ['objective'],
+    required: ["objective"],
   };
 }
 
 /**
  * Tool for getting URLs from a list of NodeIDs
  */
-export class NodeIDsToURLsTool implements Tool<{ nodeIds: number[] }, NodeIDsToURLsResult | ErrorResult> {
-  name = 'node_ids_to_urls';
-  description = 'Gets URLs associated with DOM elements identified by NodeIDs from accessibility tree.';
+export class NodeIDsToURLsTool implements Tool<
+  { nodeIds: string[] },
+  NodeIDsToURLsResult | ErrorResult
+> {
+  name = "node_ids_to_urls";
+  description =
+    "Gets URLs associated with DOM elements identified by EncodedIds from accessibility tree.";
 
-  async execute(args: { nodeIds: number[] }, _ctx?: LLMContext): Promise<NodeIDsToURLsResult | ErrorResult> {
+  async execute(
+    args: { nodeIds: string[] },
+    ctx?: LLMContext,
+  ): Promise<NodeIDsToURLsResult | ErrorResult> {
     if (!Array.isArray(args.nodeIds)) {
-      return { error: 'nodeIds must be an array of numbers' };
+      return {
+        error:
+          'nodeIds must be an array of EncodedId strings (e.g., ["0-123", "0-456"])',
+      };
     }
 
     if (args.nodeIds.length === 0) {
-      return { error: 'nodeIds array must not be empty' };
+      return { error: "nodeIds array must not be empty" };
     }
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Get adapter from context (works in both DevTools and eval runner)
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: "No browser connection available" };
     }
 
-    const results: Array<{ nodeId: number, url?: string }> = [];
+    const results: Array<{ nodeId: string; url?: string }> = [];
+    const runtimeAgent = adapter.runtimeAgent();
 
     // Process each nodeId separately
     for (const nodeId of args.nodeIds) {
       try {
-        // First, get the xpath for the node
-        const xpath = await getXPathByBackendNodeId(target, nodeId as Protocol.DOM.BackendNodeId);
+        let backendNodeId: number;
+
+        // Handle EncodedId format (e.g., "0-123")
+        if (!isEncodedId(nodeId)) {
+          results.push({ nodeId });
+          continue;
+        }
+        const parsed = parseEncodedId(nodeId);
+        if (!parsed) {
+          results.push({ nodeId });
+          continue;
+        }
+        backendNodeId = parsed.backendNodeId;
+
+        // First, get the xpath for the node using universal utils
+        const xpath = await UtilsUniversal.getXPathByBackendNodeId(
+          adapter,
+          backendNodeId,
+        );
         if (!xpath) {
           results.push({ nodeId });
           continue;
         }
 
         // Execute JavaScript to get the URL from the element
-        const runtimeAgent = target.runtimeAgent();
-        const evaluateResult = await runtimeAgent.invoke_evaluate({
+        const evaluateResult = await runtimeAgent.invoke<{
+          result?: { value?: { found: boolean; url?: string } };
+          exceptionDetails?: unknown;
+        }>("evaluate", {
           expression: `
             (function() {
               const element = document.evaluate("${xpath}", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
               if (!element) return { found: false };
-              
+
               // Try to get href for anchor tags
               if (element instanceof HTMLAnchorElement && element.href) {
                 return { found: true, url: element.href };
               }
-              
+
               // Try to find closest anchor parent
               let closestAnchor = element.closest('a[href]');
               if (closestAnchor && closestAnchor.href) {
                 return { found: true, url: closestAnchor.href };
               }
-              
+
               return { found: false };
             })()
           `,
-          returnByValue: true
+          returnByValue: true,
         });
 
         if (evaluateResult.exceptionDetails) {
-          logger.warn('Error evaluating URL for NodeID', {
+          logger.warn("Error evaluating URL for NodeID", {
             nodeId,
-            details: evaluateResult.exceptionDetails
+            details: evaluateResult.exceptionDetails,
           });
           results.push({ nodeId });
           continue;
@@ -3290,41 +3382,42 @@ export class NodeIDsToURLsTool implements Tool<{ nodeIds: number[] }, NodeIDsToU
           results.push({ nodeId });
         }
       } catch (error) {
-        logger.warn('Error processing NodeID', {
+        logger.warn("Error processing NodeID", {
           nodeId,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
         results.push({ nodeId });
       }
     }
 
     return {
-      urls: results
+      urls: results,
     };
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       nodeIds: {
-        type: 'array',
-        description: 'Array of node IDs to get URLs for',
+        type: "array",
+        description:
+          'Array of EncodedIds from the accessibility tree to get URLs for (e.g., ["0-123", "0-456"])',
         items: {
-          type: 'number'
-        }
-      }
+          type: "string",
+        },
+      },
     },
-    required: ['nodeIds']
+    required: ["nodeIds"],
   };
 }
 
 // Create interfaces for the visit history tool results
 export interface VisitHistoryDomainResult {
   visits: Array<{
-    url: string,
-    title: string,
-    visitTime: string,
-    keywords: string[],
+    url: string;
+    title: string;
+    visitTime: string;
+    keywords: string[];
   }>;
   count: number;
   error?: string;
@@ -3332,11 +3425,11 @@ export interface VisitHistoryDomainResult {
 
 export interface VisitHistoryKeywordResult {
   visits: Array<{
-    url: string,
-    title: string,
-    visitTime: string,
-    domain: string,
-    keywords: string[],
+    url: string;
+    title: string;
+    visitTime: string;
+    domain: string;
+    keywords: string[];
   }>;
   count: number;
   error?: string;
@@ -3344,68 +3437,84 @@ export interface VisitHistoryKeywordResult {
 
 export interface VisitHistorySearchResult {
   visits: Array<{
-    url: string,
-    title: string,
-    visitTime: string,
-    domain: string,
-    keywords: string[],
+    url: string;
+    title: string;
+    visitTime: string;
+    domain: string;
+    keywords: string[];
   }>;
   count: number;
   filters: {
-    domain?: string,
-    keyword?: string,
-    daysAgo?: number,
-    limit?: number,
+    domain?: string;
+    keyword?: string;
+    daysAgo?: number;
+    limit?: number;
   };
   error?: string;
 }
 
 // Create proper classes for tools that implement the Tool interface
-export class GetVisitsByDomainTool implements Tool<{ domain: string }, VisitHistoryDomainResult | ErrorResult> {
-  name = 'get_visits_by_domain';
-  description = 'Get a list of visited pages filtered by domain name';
+export class GetVisitsByDomainTool implements Tool<
+  { domain: string },
+  VisitHistoryDomainResult | ErrorResult
+> {
+  name = "get_visits_by_domain";
+  description = "Get a list of visited pages filtered by domain name";
 
-  async execute(args: { domain: string }, _ctx?: LLMContext): Promise<VisitHistoryDomainResult | ErrorResult> {
+  async execute(
+    args: { domain: string },
+    _ctx?: LLMContext,
+  ): Promise<VisitHistoryDomainResult | ErrorResult> {
     try {
-      const visits = await VisitHistoryManager.getInstance().getVisitsByDomain(args.domain);
+      const visits = await VisitHistoryManager.getInstance().getVisitsByDomain(
+        args.domain,
+      );
 
       return {
         visits: visits.map((visit: VisitData) => ({
           url: visit.url,
           title: visit.title,
           visitTime: new Date(visit.timestamp).toLocaleString(),
-          keywords: visit.keywords
+          keywords: visit.keywords,
         })),
-        count: visits.length
+        count: visits.length,
       };
     } catch (error) {
       return {
         error: String(error),
         visits: [],
-        count: 0
+        count: 0,
       };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       domain: {
-        type: 'string',
-        description: 'The domain name to filter by (e.g., "example.com")'
-      }
+        type: "string",
+        description: 'The domain name to filter by (e.g., "example.com")',
+      },
     },
-    required: ['domain'],
+    required: ["domain"],
   };
 }
 
-export class GetVisitsByKeywordTool implements Tool<{ keyword: string }, VisitHistoryKeywordResult | ErrorResult> {
-  name = 'get_visits_by_keyword';
-  description = 'Get a list of visited pages containing a specific keyword';
+export class GetVisitsByKeywordTool implements Tool<
+  { keyword: string },
+  VisitHistoryKeywordResult | ErrorResult
+> {
+  name = "get_visits_by_keyword";
+  description = "Get a list of visited pages containing a specific keyword";
 
-  async execute(args: { keyword: string }, _ctx?: LLMContext): Promise<VisitHistoryKeywordResult | ErrorResult> {
+  async execute(
+    args: { keyword: string },
+    _ctx?: LLMContext,
+  ): Promise<VisitHistoryKeywordResult | ErrorResult> {
     try {
-      const visits = await VisitHistoryManager.getInstance().getVisitsByKeyword(args.keyword);
+      const visits = await VisitHistoryManager.getInstance().getVisitsByKeyword(
+        args.keyword,
+      );
 
       return {
         visits: visits.map((visit: VisitData) => ({
@@ -3413,42 +3522,50 @@ export class GetVisitsByKeywordTool implements Tool<{ keyword: string }, VisitHi
           title: visit.title,
           visitTime: new Date(visit.timestamp).toLocaleString(),
           domain: visit.domain,
-          keywords: visit.keywords
+          keywords: visit.keywords,
         })),
-        count: visits.length
+        count: visits.length,
       };
     } catch (error) {
-      return { error: `Failed to get visits for keyword ${args.keyword}: ${error}` };
+      return {
+        error: `Failed to get visits for keyword ${args.keyword}: ${error}`,
+      };
     }
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       keyword: {
-        type: 'string',
-        description: 'The keyword to search for in page content'
-      }
+        type: "string",
+        description: "The keyword to search for in page content",
+      },
     },
-    required: ['keyword'],
+    required: ["keyword"],
   };
 }
 
-export class SearchVisitHistoryTool implements Tool<{
-  domain?: string,
-  keyword?: string,
-  daysAgo?: number,
-  limit?: number,
-}, VisitHistorySearchResult | ErrorResult> {
-  name = 'search_visit_history';
-  description = 'Search browsing history with multiple filter criteria';
+export class SearchVisitHistoryTool implements Tool<
+  {
+    domain?: string;
+    keyword?: string;
+    daysAgo?: number;
+    limit?: number;
+  },
+  VisitHistorySearchResult | ErrorResult
+> {
+  name = "search_visit_history";
+  description = "Search browsing history with multiple filter criteria";
 
-  async execute(args: {
-    domain?: string,
-    keyword?: string,
-    daysAgo?: number,
-    limit?: number,
-  }, _ctx?: LLMContext): Promise<VisitHistorySearchResult | ErrorResult> {
+  async execute(
+    args: {
+      domain?: string;
+      keyword?: string;
+      daysAgo?: number;
+      limit?: number;
+    },
+    _ctx?: LLMContext,
+  ): Promise<VisitHistorySearchResult | ErrorResult> {
     try {
       const { domain, keyword, daysAgo, limit } = args;
 
@@ -3458,7 +3575,7 @@ export class SearchVisitHistoryTool implements Tool<{
 
       if (daysAgo !== undefined) {
         const now = Date.now();
-        startTime = now - (daysAgo * 24 * 60 * 60 * 1000);
+        startTime = now - daysAgo * 24 * 60 * 60 * 1000;
         endTime = now;
       }
 
@@ -3467,24 +3584,24 @@ export class SearchVisitHistoryTool implements Tool<{
         keyword,
         startTime,
         endTime,
-        limit
+        limit,
       });
 
       return {
-        visits: visits.map(visit => ({
+        visits: visits.map((visit) => ({
           url: visit.url,
           title: visit.title,
           visitTime: new Date(visit.timestamp).toLocaleString(),
           domain: visit.domain,
-          keywords: visit.keywords
+          keywords: visit.keywords,
         })),
         count: visits.length,
         filters: {
           domain,
           keyword,
           daysAgo,
-          limit
-        }
+          limit,
+        },
       };
     } catch (error) {
       return { error: `Failed to search visit history: ${error}` };
@@ -3492,60 +3609,117 @@ export class SearchVisitHistoryTool implements Tool<{
   }
 
   schema = {
-    type: 'object',
+    type: "object",
     properties: {
       domain: {
-        type: 'string',
-        description: 'Optional domain filter'
+        type: "string",
+        description: "Optional domain filter",
       },
       keyword: {
-        type: 'string',
-        description: 'Optional keyword filter'
+        type: "string",
+        description: "Optional keyword filter",
       },
       daysAgo: {
-        type: 'number',
-        description: 'Optional filter for how many days back to search'
+        type: "number",
+        description: "Optional filter for how many days back to search",
       },
       limit: {
-        type: 'number',
-        description: 'Optional limit on number of results (default 100)'
-      }
-    }
+        type: "number",
+        description: "Optional limit on number of results (default 100)",
+      },
+    },
   };
 }
 
 /**
  * Returns all available tools
  */
-export function getTools(): Array<(
-  Tool<{ selector: string }, ElementInspectionResult | ErrorResult> |
-  Tool<{ url?: string, limit?: number }, NetworkAnalysisResult | ErrorResult> |
-  Tool<{ code: string }, JavaScriptExecutionResult | ErrorResult> |
-  Tool<{ limit?: number, level?: string }, ConsoleLogsResult | ErrorResult> |
-  Tool<{ url: string, reasoning: string }, NavigationResult | ErrorResult> |
-  Tool<{ steps: number, reasoning: string }, NavigateBackResult | ErrorResult> |
-  Tool<{ objective: string, offset?: number, chunkSize?: number, maxRetries?: number }, ObjectiveDrivenActionResult | ErrorResult> |
-  Tool<{ objective: string, schema: Record<string, unknown>, offset?: number, chunkSize?: number, maxRetries?: number }, SchemaBasedDataExtractionResult | ErrorResult> |
-  Tool<{ schema: SchemaDefinition, instruction?: string, selectorOrXPath?: string }, SchemaExtractionResult | ErrorResult> |
-  Tool<Record<string, unknown>, PageHTMLResult | ErrorResult> |
-  Tool<Record<string, unknown>, DevToolsContext | ErrorResult> |
-  Tool<{ selector: string }, ClickElementResult | ErrorResult> |
-  Tool<{ query: string, limit?: number }, SearchContentResult | ErrorResult> |
-  Tool<{ position?: { x: number, y: number }, direction?: string, amount?: number }, ScrollResult | ErrorResult> |
-  Tool<{ reasoning: string }, AccessibilityTreeResult | ErrorResult> |
-  Tool<{ method: string, nodeId: number, reasoning: string, args?: Record<string, unknown> | unknown[] }, PerformActionResult | ErrorResult> |
-  Tool<Record<string, unknown>, FullPageAccessibilityTreeToMarkdownResult | ErrorResult> |
-  Tool<{ nodeIds: number[] }, NodeIDsToURLsResult | ErrorResult> |
-  Tool<{ reasoning: string, instruction?: string }, HTMLToMarkdownResult | ErrorResult> |
-  Tool<{ url: string, reasoning: string, schema?: SchemaDefinition, markdownResponse?: boolean, extractionInstruction?: string }, CombinedExtractionResult | ErrorResult> |
-  Tool<FetcherToolArgs, FetcherToolResult> |
-  Tool<{ answer: string }, FinalizeWithCritiqueResult> |
-  Tool<{ domain: string }, VisitHistoryDomainResult | ErrorResult> |
-  Tool<{ keyword: string }, VisitHistoryKeywordResult | ErrorResult> |
-  Tool<{ domain?: string, keyword?: string, daysAgo?: number, limit?: number }, VisitHistorySearchResult | ErrorResult> |
-  Tool<{ seconds: number, reason?: string }, WaitResult | ErrorResult> |
-  Tool<SequentialThinkingArgs, SequentialThinkingResult | ErrorResult>
-)> {
+export function getTools(): Array<
+  | Tool<{ selector: string }, ElementInspectionResult | ErrorResult>
+  | Tool<{ url?: string; limit?: number }, NetworkAnalysisResult | ErrorResult>
+  | Tool<{ code: string }, JavaScriptExecutionResult | ErrorResult>
+  | Tool<{ limit?: number; level?: string }, ConsoleLogsResult | ErrorResult>
+  | Tool<{ url: string; reasoning: string }, NavigationResult | ErrorResult>
+  | Tool<{ steps: number; reasoning: string }, NavigateBackResult | ErrorResult>
+  | Tool<
+      {
+        objective: string;
+        offset?: number;
+        chunkSize?: number;
+        maxRetries?: number;
+      },
+      ObjectiveDrivenActionResult | ErrorResult
+    >
+  | Tool<
+      {
+        objective: string;
+        schema: Record<string, unknown>;
+        offset?: number;
+        chunkSize?: number;
+        maxRetries?: number;
+      },
+      SchemaBasedDataExtractionResult | ErrorResult
+    >
+  | Tool<
+      {
+        schema: SchemaDefinition;
+        instruction?: string;
+        selectorOrXPath?: string;
+      },
+      SchemaExtractionResult | ErrorResult
+    >
+  | Tool<Record<string, unknown>, PageHTMLResult | ErrorResult>
+  | Tool<Record<string, unknown>, DevToolsContext | ErrorResult>
+  | Tool<{ selector: string }, ClickElementResult | ErrorResult>
+  | Tool<{ query: string; limit?: number }, SearchContentResult | ErrorResult>
+  | Tool<
+      {
+        position?: { x: number; y: number };
+        direction?: string;
+        amount?: number;
+      },
+      ScrollResult | ErrorResult
+    >
+  | Tool<{ reasoning: string }, AccessibilityTreeResult | ErrorResult>
+  | Tool<
+      {
+        method: string;
+        nodeId: string;
+        reasoning: string;
+        args?: Record<string, unknown> | unknown[];
+      },
+      PerformActionResult | ErrorResult
+    >
+  | Tool<
+      Record<string, unknown>,
+      FullPageAccessibilityTreeToMarkdownResult | ErrorResult
+    >
+  | Tool<{ nodeIds: string[] }, NodeIDsToURLsResult | ErrorResult>
+  | Tool<
+      { reasoning: string; instruction?: string },
+      HTMLToMarkdownResult | ErrorResult
+    >
+  | Tool<
+      {
+        url: string;
+        reasoning: string;
+        schema?: SchemaDefinition;
+        markdownResponse?: boolean;
+        extractionInstruction?: string;
+      },
+      CombinedExtractionResult | ErrorResult
+    >
+  | Tool<FetcherToolArgs, FetcherToolResult>
+  | Tool<{ answer: string }, FinalizeWithCritiqueResult>
+  | Tool<{ domain: string }, VisitHistoryDomainResult | ErrorResult>
+  | Tool<{ keyword: string }, VisitHistoryKeywordResult | ErrorResult>
+  | Tool<
+      { domain?: string; keyword?: string; daysAgo?: number; limit?: number },
+      VisitHistorySearchResult | ErrorResult
+    >
+  | Tool<{ seconds: number; reason?: string }, WaitResult | ErrorResult>
+  | Tool<SequentialThinkingArgs, SequentialThinkingResult | ErrorResult>
+> {
   return [
     new ExecuteJavaScriptTool(),
     new NetworkAnalysisTool(),
@@ -3568,54 +3742,77 @@ export function getTools(): Array<(
     new GetVisitsByKeywordTool(),
     new SearchVisitHistoryTool(),
     new WaitTool(),
-    new SequentialThinkingTool()
+    new SequentialThinkingTool(),
   ];
 }
 
 // Export the SequentialThinkingTool
-export { SequentialThinkingTool } from './SequentialThinkingTool.js';
+export { SequentialThinkingTool } from "./SequentialThinkingTool.js";
 
 // Export HTML injection tools
-export { RenderWebAppTool } from './RenderWebAppTool.js';
-export type { RenderWebAppArgs, RenderWebAppResult } from './RenderWebAppTool.js';
-export { GetWebAppDataTool } from './GetWebAppDataTool.js';
-export type { GetWebAppDataArgs, GetWebAppDataResult } from './GetWebAppDataTool.js';
-export { RemoveWebAppTool } from './RemoveWebAppTool.js';
-export type { RemoveWebAppArgs, RemoveWebAppResult } from './RemoveWebAppTool.js';
+export { RenderWebAppTool } from "./RenderWebAppTool.js";
+export type {
+  RenderWebAppArgs,
+  RenderWebAppResult,
+} from "./RenderWebAppTool.js";
+export { GetWebAppDataTool } from "./GetWebAppDataTool.js";
+export type {
+  GetWebAppDataArgs,
+  GetWebAppDataResult,
+} from "./GetWebAppDataTool.js";
+export { RemoveWebAppTool } from "./RemoveWebAppTool.js";
+export type {
+  RemoveWebAppArgs,
+  RemoveWebAppResult,
+} from "./RemoveWebAppTool.js";
 
 // Export visual indicator manager
-export { VisualIndicatorManager } from './VisualIndicatorTool.js';
+export { VisualIndicatorManager } from "./VisualIndicatorTool.js";
 
 // Export ReadabilityExtractorTool
-export { ReadabilityExtractorTool } from './ReadabilityExtractorTool.js';
-export type { ReadabilityExtractorArgs, ReadabilityExtractorResult } from './ReadabilityExtractorTool.js';
+export { ReadabilityExtractorTool } from "./ReadabilityExtractorTool.js";
+export type {
+  ReadabilityExtractorArgs,
+  ReadabilityExtractorResult,
+} from "./ReadabilityExtractorTool.js";
 
-export { CreateFileTool } from './CreateFileTool.js';
-export type { CreateFileArgs, CreateFileResult } from './CreateFileTool.js';
-export { UpdateFileTool } from './UpdateFileTool.js';
-export type { UpdateFileArgs, UpdateFileResult } from './UpdateFileTool.js';
-export { DeleteFileTool } from './DeleteFileTool.js';
-export type { DeleteFileArgs, DeleteFileResult } from './DeleteFileTool.js';
-export { ReadFileTool } from './ReadFileTool.js';
-export type { ReadFileArgs, ReadFileResult } from './ReadFileTool.js';
-export { ListFilesTool } from './ListFilesTool.js';
-export type { ListFilesArgs, ListFilesResult } from './ListFilesTool.js';
-export { ExecuteCodeTool } from './ExecuteCodeTool.js';
-export type { ExecuteCodeArgs } from './ExecuteCodeTool.js';
+export { CreateFileTool } from "./CreateFileTool.js";
+export type { CreateFileArgs, CreateFileResult } from "./CreateFileTool.js";
+export { UpdateFileTool } from "./UpdateFileTool.js";
+export type { UpdateFileArgs, UpdateFileResult } from "./UpdateFileTool.js";
+export { DeleteFileTool } from "./DeleteFileTool.js";
+export type { DeleteFileArgs, DeleteFileResult } from "./DeleteFileTool.js";
+export { ReadFileTool } from "./ReadFileTool.js";
+export type { ReadFileArgs, ReadFileResult } from "./ReadFileTool.js";
+export { ListFilesTool } from "./ListFilesTool.js";
+export type { ListFilesArgs, ListFilesResult } from "./ListFilesTool.js";
+export { ExecuteCodeTool } from "./ExecuteCodeTool.js";
+export type { ExecuteCodeArgs } from "./ExecuteCodeTool.js";
 // Abortable sleep utility for tools that need delays/polling
 function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (!ms) return resolve();
-    const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
-    const onAbort = () => { clearTimeout(timer); cleanup(); reject(new DOMException('The operation was aborted', 'AbortError')); };
-    const cleanup = () => { signal?.removeEventListener('abort', onAbort); };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(new DOMException("The operation was aborted", "AbortError"));
+    };
+    const cleanup = () => {
+      signal?.removeEventListener("abort", onAbort);
+    };
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer);
         cleanup();
-        return reject(new DOMException('The operation was aborted', 'AbortError'));
+        return reject(
+          new DOMException("The operation was aborted", "AbortError"),
+        );
       }
-      signal.addEventListener('abort', onAbort, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true });
     }
   });
 }

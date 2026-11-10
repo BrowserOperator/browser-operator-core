@@ -38,6 +38,22 @@ export interface AgentSession {
   maxIterations?: number;
   modelUsed?: string;
   terminationReason?: string;
+
+  // Native metrics tracking
+  metrics?: AgentSessionMetrics;
+}
+
+/**
+ * Execution metrics tracked natively during agent execution
+ */
+export interface AgentSessionMetrics {
+  llmCallCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  toolCallCount: number;
+  toolCallsByName: Record<string, number>;
+  totalDurationMs?: number;
 }
 
 /**

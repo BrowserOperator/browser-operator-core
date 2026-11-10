@@ -257,7 +257,11 @@ export class InspectorView extends VBox implements ViewLocationResolver {
                                      drag: true,
                                      keydown: 'ArrowUp|ArrowLeft|ArrowDown|ArrowRight|Enter|Space',
                                    })}`);
-    (mainHeaderElement as HTMLElement).style.display = 'none';
+    // Only hide the tab bar when panel filter is enabled (ai-chat only mode)
+    const panelFilterEnabled = localStorage.getItem('ai_chat_panel_filter_enabled') !== 'false';
+    if (panelFilterEnabled) {
+      (mainHeaderElement as HTMLElement).style.display = 'none';
+    }
 
     // Store the initial selected panel for use in launch histograms
     Host.userMetrics.setLaunchPanel(this.tabbedPane.selectedTabId);

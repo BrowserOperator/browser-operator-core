@@ -5,7 +5,6 @@ import { ChatMessageEntity } from "../../../models/ChatTypes.js";
 import { MODEL_SENTINELS } from "../../../core/Constants.js";
 import { AGENT_VERSION } from "./AgentVersion.js";
 import { createLogger } from "../../../core/Logger.js";
-import * as SDK from '../../../../../core/sdk/sdk.js';
 
 const logger = createLogger('ActionAgent');
 
@@ -39,9 +38,10 @@ When analyzing page structure, you have access to:
 4. Determine the appropriate action method based on the element type and objective:
    - For links, buttons: use 'click'
    - For checkboxes: use 'check' (to check), 'uncheck' (to uncheck), or 'setChecked' (to set to specific state)
-   - For radio buttons: use 'click' 
+   - For radio buttons: use 'click'
    - For input fields: use 'fill' with appropriate text
    - For dropdown/select elements: use 'selectOption' with the option value or text
+   - For sliders/range inputs: use 'setValue' with numeric value to set precise values
 5. Execute the action using perform_action tool
 6. **CRITICAL: Analyze the pageChange evidence to determine action effectiveness**
 
@@ -64,14 +64,14 @@ After executing an action, the perform_action tool returns objective evidence in
   * Consider if the element might be disabled or hidden
 
 **Example Analysis:**
-Action: clicked search button (nodeId: 123)
+Action: clicked search button (nodeId: "0-123")
 Result: pageChange.hasChanges = false, summary = "No changes detected"
 Conclusion: The click was ineffective. Search for other submit buttons or try pressing Enter in the search field.
 
 **Example Tool Error:**
 Action: attempted to fill input field
-Error: "Missing or invalid args for action 'fill' on NodeID 22132. Expected an object with a string property 'text'. Example: { "text": "your value" }"
-Conclusion: Fix the args format and retry with proper syntax: { "method": "fill", "nodeId": 22132, "args": { "text": "search query" } }
+Error: "Missing or invalid args for action 'fill' on NodeID 0-22132. Expected an object with a string property 'text'. Example: { "text": "your value" }"
+Conclusion: Fix the args format and retry with proper syntax: { "method": "fill", "nodeId": "0-22132", "args": { "text": "search query" } }
 
 ## Important Considerations
 - **NEVER claim success unless pageChange.hasChanges = true**
@@ -86,9 +86,10 @@ Conclusion: Fix the args format and retry with proper syntax: { "method": "fill"
 - If pageChange shows no changes, immediately try an alternative approach
 
 ## Method Examples
-- perform_action with method='check' for checkboxes: { "method": "check", "nodeId": 123 }
-- perform_action with method='selectOption' for dropdowns: { "method": "selectOption", "nodeId": 456, "args": { "text": "United States" } }
-- perform_action with method='setChecked' for specific checkbox state: { "method": "setChecked", "nodeId": 789, "args": { "checked": true } }`,
+- perform_action with method='check' for checkboxes: { "method": "check", "nodeId": "0-123" }
+- perform_action with method='selectOption' for dropdowns: { "method": "selectOption", "nodeId": "0-456", "args": { "text": "United States" } }
+- perform_action with method='setChecked' for specific checkbox state: { "method": "setChecked", "nodeId": "0-789", "args": { "checked": true } }
+- perform_action with method='setValue' for sliders/range inputs: { "method": "setValue", "nodeId": "0-567", "args": { "value": 75 } }`,
     tools: [
       'get_page_content',
       'perform_action',
@@ -96,14 +97,6 @@ Conclusion: Fix the args format and retry with proper syntax: { "method": "fill"
       'node_ids_to_urls',
       'scroll_page',
       'take_screenshot',
-      'render_webapp',
-      'get_webapp_data',
-      'remove_webapp',
-      'create_file',
-      'update_file',
-      'delete_file',
-      'read_file',
-      'list_files',
     ],
     maxIterations: 10,
     modelName: MODEL_SENTINELS.USE_MINI,
@@ -131,7 +124,6 @@ Conclusion: Fix the args format and retry with proper syntax: { "method": "fill"
       required: ['objective', 'reasoning']
     },
     prepareMessages: (args: ConfigurableAgentArgs): ChatMessage[] => {
-      // For the action agent, we use the objective as the primary input, not the query field
       return [{
         entity: ChatMessageEntity.USER,
         text: `Objective: ${args.objective}\n
@@ -150,44 +142,53 @@ ${args.input_data ? `Input Data: ${args.input_data}` : ''}
     ],
     beforeExecute: async (callCtx: CallCtx): Promise<void> => {
       // Auto-navigate away from chrome:// URLs since action agent cannot interact with chrome:// pages
-      const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-      if (target) {
-        try {
-          const urlResult = await target.runtimeAgent().invoke_evaluate({
-            expression: 'window.location.href',
-            returnByValue: true,
-          });
+      const adapter = callCtx.cdpAdapter;
+      if (!adapter) {
+        // Skip in contexts without adapter (e.g., eval runner without browser)
+        return;
+      }
 
-          const currentUrl = urlResult.result?.value as string;
-          if (currentUrl && currentUrl.startsWith('chrome://')) {
-            logger.info(`Action agent invoked on chrome:// URL (${currentUrl}). Auto-navigating to Google...`);
+      try {
+        const urlResult = await adapter.runtimeAgent().invoke<{result?: {value?: string}}>('evaluate', {
+          expression: 'window.location.href',
+          returnByValue: true,
+        });
 
-            // Get navigate_url tool and execute
-            const navigateTool = ToolRegistry.getRegisteredTool('navigate_url');
-            if (navigateTool) {
-              // Create LLMContext from CallCtx for tool execution
-              const llmContext = {
-                apiKey: callCtx.apiKey,
-                provider: callCtx.provider!,
-                model: callCtx.model || callCtx.mainModel || '',
-                getVisionCapability: callCtx.getVisionCapability,
-                miniModel: callCtx.miniModel,
-                nanoModel: callCtx.nanoModel,
-                abortSignal: callCtx.abortSignal
-              };
-              await navigateTool.execute({
-                url: 'https://google.com',
-                reasoning: 'Auto-navigation from chrome:// URL to enable action agent functionality'
-              }, llmContext);
-              logger.info('Auto-navigation to Google completed successfully');
-            } else {
-              logger.warn('navigate_url tool not found, skipping auto-navigation');
+        const currentUrl = urlResult?.result?.value as string;
+        if (currentUrl && currentUrl.startsWith('chrome://')) {
+          logger.info(`Action agent invoked on chrome:// URL (${currentUrl}). Auto-navigating to Google...`);
+
+          // Get navigate_url tool and execute
+          const navigateTool = ToolRegistry.getRegisteredTool('navigate_url');
+          if (navigateTool) {
+            // Ensure provider is available before creating LLMContext
+            if (!callCtx.provider) {
+              logger.warn('Provider not available for auto-navigation, skipping');
+              return;
             }
+            // Create LLMContext from CallCtx for tool execution
+            const llmContext = {
+              apiKey: callCtx.apiKey,
+              provider: callCtx.provider,
+              model: callCtx.model || callCtx.mainModel || '',
+              getVisionCapability: callCtx.getVisionCapability,
+              miniModel: callCtx.miniModel,
+              nanoModel: callCtx.nanoModel,
+              abortSignal: callCtx.abortSignal,
+              cdpAdapter: callCtx.cdpAdapter
+            };
+            await navigateTool.execute({
+              url: 'https://google.com',
+              reasoning: 'Auto-navigation from chrome:// URL to enable action agent functionality'
+            }, llmContext);
+            logger.info('Auto-navigation to Google completed successfully');
+          } else {
+            logger.warn('navigate_url tool not found, skipping auto-navigation');
           }
-        } catch (error) {
-          logger.warn('Failed to check/navigate away from chrome:// URL:', error);
-          // Continue with agent execution even if auto-navigation fails
         }
+      } catch (error) {
+        logger.warn('Failed to check/navigate away from chrome:// URL:', error);
+        // Continue with agent execution even if auto-navigation fails
       }
     },
     includeSummaryInAnswer: true,  // Enable summary for action execution to provide insights

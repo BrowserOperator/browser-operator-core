@@ -1,0 +1,23 @@
+{
+  "name": "browser-operator-eval-runner",
+  "version": "1.0.0",
+  "description": "CLI Evaluation Runner for Browser Operator agents",
+  "scripts": {
+    "eval": "tsx cli.ts",
+    "test": "tsx cli.ts --tool action_agent --limit 1"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "dotenv": "^17.0.0",
+    "openai": "^4.0.0",
+    "puppeteer-core": "^24.0.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "braintrust": "^0.0.182"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

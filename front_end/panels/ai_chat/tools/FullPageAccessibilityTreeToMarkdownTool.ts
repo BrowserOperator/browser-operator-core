@@ -2,11 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { AgentService } from '../core/AgentService.js';
 import type { LLMContext } from './Tools.js';
 import { callLLMWithTracing } from './LLMTracingWrapper.js';
 
 import { GetAccessibilityTreeTool, type Tool, type ErrorResult } from './Tools.js';
+
+// Detect if we're in a Node.js environment (eval runner, tests)
+const isNodeEnvironment = typeof window === 'undefined' || typeof document === 'undefined';
+
+// Lazy-loaded browser-only AgentService dependency
+let AgentService: typeof import('../core/AgentService.js').AgentService | null = null;
+let agentServiceLoaded = false;
+
+async function ensureAgentService(): Promise<boolean> {
+  if (isNodeEnvironment) return false;
+  if (!agentServiceLoaded) {
+    agentServiceLoaded = true;
+    try {
+      const module = await import('../core/AgentService.js');
+      AgentService = module.AgentService;
+    } catch { return false; }
+  }
+  return AgentService !== null;
+}
 
 export interface FullPageAccessibilityTreeToMarkdownResult {
   success: boolean;
@@ -45,8 +63,12 @@ export class FullPageAccessibilityTreeToMarkdownTool implements Tool<Record<stri
       return { error: 'Empty or blank tree content.' };
     }
 
-    const agentService = AgentService.getInstance();
-    const apiKey = agentService.getApiKey();
+    // Get API key from context first, fallback to AgentService in browser
+    await ensureAgentService();
+    let apiKey = ctx?.apiKey;
+    if (!apiKey && AgentService) {
+      apiKey = AgentService.getInstance().getApiKey() ?? undefined;
+    }
 
     // Get provider from context
     if (!ctx?.provider || !ctx.nanoModel) {

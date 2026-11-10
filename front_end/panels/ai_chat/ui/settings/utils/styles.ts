@@ -373,6 +373,12 @@ export function getSettingsStyles(): string {
       border-bottom: 1px solid var(--color-details-hairline);
     }
 
+    .panel-filter-section {
+      margin-top: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--color-details-hairline);
+    }
+
     .settings-section-title {
       font-size: 16px;
       font-weight: 500;
@@ -604,6 +610,64 @@ export function getSettingsStyles(): string {
       font-size: 13px;
       color: var(--color-accent-red);
       padding: 8px 0;
+    }
+
+    .memory-status-message {
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin: 8px 0;
+    }
+
+    .memory-status-message.error {
+      background-color: var(--color-accent-red-background, rgba(255, 0, 0, 0.1));
+      color: var(--color-accent-red);
+    }
+
+    .memory-status-message.success {
+      background-color: var(--color-accent-green-background, rgba(0, 255, 0, 0.1));
+      color: var(--color-accent-green);
+    }
+
+    .memory-block-delete-container {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .memory-block-confirm {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .memory-block-confirm-label {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+    }
+
+    .memory-block-confirm-yes,
+    .memory-block-confirm-no {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 1px solid var(--color-details-hairline);
+      background: var(--color-background);
+    }
+
+    .memory-block-confirm-yes {
+      color: var(--color-accent-red);
+      border-color: var(--color-accent-red);
+    }
+
+    .memory-block-confirm-yes:hover {
+      background-color: var(--color-accent-red);
+      color: white;
+    }
+
+    .memory-block-confirm-no:hover {
+      background-color: var(--color-background-elevation-2);
     }
   `;
 }

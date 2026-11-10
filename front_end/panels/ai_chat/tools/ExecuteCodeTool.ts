@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as SDK from '../../../core/sdk/sdk.js';
 import { createLogger } from '../core/Logger.js';
 import type { Tool, LLMContext } from './Tools.js';
+import { getAdapter } from '../cdp/getAdapter.js';
 
 const logger = createLogger('Tool:ExecuteCode');
 
@@ -67,7 +67,7 @@ Examples:
     required: ['code', 'reasoning']
   };
 
-  async execute(args: ExecuteCodeArgs, _ctx?: LLMContext): Promise<any> {
+  async execute(args: ExecuteCodeArgs, ctx?: LLMContext): Promise<any> {
     const { code, reasoning } = args;
 
     if (typeof code !== 'string' || code.trim().length === 0) {
@@ -77,15 +77,19 @@ Examples:
     logger.info(`Executing code with reasoning: ${reasoning}`);
     logger.debug(`Code to execute: ${code.substring(0, 200)}${code.length > 200 ? '...' : ''}`);
 
-    // Get the main target
-    const target = SDK.TargetManager.TargetManager.instance().primaryPageTarget();
-    if (!target) {
-      return { error: 'No page target available' };
+    // Get adapter from context (works in both DevTools and eval runner)
+    const adapter = await getAdapter(ctx);
+    if (!adapter) {
+      return { error: 'No browser connection available' };
     }
 
     try {
       // Execute the code in the page context
-      const result = await target.runtimeAgent().invoke_evaluate({
+      const runtimeAgent = adapter.runtimeAgent();
+      const result = await runtimeAgent.invoke<{
+        result?: { value?: any; type?: string };
+        exceptionDetails?: { text?: string; exception?: { description?: string } };
+      }>('evaluate', {
         expression: code,
         returnByValue: true, // Return the actual value, not a remote object reference
         awaitPromise: true,  // Wait for promises to resolve
@@ -107,8 +111,8 @@ Examples:
       }
 
       // Return the raw result value directly
-      const resultValue = result.result.value;
-      logger.info(`Code executed successfully, result type: ${result.result.type}`);
+      const resultValue = result.result?.value;
+      logger.info(`Code executed successfully, result type: ${result.result?.type}`);
       logger.debug(`Result preview: ${JSON.stringify(resultValue).substring(0, 200)}...`);
 
       return resultValue;

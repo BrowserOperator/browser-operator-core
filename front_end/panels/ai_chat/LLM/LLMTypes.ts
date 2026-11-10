@@ -201,6 +201,14 @@ export interface LLMCallOptions {
   reasoningLevel?: 'low' | 'medium' | 'high'; // For O-series models
   retryConfig?: Partial<RetryConfig>;
   agentName?: string; // Name of the calling agent for provider-specific routing
+  // Tracing metadata for Langfuse integration via LiteLLM
+  tracingMetadata?: {
+    session_id?: string;
+    trace_id?: string;
+    generation_name?: string;
+    tags?: string[];
+    [key: string]: any;
+  };
 }
 
 /**

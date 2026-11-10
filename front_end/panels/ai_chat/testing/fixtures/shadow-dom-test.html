@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<!-- Copyright 2025 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow DOM Test Page</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .container {
+      margin: 20px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    .result {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      display: none;
+    }
+    .result.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>Shadow DOM Test Page</h1>
+  <p>This page contains various shadow DOM elements for testing the shadow piercer and element targeting capabilities.</p>
+
+  <div class="container" id="open-shadow-container">
+    <h2>Open Shadow Root</h2>
+    <p>This custom element has an open shadow root:</p>
+    <open-shadow-host id="open-host"></open-shadow-host>
+    <div class="result" id="open-result"></div>
+  </div>
+
+  <div class="container" id="closed-shadow-container">
+    <h2>Closed Shadow Root</h2>
+    <p>This custom element has a closed shadow root (requires shadow piercer):</p>
+    <closed-shadow-host id="closed-host"></closed-shadow-host>
+    <div class="result" id="closed-result"></div>
+  </div>
+
+  <div class="container" id="nested-shadow-container">
+    <h2>Nested Shadow Roots</h2>
+    <p>This custom element has multiple levels of nested shadow roots:</p>
+    <nested-shadow-host id="nested-host"></nested-shadow-host>
+    <div class="result" id="nested-result"></div>
+  </div>
+
+  <div class="container" id="form-shadow-container">
+    <h2>Form Inside Shadow DOM</h2>
+    <p>This custom element contains a form inside its shadow root:</p>
+    <shadow-form-host id="form-host"></shadow-form-host>
+  </div>
+
+  <div class="container" id="toggle-shadow-container">
+    <h2>Toggle Switch in Shadow DOM</h2>
+    <p>This custom element contains a toggle switch:</p>
+    <shadow-toggle id="toggle-host"></shadow-toggle>
+  </div>
+
+  <div class="container" id="select-shadow-container">
+    <h2>Custom Select in Shadow DOM</h2>
+    <p>This custom element contains a custom dropdown/select:</p>
+    <shadow-select id="select-host"></shadow-select>
+  </div>
+
+  <script>
+    // Open Shadow Host
+    class OpenShadowHost extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            button {
+              padding: 12px 24px;
+              font-size: 16px;
+              background: #4CAF50;
+              color: white;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+            }
+            button:hover {
+              background: #45a049;
+            }
+            button:active {
+              transform: scale(0.98);
+            }
+          </style>
+          <button id="open-btn">Open Button</button>
+        `;
+
+        shadow.querySelector('#open-btn').addEventListener('click', () => {
+          const result = document.getElementById('open-result');
+          result.textContent = 'Open Button was clicked at ' + new Date().toLocaleTimeString();
+          result.classList.add('visible');
+        });
+      }
+    }
+    customElements.define('open-shadow-host', OpenShadowHost);
+
+    // Closed Shadow Host
+    class ClosedShadowHost extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'closed' });
+        shadow.innerHTML = `
+          <style>
+            button {
+              padding: 12px 24px;
+              font-size: 16px;
+              background: #2196F3;
+              color: white;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+            }
+            button:hover {
+              background: #1976D2;
+            }
+          </style>
+          <button id="closed-btn">Closed Button</button>
+        `;
+
+        shadow.querySelector('#closed-btn').addEventListener('click', () => {
+          const result = document.getElementById('closed-result');
+          result.textContent = 'Closed Button was clicked at ' + new Date().toLocaleTimeString();
+          result.classList.add('visible');
+        });
+      }
+    }
+    customElements.define('closed-shadow-host', ClosedShadowHost);
+
+    // Nested Shadow Host (outer level)
+    class NestedShadowHost extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'closed' });
+        shadow.innerHTML = `
+          <style>
+            .outer {
+              padding: 15px;
+              background: #f5f5f5;
+              border-radius: 4px;
+            }
+          </style>
+          <div class="outer">
+            <p>Outer shadow (closed)</p>
+            <inner-shadow-host></inner-shadow-host>
+          </div>
+        `;
+      }
+    }
+
+    // Inner Shadow Host
+    class InnerShadowHost extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'closed' });
+        shadow.innerHTML = `
+          <style>
+            .inner {
+              padding: 15px;
+              background: #e0e0e0;
+              border-radius: 4px;
+              margin-top: 10px;
+            }
+            button {
+              padding: 12px 24px;
+              font-size: 16px;
+              background: #9C27B0;
+              color: white;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+            }
+            button:hover {
+              background: #7B1FA2;
+            }
+          </style>
+          <div class="inner">
+            <p>Inner shadow (closed)</p>
+            <button id="nested-btn">Nested Button</button>
+          </div>
+        `;
+
+        shadow.querySelector('#nested-btn').addEventListener('click', () => {
+          const result = document.getElementById('nested-result');
+          result.textContent = 'Nested Button was clicked at ' + new Date().toLocaleTimeString();
+          result.classList.add('visible');
+        });
+      }
+    }
+    customElements.define('nested-shadow-host', NestedShadowHost);
+    customElements.define('inner-shadow-host', InnerShadowHost);
+
+    // Shadow Form Host
+    class ShadowFormHost extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            form {
+              display: flex;
+              flex-direction: column;
+              gap: 15px;
+              max-width: 300px;
+            }
+            label {
+              font-weight: bold;
+            }
+            input {
+              padding: 10px;
+              font-size: 14px;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+            }
+            button {
+              padding: 12px 24px;
+              font-size: 16px;
+              background: #FF9800;
+              color: white;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+            }
+            .success {
+              color: #4CAF50;
+              font-weight: bold;
+            }
+          </style>
+          <form id="shadow-form">
+            <div>
+              <label for="email">Email:</label>
+              <input type="email" id="email" name="email" placeholder="test@example.com">
+            </div>
+            <div>
+              <label for="password">Password:</label>
+              <input type="password" id="password" name="password" placeholder="Enter password">
+            </div>
+            <button type="submit">Submit</button>
+            <div id="form-result"></div>
+          </form>
+        `;
+
+        shadow.querySelector('#shadow-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const email = shadow.querySelector('#email').value;
+          const password = shadow.querySelector('#password').value;
+          const result = shadow.querySelector('#form-result');
+          result.innerHTML = `<span class="success">Form submitted with email: ${email}</span>`;
+        });
+      }
+    }
+    customElements.define('shadow-form-host', ShadowFormHost);
+
+    // Shadow Toggle
+    class ShadowToggle extends HTMLElement {
+      constructor() {
+        super();
+        this._checked = false;
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            .toggle-container {
+              display: flex;
+              align-items: center;
+              gap: 10px;
+            }
+            .toggle {
+              width: 50px;
+              height: 26px;
+              background: #ccc;
+              border-radius: 13px;
+              position: relative;
+              cursor: pointer;
+              transition: background 0.3s;
+            }
+            .toggle.checked {
+              background: #4CAF50;
+            }
+            .toggle-handle {
+              width: 22px;
+              height: 22px;
+              background: white;
+              border-radius: 50%;
+              position: absolute;
+              top: 2px;
+              left: 2px;
+              transition: left 0.3s;
+            }
+            .toggle.checked .toggle-handle {
+              left: 26px;
+            }
+            .status {
+              font-size: 14px;
+              color: #666;
+            }
+          </style>
+          <div class="toggle-container">
+            <div class="toggle" role="switch" aria-checked="false" tabindex="0">
+              <div class="toggle-handle"></div>
+            </div>
+            <span class="status">OFF</span>
+          </div>
+        `;
+
+        const toggle = shadow.querySelector('.toggle');
+        const status = shadow.querySelector('.status');
+
+        toggle.addEventListener('click', () => {
+          this._checked = !this._checked;
+          toggle.classList.toggle('checked', this._checked);
+          toggle.setAttribute('aria-checked', this._checked.toString());
+          status.textContent = this._checked ? 'ON' : 'OFF';
+        });
+      }
+    }
+    customElements.define('shadow-toggle', ShadowToggle);
+
+    // Shadow Select (Custom Dropdown)
+    class ShadowSelect extends HTMLElement {
+      constructor() {
+        super();
+        this._open = false;
+        this._value = '';
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            .select-container {
+              position: relative;
+              width: 200px;
+            }
+            .select-trigger {
+              padding: 10px 15px;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+              background: white;
+              cursor: pointer;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .select-trigger:hover {
+              border-color: #999;
+            }
+            .arrow {
+              border: solid #666;
+              border-width: 0 2px 2px 0;
+              padding: 3px;
+              transform: rotate(45deg);
+              transition: transform 0.2s;
+            }
+            .arrow.up {
+              transform: rotate(-135deg);
+            }
+            .options {
+              position: absolute;
+              top: 100%;
+              left: 0;
+              right: 0;
+              background: white;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+              margin-top: 4px;
+              display: none;
+              z-index: 100;
+            }
+            .options.open {
+              display: block;
+            }
+            .option {
+              padding: 10px 15px;
+              cursor: pointer;
+            }
+            .option:hover {
+              background: #f0f0f0;
+            }
+            .option.selected {
+              background: #e3f2fd;
+            }
+            .value-display {
+              color: #666;
+            }
+            .value-display.has-value {
+              color: #333;
+            }
+          </style>
+          <div class="select-container">
+            <div class="select-trigger" role="combobox" aria-expanded="false">
+              <span class="value-display">Select an option</span>
+              <span class="arrow"></span>
+            </div>
+            <div class="options" role="listbox">
+              <div class="option" role="option" data-value="option-a">Option A</div>
+              <div class="option" role="option" data-value="option-b">Option B</div>
+              <div class="option" role="option" data-value="option-c">Option C</div>
+              <div class="option" role="option" data-value="option-d">Option D</div>
+            </div>
+          </div>
+        `;
+
+        const trigger = shadow.querySelector('.select-trigger');
+        const options = shadow.querySelector('.options');
+        const arrow = shadow.querySelector('.arrow');
+        const valueDisplay = shadow.querySelector('.value-display');
+
+        trigger.addEventListener('click', () => {
+          this._open = !this._open;
+          options.classList.toggle('open', this._open);
+          arrow.classList.toggle('up', this._open);
+          trigger.setAttribute('aria-expanded', this._open.toString());
+        });
+
+        shadow.querySelectorAll('.option').forEach(option => {
+          option.addEventListener('click', () => {
+            // Remove selected from all
+            shadow.querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+            // Select this one
+            option.classList.add('selected');
+            this._value = option.dataset.value;
+            valueDisplay.textContent = option.textContent;
+            valueDisplay.classList.add('has-value');
+            // Close dropdown
+            this._open = false;
+            options.classList.remove('open');
+            arrow.classList.remove('up');
+            trigger.setAttribute('aria-expanded', 'false');
+          });
+        });
+
+        // Close on outside click
+        document.addEventListener('click', (e) => {
+          if (!this.contains(e.target)) {
+            this._open = false;
+            options.classList.remove('open');
+            arrow.classList.remove('up');
+            trigger.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+    }
+    customElements.define('shadow-select', ShadowSelect);
+  </script>
+</body>
+</html>

@@ -18,7 +18,6 @@ import { getAgentUIConfig } from '../agent_framework/AgentSessionTypes.js';
 import { VersionChecker, type VersionInfo } from '../core/VersionChecker.js';
 import { LiveAgentSessionComponent } from './LiveAgentSessionComponent.js';
 import { MarkdownRenderer, renderMarkdown } from './markdown/MarkdownRenderers.js';
-import { parseStructuredResponse } from '../core/structured_response.js';
 import { ToolDescriptionFormatter } from './ToolDescriptionFormatter.js';
 import './message/MessageList.js';
 import { renderUserMessage } from './message/UserMessage.js';
@@ -26,13 +25,11 @@ import { renderModelMessage } from './message/ModelMessage.js';
 import { renderToolResultMessage } from './message/ToolResultMessage.js';
 import './version/VersionBanner.js';
 import { renderGlobalActionsRow } from './message/GlobalActionsRow.js';
-import { renderStructuredResponse as renderStructuredResponseUI } from './message/StructuredResponseRender.js';
 import './oauth/OAuthConnectPanel.js';
 import './input/ChatInput.js';
 import './input/InputBar.js';
 import './model_selector/ModelSelector.js';
 import { combineMessages } from './message/MessageCombiner.js';
-import { StructuredResponseController } from './message/StructuredResponseController.js';
 import './TodoListDisplay.js';
 import './FileListDisplay.js';
 
@@ -220,11 +217,7 @@ export class ChatView extends HTMLElement {
   // Add OAuth login properties
   #showOAuthLogin = false;
   #onOAuthLogin?: () => void;
-  
-  // Structured response auto-open controller
-  #structuredController = new StructuredResponseController(() => {
-    void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
-  });
+
   // Combined messages cache for this render pass
   #combinedMessagesCache: CombinedMessage[] = [];
   // Track agent session IDs that are nested inside other sessions to avoid duplicate top-level rendering
@@ -267,6 +260,17 @@ export class ChatView extends HTMLElement {
         this.#lastSuggestionHost = null;
       }
     } catch {}
+
+    // Explicitly clean up child elements that have intervals
+    // This ensures proper cleanup in test environments
+    const todoList = this.#shadow.querySelector('ai-todo-list');
+    if (todoList && 'disconnectedCallback' in todoList) {
+      (todoList as any).disconnectedCallback();
+    }
+    const fileList = this.#shadow.querySelector('ai-file-list-display');
+    if (fileList && 'disconnectedCallback' in fileList) {
+      (fileList as any).disconnectedCallback();
+    }
   }
 
   // Test-only helper to introspect cached live agent sessions
@@ -283,7 +287,6 @@ export class ChatView extends HTMLElement {
   setAgentViewMode(mode: 'simplified' | 'enhanced'): void {
     this.#agentViewMode = mode;
     void ComponentHelpers.ScheduledRender.scheduleRender(this, this.#boundRender);
-    this.#structuredController.resetLastProcessed();
   }
 
   /**
@@ -300,22 +303,6 @@ export class ChatView extends HTMLElement {
   // Lane-based routing: deprecated session-heuristics removed
 
   // Scroll behavior handled by <ai-message-list>
-
-  #isLastStructuredMessage(currentCombinedIndex: number): boolean {
-    const combined = this.#combinedMessagesCache.length ? this.#combinedMessagesCache : combineMessages(this.#messages);
-    let lastStructuredIndex = -1;
-    for (let i = 0; i < combined.length; i++) {
-      const m = combined[i];
-      if (m.entity === ChatMessageEntity.MODEL && (m as any).action === 'final') {
-        const sr = parseStructuredResponse(((m as any).answer || '') as string);
-        if (sr) {
-          lastStructuredIndex = i;
-        }
-      }
-    }
-    return lastStructuredIndex === currentCombinedIndex;
-  }
-
 
   // Update the prompt button click handler when props/state changes
   #updatePromptButtonClickHandler(): void {
@@ -385,14 +372,7 @@ export class ChatView extends HTMLElement {
   }
 
   set data(data: Props) {
-    const previousMessageCount = this.#messages?.length || 0;
-    const willHaveMoreMessages = data.messages?.length > previousMessageCount;
     const wasInputDisabled = this.#isInputDisabled;
-
-    // Inform structured response controller of new messages
-    if (willHaveMoreMessages) {
-      this.#structuredController.handleNewMessages(this.#messages, data.messages);
-    }
 
     this.#messages = data.messages;
     this.#state = data.state;
@@ -628,15 +608,7 @@ export class ChatView extends HTMLElement {
 
             // --- Render Final Answer ---
             if (isFinal) {
-              // Check if this is a structured response with REASONING and MARKDOWN_REPORT sections
-              const structuredResponse = parseStructuredResponse(modelMessage.answer || '');
-              
-              if (structuredResponse) {
-                return this.#renderStructuredResponse(structuredResponse, combinedIndex);
-              } else {
-                // Regular final answer -> delegate to renderer
-                return renderModelMessage(modelMessage as any, this.#markdownRenderer);
-              }
+              return renderModelMessage(modelMessage as any, this.#markdownRenderer);
             }
 
             // --- Render Tool Call with Timeline Design ---
@@ -1323,21 +1295,6 @@ export class ChatView extends HTMLElement {
     ></ai-version-banner>`;
   }
 
-  // Method to parse structured response with reasoning and markdown_report XML tags
-  // parseStructuredResponse moved to core/structured_response.ts
-
-  // Render structured response with last-message-only auto-processing
-  #renderStructuredResponse(structuredResponse: {reasoning: string, markdownReport: string}, combinedIndex?: number): Lit.TemplateResult {
-    const { aiState, isLastMessage } = this.#structuredController.computeStateAndMaybeOpen(
-      structuredResponse,
-      combinedIndex || 0,
-      this.#combinedMessagesCache as any
-    );
-    return renderStructuredResponseUI(structuredResponse, { aiState, isLastMessage }, this.#markdownRenderer);
-  }
-
-  // Presentational structured response handled by StructuredResponseRender
-  // Auto-open behavior delegated to StructuredResponseController
   /**
    * Toggle between simplified and enhanced agent view
    */
