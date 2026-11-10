@@ -16,6 +16,20 @@ def checked(*args):
     return subprocess.check_output(['gh', *args], text=True)
 
 
+def public_release_manifest(release):
+    """Keep build-host paths and untracked filenames in private audit evidence."""
+    fields = ('version', 'architecture', 'update_channel', 'team_id', 'dmg', 'sha256',
+              'notarization', 'gatekeeper', 'mounted_app_functional_tests',
+              'functional_test_architectures', 'native_updater_upgrade_test',
+              'intel_hardware_test', 'updater_trust', 'build_settings',
+              'source_base_revision', 'source_patch_sha256', 'source_frozen_manifest_sha256')
+    result = {key: release[key] for key in fields if key in release}
+    for key in ('native_source_state', 'frontend_source_state', 'universal_composition'):
+        if key in release:
+            result[key + '_sha256'] = hashlib.sha256(json.dumps(release[key], sort_keys=True).encode()).hexdigest()
+    return result
+
+
 def main(production=False):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--candidate', required=True, type=Path)
@@ -76,7 +90,11 @@ def main(production=False):
     package['url'] = f'https://github.com/{REPOSITORY}/releases/download/{a.tag}/{artifact.name}'
     output = a.candidate / 'catalog-github.json'
     output.write_text(json.dumps(catalog, indent=2) + '\n')
-    files = [artifact, output, a.candidate / 'update-manifest.json', a.release / 'release-manifest.json']
+    public = a.candidate / 'public'
+    public.mkdir(exist_ok=True)
+    published_manifest = public / 'release-manifest.json'
+    published_manifest.write_text(json.dumps(public_release_manifest(release), indent=2) + '\n')
+    files = [artifact, output, a.candidate / 'update-manifest.json', published_manifest]
     if production:
         dmg = a.release / 'artifacts' / release['dmg']
         if dmg.parent != a.release / 'artifacts':

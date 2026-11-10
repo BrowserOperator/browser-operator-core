@@ -15,6 +15,15 @@ import publish_test_update as publisher
 
 
 class ProductionPublishingTests(unittest.TestCase):
+    def test_public_manifest_contains_no_local_paths_or_untracked_names(self):
+        private = {'version': '158.0.8127.18', 'native_source_state': {
+            'untracked_source_files': {'private-local-filename': {'link': '/Users/example/local'}}}}
+        public = publisher.public_release_manifest(private)
+        self.assertEqual(public['version'], private['version'])
+        self.assertIn('native_source_state_sha256', public)
+        self.assertNotIn('private-local-filename', json.dumps(public))
+        self.assertNotIn('/Users/', json.dumps(public))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

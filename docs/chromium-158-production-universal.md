@@ -11,7 +11,7 @@ also expects it by default; `--manual-updates` is an explicit escape hatch for
 historical artifacts. Both architectures use official optimization, PGO phase2,
 full frontend type checking and bundled DevTools. ThinLTO is disabled on the
 16GiB build host. Total native compile concurrency remains six jobs; every
-build stops below5GiB free. Intel output/config defaults are distinct from ARM.
+build stops below 5 GiB free. Intel output/config defaults are distinct from ARM.
 
 ## Permanent update identity
 
@@ -30,15 +30,15 @@ build stops below5GiB free. Intel output/config defaults are distinct from ARM.
   `793e74189c15bcabab1034d920d45d580dd0f983243ca7d48a0e7d73b3e5809f`.
 
 The CUP private key is held in Secret Manager, secret
-`browser-operator-production-cup`, pinned version1. The runtime service account
+`browser-operator-production-cup`, pinned version 1. The runtime service account
 can access only that secret. The package-signing private key remains on the
 signing Mac, outside repositories. Do not regenerate these keys for a new
 browser version: existing clients pin their public trust roots. A backend move
 can retain the hostname and keys without rebuilding clients.
 
-The initial stable catalog is deliberately empty. A production159 release must
+The initial stable catalog is deliberately empty. A production 159 release must
 be built with these same production identities, signed/notarized, packaged and
-qualified before offering it to158 clients. Earlier158-to159 qualification with
+qualified before offering it to 158 clients. Earlier158-to159 qualification with
 test identities is not a substitute for the production rollout check.
 
 ## Build, freeze and merge
@@ -131,3 +131,32 @@ stable catalog and promote that immutable image. Universal payloads can serve
 both Mac CPU types, preserving universal installations; architecture-specific
 catalog entries must not overlap. The service rejects wrong channels, ambiguous
 architecture entries, non-GitHub production download origins and downgrades.
+
+## Qualification isolation and retries
+
+Native updater checks require a clean dedicated macOS user namespace. Packaging
+refuses to replace a pre-existing production or qualification controller. The
+smoke test can install its own signed helper; it uninstalls only that newly
+created helper, verifies removal of its wake agents, and preserves diagnostics
+in the private release evidence. A successful authenticated check may report
+up-to-date, downloading or relaunch required; this does not claim an upgrade
+installation passed. The feed can therefore advance without invalidating
+verification of an older signed release.
+
+Public release assets contain a reduced provenance manifest: detailed local
+untracked filenames and absolute symlink targets stay in private audit evidence,
+represented publicly by digests. The frozen-input manifest remains private.
+
+Every attempt uses a new output and frozen-input directory. If CI fails after
+freezing, preserve the completed input and diagnostics. To retry signing, invoke
+the packager directly with that verified `--frozen-input` and a new `--output`.
+If a final signed/stapled DMG already exists, use `--verify-existing` with its
+original output to resume verification. Never delete or overwrite an accepted
+release to make a retry pass. The CircleCI wrapper itself starts fresh and
+requires a new `RELEASE_OUTPUT` for a full rerun.
+
+Production promotion accepts only universal payloads covering both CPU types.
+Native update requests expose OS architecture, which cannot distinguish ARM64
+and universal installations on Apple Silicon. Both installers receive future
+universal updates, preserving Intel compatibility. ARM-only catalog candidates
+may accompany download assets but must not be activated in the stable service.

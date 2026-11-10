@@ -6,6 +6,7 @@ notarytool keychain profile. Never modifies the input app or deletes a release.
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -176,7 +177,7 @@ def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None):
                     run([node, scripts / 'verify_chromium_about.mjs', endpoint, artifacts])
                 else:
                     run([node, scripts / 'updater/verify_browser_updater.mjs',
-                         endpoint, version, 'updated', artifacts])
+                         endpoint, version, 'successful-check', artifacts])
             finally:
                 if process.poll() is None:
                     process.terminate()
@@ -223,10 +224,13 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 raise RuntimeError('Expected exactly one embedded updater')
             validate_mounted_app(updater_apps[0], team, output / 'gatekeeper-updater.txt')
         tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
-        for cpu in tested_architectures:
-            cpu_tests = tests / cpu
-            cpu_tests.mkdir(exist_ok=True)
-            smoke_test(mounted_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
+        from updater.macos_smoke_scope import UpdaterSmokeScope
+        scope = UpdaterSmokeScope(settings, team, tests) if updater_enabled else contextlib.nullcontext()
+        with scope:
+            for cpu in tested_architectures:
+                cpu_tests = tests / cpu
+                cpu_tests.mkdir(exist_ok=True)
+                smoke_test(mounted_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
     finally:
         run(['hdiutil', 'detach', volume])
     with dmg.open('rb') as stream:
@@ -327,6 +331,9 @@ def main():
     from chromium_macos_arch import verify_architectures
     verify_architectures(app, args.architecture)
     identity, team = find_identity(args.identity)
+    if args.updater_enabled:
+        from updater.macos_smoke_scope import UpdaterSmokeScope
+        UpdaterSmokeScope(settings, team, output).require_clean()
     packaging = build / 'Browser Operator Packaging'
     if not (packaging / 'sign_chrome.py').is_file():
         raise RuntimeError('Build chrome/installer/mac to generate the packaging pipeline first')
