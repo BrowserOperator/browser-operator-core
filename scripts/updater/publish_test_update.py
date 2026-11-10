@@ -20,6 +20,7 @@ def public_release_manifest(release):
     """Keep build-host paths and untracked filenames in private audit evidence."""
     fields = ('version', 'architecture', 'update_channel', 'team_id', 'dmg', 'sha256',
               'notarization', 'gatekeeper', 'mounted_app_functional_tests',
+              'mounted_app_validation', 'installed_dmg_copy_functional_tests',
               'functional_test_architectures', 'native_updater_upgrade_test',
               'intel_hardware_test', 'updater_trust', 'build_settings',
               'source_base_revision', 'source_patch_sha256', 'source_frozen_manifest_sha256')

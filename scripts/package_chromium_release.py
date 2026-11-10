@@ -227,11 +227,19 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
         from updater.macos_smoke_scope import UpdaterSmokeScope
         scope = UpdaterSmokeScope(settings, team, tests) if updater_enabled else contextlib.nullcontext()
+        # Native Chromium correctly refuses registration on a read-only DMG.
+        # Exercise the actual installation path using this exact verified app,
+        # leaving the user's /Applications and browser profile untouched.
+        installed = tests / 'installed'
+        installed.mkdir()
+        installed_app = installed / app_name
+        run(['cp', '-cR', mounted_app, installed_app])
+        validate_mounted_app(installed_app, team, tests / 'gatekeeper-installed-app.txt')
         with scope:
             for cpu in tested_architectures:
                 cpu_tests = tests / cpu
                 cpu_tests.mkdir(exist_ok=True)
-                smoke_test(mounted_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
+                smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu)
     finally:
         run(['hdiutil', 'detach', volume])
     with dmg.open('rb') as stream:
@@ -247,7 +255,8 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 **{key: value for key, value in provenance.items() if key.startswith('source_')},
                 'dmg': dmg.name, 'sha256': digest, 'build_settings': settings,
                 'notarization': 'accepted and stapled', 'gatekeeper': 'accepted',
-                'mounted_app_functional_tests': 'passed'}
+                'mounted_app_validation': 'passed',
+                'installed_dmg_copy_functional_tests': 'passed'}
     manifest['mach_o_architectures'] = binaries
     manifest['verification_evidence'] = str(tests.relative_to(output))
     manifest['functional_test_architectures'] = {cpu: 'passed' for cpu in tested_architectures}

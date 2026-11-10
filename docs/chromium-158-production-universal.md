@@ -87,8 +87,10 @@ python3 scripts/package_chromium_release.py --chromium-src /path/to/chromium/src
 
 The existing nested Developer ID signing, app/DMG notarization and stapling,
 APFS packaging, strict signatures, hardened runtime and Gatekeeper checks are
-retained. Functional/About/updater checks run from each final mounted DMG with
-disposable profiles. Universal validation requires Rosetta on Apple Silicon
+retained. Each final DMG is mounted read-only and its signatures/tickets are verified.
+Functional/About/updater checks run from a writable install copy of that exact
+app with disposable profiles. Chromium deliberately refuses updater registration
+on read-only mounts; a DMG launch is not a valid installed-updater test. Universal validation requires Rosetta on Apple Silicon
 and runs both CPU slices. macOS's public proc API verifies that browser and
 renderer processes actually use the requested CPU. Physical Intel hardware
 qualification remains distinct from Rosetta execution.
