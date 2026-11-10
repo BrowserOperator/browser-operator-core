@@ -22,6 +22,9 @@ def merge(source, arm, intel, output):
             raise RuntimeError(f'Architecture inputs differ in {key}')
     if a['build_settings']['target_cpu'] != '"arm64"' or b['build_settings']['target_cpu'] != '"x64"':
         raise RuntimeError('Expected one ARM64 and one Intel input')
+    for key in ('publication_policy', 'release_source_trees'):
+        if a.get(key) != b.get(key):
+            raise RuntimeError(f'Architecture publication inputs differ in {key}')
     for key in set(a['build_settings']) | set(b['build_settings']):
         if key != 'target_cpu' and a['build_settings'].get(key) != b['build_settings'].get(key):
             raise RuntimeError(f'Architecture build settings differ in {key}')

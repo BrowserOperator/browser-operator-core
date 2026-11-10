@@ -45,3 +45,12 @@ After merge, public v0.7.0 in browser-operator-core will expose the Mac DMGs to
 legacy users, with private copies retained in Omaha. Native Omaha compares the
 four-part Chromium version: same158.0.8127.18 rebuilds require the legacy notice
 and manual bootstrap; a genuine159 native offer is separately qualified.
+
+
+Product0.7.0 main integration is PR111 (base main). The final integration
+restores main's AI files untouched by release work, removes duplicate AI
+settings/resource entries, and compiles both158 architectures. Its frozen
+manifest records the five product source trees; publication requires PR111
+merged into main with those exact trees. A later product change requires
+a rebuild. The Windows candidate is a separate CircleCI change/build and
+will not publish an installer or activate a Windows update feed.

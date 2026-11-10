@@ -61,6 +61,17 @@ def freeze(source, build, destination):
         'updater_trust': updater_trust(source, settings),
         'input_files': inventory(destination),
     }
+    policy_path = frontend_root / 'config/releases' / (product_version.group(1) + '.json')
+    if policy_path.exists():
+        frontend_state = metadata['frontend_source_state']
+        if (frontend_state['patch_sha256'] != hashlib.sha256(b'').hexdigest()
+                or frontend_state['untracked_source_files']):
+            raise RuntimeError('Merge-gated release inputs require committed, clean frontend source')
+        metadata['publication_policy'] = json.loads(policy_path.read_text())
+        metadata['release_source_trees'] = {
+            name: subprocess.check_output(['git', 'rev-parse', 'HEAD:' + name], cwd=frontend_root, text=True).strip()
+            for name in ('front_end', 'BUILD.gn', 'config', 'scripts', 'patches')
+        }
     (destination / 'frozen-input.json').write_text(json.dumps(metadata, indent=2) + '\n')
     load(destination)
     return metadata

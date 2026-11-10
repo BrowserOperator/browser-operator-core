@@ -108,6 +108,9 @@ def main(production=False):
     for path in files:
         with path.open('rb') as stream:
             expected[path.name] = (path, path.stat().st_size, 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest())
+    if production and release.get('publication_policy'):
+        from release_merge_gate import require_merged_release
+        require_merged_release(release['publication_policy'], release.get('release_source_trees', {}))
     # Draft releases do not necessarily have a Git tag yet; look them up by
     # release ID rather than the /tags endpoint. Uploaded assets are immutable.
     pages = json.loads(checked('api', f'repos/{REPOSITORY}/releases?per_page=100', '--paginate', '--slurp'))

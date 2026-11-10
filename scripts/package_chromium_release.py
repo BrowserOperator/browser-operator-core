@@ -273,6 +273,9 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
     manifest['mach_o_architectures'] = binaries
     if provenance.get('browser_operator_version'):
         manifest['browser_operator_version'] = provenance['browser_operator_version']
+    for key in ('publication_policy', 'release_source_trees'):
+        if provenance.get(key):
+            manifest[key] = provenance[key]
     manifest['verification_evidence'] = str(tests.relative_to(output))
     manifest['functional_test_architectures'] = {cpu: 'passed' for cpu in tested_architectures}
     if architecture == 'universal':

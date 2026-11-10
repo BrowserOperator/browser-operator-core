@@ -282,9 +282,9 @@ devtools_module("ai_chat") {
   deps = [
     ":css_files",
     "../../core/common:bundle",
-    "../../core/host:bundle",
-    "../../core/platform:bundle",
     "../../core/root:bundle",
+    "../../core/platform:bundle",
+    "../../core/host:bundle",
     "../../core/i18n:bundle",
     "../../core/sdk:bundle",
     "../../generated:protocol",
@@ -302,8 +302,7 @@ devtools_module("ai_chat") {
   ]
 }
 
-# Derive release resources from the actual TypeScript action outputs so new
-# modules cannot be omitted from a second, manually maintained source list.
+# Derive release resources from actual compiler outputs, including new main modules.
 _ai_chat_js_outputs_for_metadata =
     filter_include(get_target_outputs(":ai_chat"), [ "*.js" ])
 
