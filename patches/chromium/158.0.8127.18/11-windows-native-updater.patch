@@ -1,0 +1,676 @@
+diff --git a/build/toolchain/win/midl.py b/build/toolchain/win/midl.py
+index 370e5ad..96519f4 100644
+--- a/build/toolchain/win/midl.py
++++ b/build/toolchain/win/midl.py
+@@ -274,6 +274,17 @@ def generate_idl_from_template(idl_template, dynamic_guids, idl):
+ 
+ # This function runs the MIDL compiler with the provided arguments. It creates
+ # and returns a tuple of |0,midl_output_dir| on success.
++def NormalizeDynamicIdlComment(contents, original_idl, generated_idl):
++    # Branding an existing .idl relocates the compiler input to gen/. Only
++    # normalize that provenance comment; declarations and GUIDs stay compared.
++    # Existing .template inputs already have gen/ paths in their baselines.
++    if not original_idl.endswith('.idl'):
++        return contents
++    generated = b'/* Compiler settings for ' + generated_idl.encode() + b':'
++    original = b'/* Compiler settings for ' + original_idl.encode() + b':'
++    return contents.replace(generated, original)
++
++
+ def run_midl(args, env_dict):
+     midl_output_dir = tempfile.mkdtemp()
+     delete_midl_output_dir = True
+@@ -500,6 +511,16 @@ def main(
+     if returncode != 0:
+         return returncode
+ 
++    if idl_template:
++        for filename in (h, iid):
++            if filename:
++                path = os.path.join(midl_output_dir, filename)
++                with open(path, 'rb') as output:
++                    contents = output.read()
++                with open(path, 'wb') as output:
++                    output.write(NormalizeDynamicIdlComment(
++                        contents, idl_template, idl))
++
+     # Now compare the output in midl_output_dir to the copied-over outputs.
+     _, mismatch, errors = filecmp.cmpfiles(
+         midl_output_dir, outdir, common_files
+diff --git a/chrome/browser/devtools/BUILD.gn b/chrome/browser/devtools/BUILD.gn
+index 519b00f..3a972bd 100644
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -137,6 +137,8 @@ static_library("devtools") {
+ 
+   deps = [
+     "//base",
++    "//chrome/browser:buildflags",
++    "//chrome/browser/ui:chrome_pages",
+     "//chrome/browser:file_select_helper",
+     "//chrome/browser/infobars",
+     "//chrome/browser/lifetime",
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
+index 41cc46f..60a175e 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.cc
++++ b/chrome/browser/devtools/devtools_ui_bindings.cc
+@@ -1432,7 +1432,7 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
+ 
+ void DevToolsUIBindings::OpenInNewTab(const std::string& url) {
+   GURL gurl(url);
+-#if BUILDFLAG(IS_MAC) && BUILDFLAG(ENABLE_UPDATER)
++#if (BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)) && BUILDFLAG(ENABLE_UPDATER)
+   // The shipped Browser Operator panel may open only the fixed native update
+   // page. Remote/custom frontends and all other chrome:// URLs retain the
+   // standard request policy below.
+@@ -2387,7 +2387,7 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
+ 
+ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
+   base::DictValue config = GetHostConfigDictionary(profile_);
+-#if BUILDFLAG(IS_MAC) && BUILDFLAG(ENABLE_UPDATER)
++#if (BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)) && BUILDFLAG(ENABLE_UPDATER)
+   if (is_local_frontend_ && !profile_->IsSystemProfile() && web_contents_) {
+     const GURL& frontend = web_contents_->GetLastCommittedURL();
+     if (frontend.SchemeIs(content::kChromeDevToolsScheme) &&
+diff --git a/chrome/browser/ui/webui/help/BUILD.gn b/chrome/browser/ui/webui/help/BUILD.gn
+index 45aa604..e026cb4 100644
+--- a/chrome/browser/ui/webui/help/BUILD.gn
++++ b/chrome/browser/ui/webui/help/BUILD.gn
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//chrome/common/features.gni")
++import("//chrome/updater/branding.gni")
+ 
+ source_set("help") {
+   public = [ "version_updater.h" ]
+@@ -53,7 +54,7 @@ source_set("help") {
+   }
+ 
+   if (is_win) {
+-    if (is_chrome_branded) {
++    if (is_chrome_branded || browser_operator_updater_config != "") {
+       sources = [ "version_updater_win.cc" ]
+       deps += [
+         "//chrome/app:generated_resources_grit",
+diff --git a/chrome/elevation_service/BUILD.gn b/chrome/elevation_service/BUILD.gn
+index 0ce72b2..d4f2fea 100644
+--- a/chrome/elevation_service/BUILD.gn
++++ b/chrome/elevation_service/BUILD.gn
+@@ -6,10 +6,15 @@ import("//build/config/chrome_build.gni")
+ import("//build/config/ui.gni")
+ import("//build/toolchain/win/midl.gni")
+ import("//chrome/process_version_rc_template.gni")
++import("//chrome/updater/branding.gni")
+ import("//testing/libfuzzer/fuzzer_test.gni")
+ import("//testing/test.gni")
+ 
+ midl("elevation_service_idl") {
++  if (browser_operator_updater_config != "") {
++    dynamic_guids = "ignore_proxy_stub,BB19A0E5-00C6-4966-94B2-5AFEC6FED93A=DF13BDBE-D910-5F85-93E8-9A1FDC67192D,0014D784-7012-4A79-8AB6-ADDB8193A06E=98F8B270-AA59-5C5F-9C69-3E2B5F104DC9"
++  }
++
+   sources = [ "elevation_service_idl.idl" ]
+ 
+   writes_tlb = true
+diff --git a/chrome/install_static/BUILD.gn b/chrome/install_static/BUILD.gn
+index e01fe13..27c6838 100644
+--- a/chrome/install_static/BUILD.gn
++++ b/chrome/install_static/BUILD.gn
+@@ -5,13 +5,16 @@
+ import("//build/buildflag_header.gni")
+ import("//build/config/chrome_build.gni")
+ import("//testing/test.gni")
++import("//chrome/updater/branding.gni")
+ 
+ buildflag_header("buildflags") {
+   header = "buildflags.h"
+-  if (is_chrome_branded && is_win) {
+-    flags = [ "USE_GOOGLE_UPDATE_INTEGRATION=true" ]
++  browser_operator_windows_updates = is_win && browser_operator_updater_config != ""
++  flags = [ "BROWSER_OPERATOR_UPDATE_INTEGRATION=$browser_operator_windows_updates" ]
++  if ((is_chrome_branded || browser_operator_windows_updates) && is_win) {
++    flags += [ "USE_GOOGLE_UPDATE_INTEGRATION=true" ]
+   } else {
+-    flags = [ "USE_GOOGLE_UPDATE_INTEGRATION=false" ]
++    flags += [ "USE_GOOGLE_UPDATE_INTEGRATION=false" ]
+   }
+ }
+ 
+@@ -54,6 +57,8 @@ if (is_win) {
+       sources += [ "google_chrome_install_modes.h" ]
+     } else if (is_chrome_for_testing_branded) {
+       sources += [ "google_chrome_for_testing_install_modes.h" ]
++    } else if (browser_operator_updater_config != "") {
++      sources += [ "browser_operator_install_modes.h" ]
+     } else {
+       sources += [ "chromium_install_modes.h" ]
+     }
+diff --git a/chrome/install_static/browser_operator_install_modes.h b/chrome/install_static/browser_operator_install_modes.h
+new file mode 100644
+index 0000000..f2f3d21
+--- /dev/null
++++ b/chrome/install_static/browser_operator_install_modes.h
+@@ -0,0 +1,104 @@
++// Copyright 2016 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Brand-specific types and constants for Chromium.
++
++#ifndef CHROME_INSTALL_STATIC_BROWSER_OPERATOR_INSTALL_MODES_H_
++#define CHROME_INSTALL_STATIC_BROWSER_OPERATOR_INSTALL_MODES_H_
++
++#include <array>
++#include <string_view>
++
++#include "chrome/app/chrome_dll_resource.h"
++#include "chrome/common/chrome_icon_resources_win.h"
++#include "chrome/install_static/install_constants.h"
++
++namespace install_static {
++
++// The brand-specific company name to be included as a component of the install
++// and user data directory paths. May be empty if no such dir is to be used.
++inline constexpr wchar_t kCompanyPathName[] = L"BrowserOperator";
++
++// The brand-specific product name to be included as a component of the install
++// and user data directory paths.
++inline constexpr wchar_t kProductPathName[] = L"Browser Operator";
++
++// The brand-specific safe browsing client name.
++inline constexpr char kSafeBrowsingName[] = "chromium";
++
++// Note: This list of indices must be kept in sync with the brand-specific
++// resource strings in chrome/installer/util/prebuild/create_string_rc.
++enum InstallConstantIndex {
++  CHROMIUM_INDEX,
++  NUM_INSTALL_MODES,
++};
++
++inline constexpr auto kOldTracingServiceIids = std::to_array<IID>({
++    // Replaced in 2026-09. Delete after 2028-09.
++    // {A3FD580A-FFD4-4075-9174-75D0B199D3CB}
++    {0xa3fd580a,
++     0xffd4,
++     0x4075,
++     {0x91, 0x74, 0x75, 0xd0, 0xb1, 0x99, 0xd3, 0xcb}},
++});
++
++inline constexpr auto kInstallModes = std::to_array<InstallConstants>({
++    // The primary (and only) install mode for Chromium.
++    {
++        .size = sizeof(InstallConstants),
++        .index = CHROMIUM_INDEX,  // The one and only mode for Chromium.
++        .install_switch =
++            "",  // No install switch for the primary install mode.
++        .install_suffix =
++            L"",  // Empty install_suffix for the primary install mode.
++        .logo_suffix = L"",  // No logo suffix for the primary install mode.
++        .app_guid =
++            L"{6A900E82-8B40-53D6-84F6-494715149889}",  // Browser Operator update identity.
++        .base_app_name = L"Browser Operator",              // A distinct base_app_name.
++        .base_app_id = L"BrowserOperator",                // A distinct base_app_id.
++        .browser_prog_id_prefix = L"BrowserOpHTM",  // Browser ProgID prefix.
++        .browser_prog_id_description =
++            L"Browser Operator HTML Document",  // Browser ProgID description.
++        .direct_launch_url_scheme = "browseroperator",
++        .pdf_prog_id_prefix = L"BrowserOpPDF",  // PDF ProgID prefix.
++        .pdf_prog_id_description =
++            L"Browser Operator PDF Document",  // PDF ProgID description.
++        .active_setup_guid =
++            L"{9B2C6864-59B1-5C80-8A80-DA6802FE61A9}",  // Active Setup
++                                                        // GUID.
++        .toast_activator_clsid = {0x48d9c750, 0x53e6, 0x55c8, {0x90, 0x7d, 0xe1, 0x41, 0xc3, 0x1c, 0x3b, 0x1d}},  // Toast Activator CLSID.
++        .elevator_clsid = {0x79cf1b84, 0xb4c0, 0x5d9e, {0xa5, 0x52, 0x03, 0x9a, 0x23, 0x09, 0x7b, 0x70}},
++        .elevator_iid = {0xdf13bdbe, 0xd910, 0x5f85, {0x93, 0xe8, 0x9a, 0x1f, 0xdc, 0x67, 0x19, 0x2d}},
++        .old_elevator_iids = {},
++        .tracing_service_clsid = {0x62f56917, 0x30da, 0x536a, {0xa9, 0x36, 0x90, 0x33, 0x1c, 0x11, 0x18, 0x34}},
++        .tracing_service_iid = {0xa6191323, 0x484b, 0x567f, {0xa2, 0xfa, 0x28, 0xa9, 0x9f, 0xd7, 0x6c, 0xaf}},
++        .old_tracing_service_iids = {},
++        .default_channel_name =
++            L"",  // Empty default channel name since no update integration.
++        .channel_strategy = ChannelStrategy::FIXED,
++        .supports_system_level = true,  // Supports system-level installs.
++        .supports_set_as_default_browser =
++            true,  // Supports in-product set as default browser UX.
++        .app_icon_resource_index =
++            icon_resources::kApplicationIndex,  // App icon resource index.
++        .app_icon_resource_id = IDR_MAINFRAME,  // App icon resource id.
++        .html_doc_icon_resource_index =
++            icon_resources::kHtmlDocIndex,  // HTML doc icon resource index.
++        .pdf_doc_icon_resource_index =
++            icon_resources::kPDFDocIndex,  // PDF doc icon resource index.
++        .sandbox_sid_prefix =
++            L"S-1-15-2-3486774053-2428884997-534694156-2855730961-431531788-1642304090-1315250560-",  // Browser Operator app container.
++    },
++});
++
++// Windows limits ProgIds to 39 characters. Chromium appends a dot and
++// a 26-character user hash for per-user registration.
++static_assert(std::wstring_view(kInstallModes[0].browser_prog_id_prefix).size() +
++                  27 <= 39);
++static_assert(std::wstring_view(kInstallModes[0].pdf_prog_id_prefix).size() +
++                  27 <= 39);
++
++}  // namespace install_static
++
++#endif  // CHROME_INSTALL_STATIC_BROWSER_OPERATOR_INSTALL_MODES_H_
+diff --git a/chrome/install_static/install_modes.cc b/chrome/install_static/install_modes.cc
+index bdd057b..3dafdb5 100644
+--- a/chrome/install_static/install_modes.cc
++++ b/chrome/install_static/install_modes.cc
+@@ -6,22 +6,28 @@
+ 
+ #include "chrome/install_static/buildflags.h"
+ 
++#if BUILDFLAG(BROWSER_OPERATOR_UPDATE_INTEGRATION)
++#define BROWSER_OPERATOR_UPDATE_ROOT L"Software\\BrowserOperator\\Update"
++#else
++#define BROWSER_OPERATOR_UPDATE_ROOT L"Software\\Google\\Update"
++#endif
++
+ namespace install_static {
+ 
+ namespace {
+ 
+ #if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+ std::wstring GetClientsKeyPathForApp(const wchar_t* app_guid) {
+-  return std::wstring(L"Software\\Google\\Update\\Clients\\").append(app_guid);
++  return std::wstring(BROWSER_OPERATOR_UPDATE_ROOT L"\\Clients\\").append(app_guid);
+ }
+ 
+ std::wstring GetClientStateKeyPathForApp(const wchar_t* app_guid) {
+-  return std::wstring(L"Software\\Google\\Update\\ClientState\\")
++  return std::wstring(BROWSER_OPERATOR_UPDATE_ROOT L"\\ClientState\\")
+       .append(app_guid);
+ }
+ 
+ std::wstring GetClientStateMediumKeyPathForApp(const wchar_t* app_guid) {
+-  return std::wstring(L"Software\\Google\\Update\\ClientStateMedium\\")
++  return std::wstring(BROWSER_OPERATOR_UPDATE_ROOT L"\\ClientStateMedium\\")
+       .append(app_guid);
+ }
+ #else
+diff --git a/chrome/install_static/install_modes.h b/chrome/install_static/install_modes.h
+index d2a8f59..f186278 100644
+--- a/chrome/install_static/install_modes.h
++++ b/chrome/install_static/install_modes.h
+@@ -33,6 +33,7 @@
+ #include <string>
+ 
+ #include "build/branding_buildflags.h"
++#include "chrome/install_static/buildflags.h"
+ 
+ // Include the brand-specific values. Each of these must define:
+ // - kCompanyPathName, kProductPathName and kSafeBrowsingName constants.
+@@ -44,6 +45,8 @@
+ #include "chrome/install_static/google_chrome_install_modes.h"
+ #elif BUILDFLAG(GOOGLE_CHROME_FOR_TESTING_BRANDING)
+ #include "chrome/install_static/google_chrome_for_testing_install_modes.h"
++#elif BUILDFLAG(BROWSER_OPERATOR_UPDATE_INTEGRATION)
++#include "chrome/install_static/browser_operator_install_modes.h"
+ #else
+ #include "chrome/install_static/chromium_install_modes.h"
+ #endif
+diff --git a/chrome/installer/mini_installer/BUILD.gn b/chrome/installer/mini_installer/BUILD.gn
+index df9408b..fd0b185 100644
+--- a/chrome/installer/mini_installer/BUILD.gn
++++ b/chrome/installer/mini_installer/BUILD.gn
+@@ -7,6 +7,7 @@ import("//build/config/python.gni")
+ import("//build/config/ui.gni")
+ import("//build/timestamp.gni")
+ import("//chrome/process_version_rc_template.gni")
++import("//chrome/updater/branding.gni")
+ import("//third_party/dawn/scripts/dawn_features.gni")
+ import("//third_party/ffmpeg/ffmpeg_options.gni")
+ import("//third_party/icu/config.gni")
+@@ -71,6 +72,7 @@ source_set("lib") {
+ 
+   deps = [
+     "//base:compiler_specific",
++    "//chrome/install_static:buildflags",
+     "//build:branding_buildflags",
+   ]
+ 
+@@ -200,6 +202,11 @@ action("mini_installer_archive") {
+     "//third_party/icu:icudata",
+   ]
+ 
++  if (browser_operator_updater_config != "") {
++    inputs += [ "$root_out_dir/UpdaterSetup.exe" ]
++    deps += [ "//chrome/updater/win/installer" ]
++  }
++
+   if (enable_hidpi) {
+     args += [ "--enable_hidpi=1" ]
+   }
+@@ -263,6 +270,7 @@ source_set("mini_installer_sources") {
+     ":lib",
+     "//base:clang_profiling_buildflags",
+     "//base:compiler_specific",
++    "//chrome/install_static:buildflags",
+   ]
+   configs -= [ "//build/config/compiler:default_init_stack_vars" ]
+   configs += [ ":mini_installer_compiler_flags" ]
+diff --git a/chrome/installer/mini_installer/chrome.release b/chrome/installer/mini_installer/chrome.release
+index 33e8546..6ff15cd 100644
+--- a/chrome/installer/mini_installer/chrome.release
++++ b/chrome/installer/mini_installer/chrome.release
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ [GENERAL]
++UpdaterSetup.exe: %(VersionDir)s\
+ #
+ # Chrome Application dir entries, sorted alphabetically.
+ #
+diff --git a/chrome/installer/mini_installer/chrome_appid.cc b/chrome/installer/mini_installer/chrome_appid.cc
+index 8875c8f..10c1f82 100644
+--- a/chrome/installer/mini_installer/chrome_appid.cc
++++ b/chrome/installer/mini_installer/chrome_appid.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/installer/mini_installer/appid.h"
+ 
+ #include "build/branding_buildflags.h"
++#include "chrome/install_static/buildflags.h"
+ 
+ namespace google_update {
+ 
+@@ -13,6 +14,8 @@ const wchar_t kAppGuid[] = L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
+ const wchar_t kBetaAppGuid[] = L"{8237E44A-0054-442C-B6B6-EA0509993955}";
+ const wchar_t kDevAppGuid[] = L"{401C381F-E0DE-4B85-8BD8-3F3F14FBDA57}";
+ const wchar_t kSxSAppGuid[] = L"{4ea16ac7-fd5a-47c3-875b-dbf4a2008c20}";
++#elif BUILDFLAG(BROWSER_OPERATOR_UPDATE_INTEGRATION)
++const wchar_t kAppGuid[] = L"{6A900E82-8B40-53D6-84F6-494715149889}";
+ #else   // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ const wchar_t kAppGuid[] = L"";
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+diff --git a/chrome/installer/mini_installer/mini_installer.cc b/chrome/installer/mini_installer/mini_installer.cc
+index c37d8d1..4011f2b 100644
+--- a/chrome/installer/mini_installer/mini_installer.cc
++++ b/chrome/installer/mini_installer/mini_installer.cc
+@@ -42,6 +42,7 @@
+ #include <initializer_list>
+ 
+ #include "build/branding_buildflags.h"
++#include "chrome/install_static/buildflags.h"
+ #include "chrome/installer/mini_installer/appid.h"
+ #include "chrome/installer/mini_installer/configuration.h"
+ #include "chrome/installer/mini_installer/decompress.h"
+@@ -68,7 +69,7 @@ void DeleteWithRetryAndMetrics(const wchar_t* path, int& max_delete_attempts) {
+ // TODO(grt): Frame this in terms of whether or not the brand supports
+ // integration with Omaha, where Google Update is the Google-specific fork of
+ // the open-source Omaha project.
+-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
++#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+ // Opens the Google Update ClientState key for the current install mode.
+ bool OpenInstallStateKey(const Configuration& configuration, RegKey* key) {
+   const HKEY root_key =
+@@ -749,7 +750,7 @@ ProcessExitResult WMain(HMODULE module) {
+     DeleteExtractedFiles(module, setup_path, base_path, max_delete_attempts);
+   }
+ 
+-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
++#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+   if (exit_code.IsSuccess()) {
+     // Send up a signal in ExtraCode1 upon successful install indicating the
+     // maximum number of retries needed to delete a file or directory by
+diff --git a/chrome/installer/mini_installer/mini_installer_constants.cc b/chrome/installer/mini_installer/mini_installer_constants.cc
+index ed57860..ec17a63 100644
+--- a/chrome/installer/mini_installer/mini_installer_constants.cc
++++ b/chrome/installer/mini_installer/mini_installer_constants.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/installer/mini_installer/mini_installer_constants.h"
+ 
+ #include "build/branding_buildflags.h"
++#include "chrome/install_static/buildflags.h"
+ 
+ namespace mini_installer {
+ 
+@@ -56,6 +57,10 @@ const wchar_t kClientStateKeyBase[] =
+     L"Software\\Google\\Update\\ClientState\\";
+ // The path to the key in which kCleanupRegistryValue is found.
+ const wchar_t kCleanupRegistryKey[] = L"Software\\Google";
++#elif BUILDFLAG(BROWSER_OPERATOR_UPDATE_INTEGRATION)
++const wchar_t kClientsKeyBase[] = L"Software\\BrowserOperator\\Update\\Clients\\";
++const wchar_t kClientStateKeyBase[] = L"Software\\BrowserOperator\\Update\\ClientState\\";
++const wchar_t kCleanupRegistryKey[] = L"Software\\BrowserOperator";
+ #elif BUILDFLAG(GOOGLE_CHROME_FOR_TESTING_BRANDING)
+ // The path to the key containing each app's Clients registry key.
+ // No trailing slash on this one because the app's GUID is not appended.
+diff --git a/chrome/installer/mini_installer/regkey.cc b/chrome/installer/mini_installer/regkey.cc
+index e9d8af1..c309a5a 100644
+--- a/chrome/installer/mini_installer/regkey.cc
++++ b/chrome/installer/mini_installer/regkey.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "base/compiler_specific.h"
+ #include "build/branding_buildflags.h"
++#include "chrome/install_static/buildflags.h"
+ #include "chrome/installer/mini_installer/mini_installer_constants.h"
+ #include "chrome/installer/mini_installer/mini_string.h"
+ 
+@@ -85,7 +86,7 @@ LONG OpenClientsKey(HKEY root_key,
+   StackString<MAX_PATH> clients_key;
+   if (!clients_key.assign(kClientsKeyBase))
+     return ERROR_BUFFER_OVERFLOW;
+-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
++#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+   if (!clients_key.append(app_guid))
+     return ERROR_BUFFER_OVERFLOW;
+ #endif
+@@ -100,7 +101,7 @@ LONG OpenClientStateKey(HKEY root_key,
+   StackString<MAX_PATH> client_state_key;
+   if (!client_state_key.assign(kClientStateKeyBase))
+     return ERROR_BUFFER_OVERFLOW;
+-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
++#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+   if (!client_state_key.append(app_guid))
+     return ERROR_BUFFER_OVERFLOW;
+ #endif
+diff --git a/chrome/installer/setup/BUILD.gn b/chrome/installer/setup/BUILD.gn
+index e7e695f..0560441 100644
+--- a/chrome/installer/setup/BUILD.gn
++++ b/chrome/installer/setup/BUILD.gn
+@@ -5,6 +5,7 @@
+ import("//build/buildflag_header.gni")
+ import("//build/config/chrome_build.gni")
+ import("//chrome/process_version_rc_template.gni")
++import("//chrome/updater/branding.gni")
+ import("//services/webnn/features.gni")
+ import("//testing/test.gni")
+ 
+@@ -143,7 +144,7 @@ if (is_win) {
+       deps += [ "//services/webnn/public/cpp:win" ]
+     }
+ 
+-    if (is_chrome_branded) {
++    if (is_chrome_branded || browser_operator_updater_config != "") {
+       sources += [
+         "channel_override_work_item.cc",
+         "channel_override_work_item.h",
+diff --git a/chrome/installer/setup/setup_main.cc b/chrome/installer/setup/setup_main.cc
+index 3b9e317..24b6b71 100644
+--- a/chrome/installer/setup/setup_main.cc
++++ b/chrome/installer/setup/setup_main.cc
+@@ -61,6 +61,7 @@
+ #include "base/win/scoped_handle.h"
+ #include "base/win/windows_handle_util.h"
+ #include "build/branding_buildflags.h"
++#include "chrome/install_static/buildflags.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/enterprise/connectors/device_trust/key_management/core/network/win_key_network_delegate.h"
+ #include "chrome/browser/enterprise/connectors/device_trust/key_management/installer/key_rotation_manager.h"
+@@ -1445,6 +1446,42 @@ InstallStatus InstallProductsHelper(InstallationState& original_state,
+     }
+   }
+ 
++#if BUILDFLAG(BROWSER_OPERATOR_UPDATE_INTEGRATION)
++  if (InstallUtil::GetInstallReturnCode(install_status) == 0) {
++    // This product owns a separate updater and registry tree. Never bootstrap
++    // Google's updater or rely on a developer's machine-wide installation.
++    base::win::RegKey updater_key;
++    std::wstring updater_version;
++    const bool registered =
++        updater_key.Open(system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER,
++                         L"Software\\BrowserOperator\\Update\\Clients\\{CCEB6F77-92D1-55FC-A133-3C1DEB2848C3}",
++                         KEY_READ | KEY_WOW64_32KEY) == ERROR_SUCCESS &&
++        updater_key.ReadValue(L"pv", &updater_version) == ERROR_SUCCESS &&
++        !updater_version.empty();
++    if (!registered) {
++      base::CommandLine updater_setup(
++          installer_state.target_path()
++              .AppendASCII(installer_version->GetString())
++              .Append(L"UpdaterSetup.exe"));
++      updater_setup.AppendSwitch("install");
++      updater_setup.AppendSwitch("silent");
++      if (system_install) {
++        updater_setup.AppendSwitch("system");
++      }
++      base::Process process = base::LaunchProcess(updater_setup, {});
++      int exit_code = -1;
++      if (!process.IsValid() ||
++          !process.WaitForExitWithTimeout(base::Minutes(3), &exit_code) ||
++          exit_code != 0) {
++        LOG(ERROR) << "Browser Operator updater installation failed: " << exit_code;
++        install_status = INSTALL_FAILED;
++        installer_state.WriteInstallerResult(
++            install_status, IDS_INSTALL_FAILED_BASE, nullptr);
++      }
++    }
++  }
++#endif
++
+   // If the installation completed successfully...
+   if (InstallUtil::GetInstallReturnCode(install_status) == 0) {
+     // Update the installer properties created by an MSI-based install.
+diff --git a/chrome/installer/util/google_update_constants.cc b/chrome/installer/util/google_update_constants.cc
+index d29b9e2..1a838b4 100644
+--- a/chrome/installer/util/google_update_constants.cc
++++ b/chrome/installer/util/google_update_constants.cc
+@@ -3,6 +3,13 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/installer/util/google_update_constants.h"
++#include "chrome/install_static/buildflags.h"
++
++#if BUILDFLAG(BROWSER_OPERATOR_UPDATE_INTEGRATION)
++#define BROWSER_OPERATOR_UPDATE_ROOT L"Software\\BrowserOperator\\Update"
++#else
++#define BROWSER_OPERATOR_UPDATE_ROOT L"Software\\Google\\Update"
++#endif
+ 
+ namespace google_update {
+ 
+@@ -13,11 +20,11 @@ const wchar_t kGoogleUpdateUpgradeCode[] =
+ 
+ const wchar_t kGoogleUpdateSetupExe[] = L"GoogleUpdateSetup.exe";
+ 
+-const wchar_t kRegPathClients[] = L"Software\\Google\\Update\\Clients";
+-const wchar_t kRegPathClientState[] = L"Software\\Google\\Update\\ClientState";
++const wchar_t kRegPathClients[] = BROWSER_OPERATOR_UPDATE_ROOT L"\\Clients";
++const wchar_t kRegPathClientState[] = BROWSER_OPERATOR_UPDATE_ROOT L"\\ClientState";
+ const wchar_t kRegPathClientStateMedium[] =
+-    L"Software\\Google\\Update\\ClientStateMedium";
+-const wchar_t kRegPathGoogleUpdate[] = L"Software\\Google\\Update";
++    BROWSER_OPERATOR_UPDATE_ROOT L"\\ClientStateMedium";
++const wchar_t kRegPathGoogleUpdate[] = BROWSER_OPERATOR_UPDATE_ROOT L"";
+ 
+ const wchar_t kRegCommandsKey[] = L"Commands";
+ 
+diff --git a/chrome/updater/branding.gni b/chrome/updater/branding.gni
+index 4311700..cee8d84 100644
+--- a/chrome/updater/branding.gni
++++ b/chrome/updater/branding.gni
+@@ -150,6 +150,57 @@ if (browser_operator_updater_config != "") {
+   browser_operator_cup_key = browser_operator_updater_branding.browser_operator_cup_key
+   browser_operator_cup_key_version = browser_operator_updater_branding.browser_operator_cup_key_version
+ 
++  if (is_win) {
++    platform_experience_helper_appid = browser_operator_updater_branding.platform_experience_helper_appid
++    prefs_access_mutex = browser_operator_updater_branding.prefs_access_mutex
++    setup_mutex_prefix = browser_operator_updater_branding.setup_mutex_prefix
++    legacy_google_update_appid = browser_operator_updater_branding.legacy_google_update_appid
++    UpdaterLegacyLibGUID = browser_operator_updater_branding.UpdaterLegacyLibGUID
++    GoogleUpdate3WebUserClassGUID = browser_operator_updater_branding.GoogleUpdate3WebUserClassGUID
++    GoogleUpdate3WebSystemClassGUID = browser_operator_updater_branding.GoogleUpdate3WebSystemClassGUID
++    GoogleUpdate3WebServiceClassGUID = browser_operator_updater_branding.GoogleUpdate3WebServiceClassGUID
++    PolicyStatusUserClassGUID = browser_operator_updater_branding.PolicyStatusUserClassGUID
++    PolicyStatusSystemClassGUID = browser_operator_updater_branding.PolicyStatusSystemClassGUID
++    ProcessLauncherClassGUID = browser_operator_updater_branding.ProcessLauncherClassGUID
++    IAppVersionWebGUID = browser_operator_updater_branding.IAppVersionWebGUID
++    IAppVersionWebUserGUID = browser_operator_updater_branding.IAppVersionWebUserGUID
++    IAppVersionWebSystemGUID = browser_operator_updater_branding.IAppVersionWebSystemGUID
++    ICurrentStateGUID = browser_operator_updater_branding.ICurrentStateGUID
++    ICurrentStateUserGUID = browser_operator_updater_branding.ICurrentStateUserGUID
++    ICurrentStateSystemGUID = browser_operator_updater_branding.ICurrentStateSystemGUID
++    IGoogleUpdate3WebGUID = browser_operator_updater_branding.IGoogleUpdate3WebGUID
++    IGoogleUpdate3WebUserGUID = browser_operator_updater_branding.IGoogleUpdate3WebUserGUID
++    IGoogleUpdate3WebSystemGUID = browser_operator_updater_branding.IGoogleUpdate3WebSystemGUID
++    IAppBundleWebGUID = browser_operator_updater_branding.IAppBundleWebGUID
++    IAppBundleWebUserGUID = browser_operator_updater_branding.IAppBundleWebUserGUID
++    IAppBundleWebSystemGUID = browser_operator_updater_branding.IAppBundleWebSystemGUID
++    IAppWebGUID = browser_operator_updater_branding.IAppWebGUID
++    IAppWebUserGUID = browser_operator_updater_branding.IAppWebUserGUID
++    IAppWebSystemGUID = browser_operator_updater_branding.IAppWebSystemGUID
++    IAppCommandWebGUID = browser_operator_updater_branding.IAppCommandWebGUID
++    IAppCommandWebUserGUID = browser_operator_updater_branding.IAppCommandWebUserGUID
++    IAppCommandWebSystemGUID = browser_operator_updater_branding.IAppCommandWebSystemGUID
++    IPolicyStatusGUID = browser_operator_updater_branding.IPolicyStatusGUID
++    IPolicyStatusUserGUID = browser_operator_updater_branding.IPolicyStatusUserGUID
++    IPolicyStatusSystemGUID = browser_operator_updater_branding.IPolicyStatusSystemGUID
++    IPolicyStatus2GUID = browser_operator_updater_branding.IPolicyStatus2GUID
++    IPolicyStatus2UserGUID = browser_operator_updater_branding.IPolicyStatus2UserGUID
++    IPolicyStatus2SystemGUID = browser_operator_updater_branding.IPolicyStatus2SystemGUID
++    IPolicyStatus3GUID = browser_operator_updater_branding.IPolicyStatus3GUID
++    IPolicyStatus3UserGUID = browser_operator_updater_branding.IPolicyStatus3UserGUID
++    IPolicyStatus3SystemGUID = browser_operator_updater_branding.IPolicyStatus3SystemGUID
++    IPolicyStatus4GUID = browser_operator_updater_branding.IPolicyStatus4GUID
++    IPolicyStatus4UserGUID = browser_operator_updater_branding.IPolicyStatus4UserGUID
++    IPolicyStatus4SystemGUID = browser_operator_updater_branding.IPolicyStatus4SystemGUID
++    IPolicyStatusValueGUID = browser_operator_updater_branding.IPolicyStatusValueGUID
++    IPolicyStatusValueUserGUID = browser_operator_updater_branding.IPolicyStatusValueUserGUID
++    IPolicyStatusValueSystemGUID = browser_operator_updater_branding.IPolicyStatusValueSystemGUID
++    IProcessLauncherGUID = browser_operator_updater_branding.IProcessLauncherGUID
++    IProcessLauncherSystemGUID = browser_operator_updater_branding.IProcessLauncherSystemGUID
++    IProcessLauncher2GUID = browser_operator_updater_branding.IProcessLauncher2GUID
++    IProcessLauncher2SystemGUID = browser_operator_updater_branding.IProcessLauncher2SystemGUID
++  }
++
+   assert(browser_operator_cup_key != "")
+   assert(browser_operator_cup_key_version > 0)
+   assert(crx_pkhash != "")
+diff --git a/chrome/updater/win/setup/setup_util.cc b/chrome/updater/win/setup/setup_util.cc
+index 5088e99..e1570d2 100644
+--- a/chrome/updater/win/setup/setup_util.cc
++++ b/chrome/updater/win/setup/setup_util.cc
+@@ -637,6 +637,9 @@ void RegisterUserRunAtStartup(const std::wstring& run_value_name,
+   CHECK(list);
+   VLOG(1) << __func__;
+ 
++  // Fresh user profiles may not have the Run key yet. Use a work item so
++  // creation participates in the same rollback as the startup value.
++  list->AddCreateRegKeyWorkItem(HKEY_CURRENT_USER, REGSTR_PATH_RUN, 0);
+   list->AddSetRegValueWorkItem(HKEY_CURRENT_USER, REGSTR_PATH_RUN, 0,
+                                run_value_name, command.GetCommandLineString(),
+                                true);
+diff --git a/chrome/windows_services/elevated_tracing_service/BUILD.gn b/chrome/windows_services/elevated_tracing_service/BUILD.gn
+index be389aa..a54234b 100644
+--- a/chrome/windows_services/elevated_tracing_service/BUILD.gn
++++ b/chrome/windows_services/elevated_tracing_service/BUILD.gn
+@@ -5,9 +5,14 @@
+ import("//build/config/chrome_build.gni")
+ import("//build/toolchain/win/midl.gni")
+ import("//chrome/process_version_rc_template.gni")
++import("//chrome/updater/branding.gni")
+ import("//testing/test.gni")
+ 
+ midl("tracing_service_idl") {
++  if (browser_operator_updater_config != "") {
++    dynamic_guids = "ignore_proxy_stub,E0B03E2D-7682-4D83-B9FF-4574AF720500=A6191323-484B-567F-A2FA-28A99FD76CAF,C9368104-11AE-4784-8C2D-115C5D421937=5E7BC182-7906-56B6-A914-F90DF8FD9479"
++  }
++
+   sources = [ "tracing_service_idl.idl" ]
+ 
+   writes_tlb = true
