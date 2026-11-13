@@ -13,6 +13,13 @@ import tempfile
 from chromium_git import git_environment
 
 
+def check_branding_asset_paths(relative, source_name):
+    """Keep branding paths relative and inside the theme tree on every host."""
+    if (relative.anchor or source_name.anchor or '..' in relative.parts
+            or '..' in source_name.parts or not relative.as_posix().startswith('chrome/app/theme/')):
+        raise RuntimeError('Invalid reviewed branding asset path')
+
+
 def combined_patch(chromium, patches):
     """Validate ordered, overlapping patches in a private partial source tree."""
     environment = git_environment()
@@ -82,9 +89,7 @@ def main():
                 raise RuntimeError('Branding dependency revision differs from the reviewed manifest')
         for item in manifest['files']:
             relative, source_name = Path(item['destination']), Path(item['source'])
-            if (relative.is_absolute() or source_name.is_absolute() or '..' in relative.parts
-                    or '..' in source_name.parts or not str(relative).startswith('chrome/app/theme/')):
-                raise RuntimeError('Invalid reviewed branding asset path')
+            check_branding_asset_paths(relative, source_name)
             destination = chromium / relative
             if not destination.resolve().is_relative_to(chromium):
                 raise RuntimeError('Branding destination escapes Chromium source')

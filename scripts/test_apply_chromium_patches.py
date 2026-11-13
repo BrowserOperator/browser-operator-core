@@ -1,10 +1,38 @@
 """Validate ordered patch checking without writing partial source changes."""
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import subprocess
 import tempfile
 from unittest.mock import patch
 import unittest
-from apply_chromium_patches import combined_patch
+from apply_chromium_patches import check_branding_asset_paths, combined_patch
+
+
+class BrandingPathTests(unittest.TestCase):
+    def test_theme_assets_accept_posix_and_windows_separators(self):
+        for flavor in (PurePosixPath, PureWindowsPath):
+            with self.subTest(flavor=flavor):
+                check_branding_asset_paths(flavor('chrome/app/theme/win/chromium.ico'),
+                                           flavor('theme/chromium/win/chromium.ico'))
+
+    def test_traversal_and_theme_siblings_are_rejected_for_both_path_flavors(self):
+        for flavor in (PurePosixPath, PureWindowsPath):
+            for destination, source in (
+                    ('chrome/app/theme/../outside.ico', 'theme/icon.ico'),
+                    ('chrome/app/theme/icon.ico', '../outside.ico'),
+                    ('chrome/app/theme-sibling/icon.ico', 'theme/icon.ico'),
+                    ('chrome/app/theme', 'theme/icon.ico'),
+                    ('/chrome/app/theme/icon.ico', 'theme/icon.ico'),
+                    ('chrome/app/theme/icon.ico', '/theme/icon.ico')):
+                with self.subTest(flavor=flavor, destination=destination, source=source):
+                    with self.assertRaisesRegex(RuntimeError, 'Invalid reviewed branding asset path'):
+                        check_branding_asset_paths(flavor(destination), flavor(source))
+
+    def test_windows_drive_and_unc_sources_are_rejected(self):
+        for source in ('C:/theme/icon.ico', 'C:theme/icon.ico', '//server/share/icon.ico'):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(RuntimeError, 'Invalid reviewed branding asset path'):
+                    check_branding_asset_paths(PureWindowsPath('chrome/app/theme/icon.ico'),
+                                               PureWindowsPath(source))
 
 
 class OrderedPatchTests(unittest.TestCase):
