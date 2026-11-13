@@ -37,6 +37,19 @@ index 370e5ad..96519f4 100644
      # Now compare the output in midl_output_dir to the copied-over outputs.
      _, mismatch, errors = filecmp.cmpfiles(
          midl_output_dir, outdir, common_files
+diff --git a/chrome/browser/devtools/BUILD.gn b/chrome/browser/devtools/BUILD.gn
+index 519b00f..3a972bd 100644
+--- a/chrome/browser/devtools/BUILD.gn
++++ b/chrome/browser/devtools/BUILD.gn
+@@ -137,6 +137,8 @@ static_library("devtools") {
+ 
+   deps = [
+     "//base",
++    "//chrome/browser:buildflags",
++    "//chrome/browser/ui:chrome_pages",
+     "//chrome/browser:file_select_helper",
+     "//chrome/browser/infobars",
+     "//chrome/browser/lifetime",
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
 index 41cc46f..60a175e 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
