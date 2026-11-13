@@ -1,3 +1,42 @@
+diff --git a/build/toolchain/win/midl.py b/build/toolchain/win/midl.py
+index 370e5ad..96519f4 100644
+--- a/build/toolchain/win/midl.py
++++ b/build/toolchain/win/midl.py
+@@ -274,6 +274,17 @@ def generate_idl_from_template(idl_template, dynamic_guids, idl):
+ 
+ # This function runs the MIDL compiler with the provided arguments. It creates
+ # and returns a tuple of |0,midl_output_dir| on success.
++def NormalizeDynamicIdlComment(contents, original_idl, generated_idl):
++    # Branding an existing .idl relocates the compiler input to gen/. Only
++    # normalize that provenance comment; declarations and GUIDs stay compared.
++    # Existing .template inputs already have gen/ paths in their baselines.
++    if not original_idl.endswith('.idl'):
++        return contents
++    generated = b'/* Compiler settings for ' + generated_idl.encode() + b':'
++    original = b'/* Compiler settings for ' + original_idl.encode() + b':'
++    return contents.replace(generated, original)
++
++
+ def run_midl(args, env_dict):
+     midl_output_dir = tempfile.mkdtemp()
+     delete_midl_output_dir = True
+@@ -500,6 +511,16 @@ def main(
+     if returncode != 0:
+         return returncode
+ 
++    if idl_template:
++        for filename in (h, iid):
++            if filename:
++                path = os.path.join(midl_output_dir, filename)
++                with open(path, 'rb') as output:
++                    contents = output.read()
++                with open(path, 'wb') as output:
++                    output.write(NormalizeDynamicIdlComment(
++                        contents, idl_template, idl))
++
+     # Now compare the output in midl_output_dir to the copied-over outputs.
+     _, mismatch, errors = filecmp.cmpfiles(
+         midl_output_dir, outdir, common_files
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
 index 41cc46f..60a175e 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
