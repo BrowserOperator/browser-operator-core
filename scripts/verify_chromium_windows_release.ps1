@@ -17,6 +17,16 @@ if (Test-Path $exe) {
     if (!(Test-Path $ownership)) { throw 'Refusing to replace an installation not created by this qualification' }
     $owned = Get-Content $ownership -Raw | ConvertFrom-Json
     if ($owned.sid -ne $currentSid -or $owned.path -ne $exe) { throw 'Existing qualification ownership differs' }
+    # Chromium intentionally retains same-version files during repair. A new
+    # candidate with the same158 version must be tested as a fresh installation.
+    $uninstaller = Join-Path $installRoot '158.0.8127.18\Installer\setup.exe'
+    if (!(Test-Path -LiteralPath $uninstaller)) { throw 'Owned installation has no uninstaller; preserve it for inspection' }
+    $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('--uninstall','--force-uninstall','--verbose-logging') -PassThru
+    $null = $uninstall.Handle
+    if (!$uninstall.WaitForExit(120000) -or $uninstall.ExitCode -notin @(0,19)) { throw 'Owned qualification uninstall failed; do not replace unknown files' }
+    for ($n=0; $n -lt 30 -and (Test-Path -LiteralPath $exe); $n++) { Start-Sleep -Seconds 1 }
+    if (Test-Path -LiteralPath $exe) { throw 'Owned browser remains after uninstall' }
+
 } else {
     New-Item -ItemType Directory -Force (Split-Path $ownership) | Out-Null
     @{sid=$currentSid; path=$exe} | ConvertTo-Json | Set-Content -Encoding utf8 $ownership
@@ -30,6 +40,13 @@ $null = $process.Handle
 if (!$process.WaitForExit(600000)) { throw 'Candidate installer timed out' }
 if ($process.ExitCode -ne 0) { throw "Candidate installer failed: $($process.ExitCode)" }
 if (!(Test-Path $exe)) { throw 'Installer did not create the branded per-user browser' }
+$expectedSetup = Join-Path (Split-Path $Installer) 'UpdaterSetup.exe'
+$installedSetup = Join-Path $installRoot '158.0.8127.18\UpdaterSetup.exe'
+if ((Get-FileHash -LiteralPath $expectedSetup -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installedSetup -Algorithm SHA256).Hash) { throw 'Installed updater setup differs from the candidate payload' }
+$expectedUpdater = Join-Path (Split-Path $Installer) 'updater.exe'
+$installedUpdater = Join-Path $env:LOCALAPPDATA 'BrowserOperator\BrowserOperatorUpdater\158.0.8127.18\updater.exe'
+if ((Get-FileHash -LiteralPath $expectedUpdater -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $installedUpdater -Algorithm SHA256).Hash) { throw 'Installed updater executable differs from the candidate payload' }
+
 $registry = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry32)
 foreach ($app in @($browserId,$updaterId)) {
     $key = $registry.OpenSubKey('Software\BrowserOperator\Update\Clients\'+$app)

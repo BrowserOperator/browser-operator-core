@@ -55,3 +55,12 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\Run. The native log recorded
 ERROR_FILE_NOT_FOUND and updater exit75044, rolling back the updater. Add a
 CreateRegKey work item before the value, retaining normal transaction rollback;
 do not pre-create the key in the qualification to hide this installer defect.
+
+Qualification must uninstall only the installation whose stored SID/path marker
+matches this test before reinstalling another candidate with the same engine
+version. Chromium same-version repair retained the original UpdaterSetup.exe
+on disk, while both packaging layers correctly contained the new updater. Hash
+reports proved built/embedded/bundled equality and installed-wrapper mismatch.
+The test now performs a fresh owned install, then compares both installed updater
+binaries with the built payload before functional tests. Unknown installs remain
+protected. This is test isolation, not a change to normal Chromium upgrade rules.
