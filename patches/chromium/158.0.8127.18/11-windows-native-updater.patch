@@ -641,6 +641,20 @@ index 4311700..cee8d84 100644
    assert(browser_operator_cup_key != "")
    assert(browser_operator_cup_key_version > 0)
    assert(crx_pkhash != "")
+diff --git a/chrome/updater/win/setup/setup_util.cc b/chrome/updater/win/setup/setup_util.cc
+index 5088e99..e1570d2 100644
+--- a/chrome/updater/win/setup/setup_util.cc
++++ b/chrome/updater/win/setup/setup_util.cc
+@@ -637,6 +637,9 @@ void RegisterUserRunAtStartup(const std::wstring& run_value_name,
+   CHECK(list);
+   VLOG(1) << __func__;
+ 
++  // Fresh user profiles may not have the Run key yet. Use a work item so
++  // creation participates in the same rollback as the startup value.
++  list->AddCreateRegKeyWorkItem(HKEY_CURRENT_USER, REGSTR_PATH_RUN, 0);
+   list->AddSetRegValueWorkItem(HKEY_CURRENT_USER, REGSTR_PATH_RUN, 0,
+                                run_value_name, command.GetCommandLineString(),
+                                true);
 diff --git a/chrome/windows_services/elevated_tracing_service/BUILD.gn b/chrome/windows_services/elevated_tracing_service/BUILD.gn
 index be389aa..a54234b 100644
 --- a/chrome/windows_services/elevated_tracing_service/BUILD.gn

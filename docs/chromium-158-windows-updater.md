@@ -48,3 +48,10 @@ prefixes exceeded Windows' 39-character ProgId limit once Chromium appended the
 compile-time assertions retain this constraint. Visible product names and all
 browser/updater GUIDs remain unchanged. This repairs actual setup failure
 0x80000003 during browser registration, rather than suppressing the check.
+
+A fresh non-interactive Windows user profile also exposed an upstream setup
+assumption: RegisterUserRunAtStartup wrote a value without first creating
+HKCU\Software\Microsoft\Windows\CurrentVersion\Run. The native log recorded
+ERROR_FILE_NOT_FOUND and updater exit75044, rolling back the updater. Add a
+CreateRegKey work item before the value, retaining normal transaction rollback;
+do not pre-create the key in the qualification to hide this installer defect.
