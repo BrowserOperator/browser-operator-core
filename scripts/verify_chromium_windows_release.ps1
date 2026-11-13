@@ -11,7 +11,16 @@ $browserId = '{'+$identities.browser+'}'
 $updaterId = '{'+$identities.updater+'}'
 $installRoot = Join-Path $env:LOCALAPPDATA 'BrowserOperator\Browser Operator\Application'
 $exe = Join-Path $installRoot 'chrome.exe'
-if (Test-Path $exe) { throw 'Installed-app qualification requires a disposable Windows account without a prior Browser Operator installation' }
+$ownership = Join-Path $env:LOCALAPPDATA 'BrowserOperatorQualification\installation.json'
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if (Test-Path $exe) {
+    if (!(Test-Path $ownership)) { throw 'Refusing to replace an installation not created by this qualification' }
+    $owned = Get-Content $ownership -Raw | ConvertFrom-Json
+    if ($owned.sid -ne $currentSid -or $owned.path -ne $exe) { throw 'Existing qualification ownership differs' }
+} else {
+    New-Item -ItemType Directory -Force (Split-Path $ownership) | Out-Null
+    @{sid=$currentSid; path=$exe} | ConvertTo-Json | Set-Content -Encoding utf8 $ownership
+}
 New-Item -ItemType Directory -Force $Artifacts | Out-Null
 if ((Get-AuthenticodeSignature -LiteralPath $Installer).Status -ne 'NotSigned') { throw 'This qualification is for the explicitly approved unsigned internal candidate' }
 $beforeGoogleUpdate = Test-Path 'HKCU:\Software\Google\Update'
@@ -42,11 +51,12 @@ try {
         try { $null=Invoke-RestMethod "$endpoint/json/version"; $ready=$true; break } catch { Start-Sleep -Seconds 1 }
     }
     if (!$ready) { throw 'Installed browser did not start its local qualification endpoint' }
+    & (Join-Path $PSScriptRoot 'verify_chromium_windows_toolbar.ps1') -BrowserPid $browser.Id -Endpoint $endpoint -Artifacts $Artifacts
     & $node (Join-Path $PSScriptRoot 'verify_chromium_release.mjs') $endpoint '158.0.8127.18' $Artifacts '0.7.0'
     if ($LASTEXITCODE -ne 0) { throw 'Installed AI tools, native update entry, or privileged-URL tests failed' }
     & $node (Join-Path $PSScriptRoot 'verify_chromium_windows_update.mjs') $endpoint $Artifacts
     if ($LASTEXITCODE -ne 0) { throw 'Installed native updater check failed' }
-    @{passed=$true; installed_executable=$exe; browser_app_id=$browserId; updater_app_id=$updaterId; signed=$false; publication=$false; os=[Environment]::OSVersion.VersionString; intel_windows_client_tested=$false} | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $Artifacts 'installed-windows-report.json')
+    @{passed=$true; installed_executable=$exe; browser_app_id=$browserId; updater_app_id=$updaterId; signed=$false; publication=$false; os=[Environment]::OSVersion.VersionString; windows_10_11_client_tested=$false} | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $Artifacts 'installed-windows-report.json')
 } finally {
     if (!$browser.HasExited) { & "$env:SystemRoot\System32\taskkill.exe" /PID $browser.Id /T /F | Out-Null }
     $updaterRoot = Join-Path $env:LOCALAPPDATA 'BrowserOperator\BrowserOperatorUpdater'
