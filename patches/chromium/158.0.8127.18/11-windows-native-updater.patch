@@ -461,6 +461,27 @@ index e9d8af1..c309a5a 100644
    if (!client_state_key.append(app_guid))
      return ERROR_BUFFER_OVERFLOW;
  #endif
+diff --git a/chrome/installer/setup/BUILD.gn b/chrome/installer/setup/BUILD.gn
+index e7e695f..0560441 100644
+--- a/chrome/installer/setup/BUILD.gn
++++ b/chrome/installer/setup/BUILD.gn
+@@ -5,6 +5,7 @@
+ import("//build/buildflag_header.gni")
+ import("//build/config/chrome_build.gni")
+ import("//chrome/process_version_rc_template.gni")
++import("//chrome/updater/branding.gni")
+ import("//services/webnn/features.gni")
+ import("//testing/test.gni")
+ 
+@@ -143,7 +144,7 @@ if (is_win) {
+       deps += [ "//services/webnn/public/cpp:win" ]
+     }
+ 
+-    if (is_chrome_branded) {
++    if (is_chrome_branded || browser_operator_updater_config != "") {
+       sources += [
+         "channel_override_work_item.cc",
+         "channel_override_work_item.h",
 diff --git a/chrome/installer/setup/setup_main.cc b/chrome/installer/setup/setup_main.cc
 index 3b9e317..24b6b71 100644
 --- a/chrome/installer/setup/setup_main.cc
