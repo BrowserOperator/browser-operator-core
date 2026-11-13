@@ -41,3 +41,10 @@ The cloud service currently offers macOS payloads only. A Windows 159 offer
 requires separate Windows installer/payload publication support and a real
 158-to-159 upgrade test before promotion. No test should manufacture an update
 result or disable CUP, CRX verification, or browser sandboxing.
+
+Windows installer qualification found that the original BrowserOperatorHTM/PDF
+prefixes exceeded Windows' 39-character ProgId limit once Chromium appended the
+27-character per-user suffix. Use BrowserOpHTM and BrowserOpPDF (12 + 27 = 39);
+compile-time assertions retain this constraint. Visible product names and all
+browser/updater GUIDs remain unchanged. This repairs actual setup failure
+0x80000003 during browser registration, rather than suppressing the check.
