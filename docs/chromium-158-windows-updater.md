@@ -64,3 +64,12 @@ reports proved built/embedded/bundled equality and installed-wrapper mismatch.
 The test now performs a fresh owned install, then compares both installed updater
 binaries with the built payload before functional tests. Unknown installs remain
 protected. This is test isolation, not a change to normal Chromium upgrade rules.
+
+The normal interactive desktop test reached a visibly successful native About
+page, but the first text verifier read innerText from shadow-root fragments and
+collected only newlines. Qualification now reads rendered accessibility nodes
+and checks the real GoogleUpdate.UpgradeResult histogram's native result4, with
+AX/screenshot/histogram evidence retained. Toolbar capture waits for the panel or
+welcome UI to render after target creation; target existence alone is too early
+for a useful native screenshot. These are verifier fixes; installer bytes and
+frozen Mac inputs are unchanged.

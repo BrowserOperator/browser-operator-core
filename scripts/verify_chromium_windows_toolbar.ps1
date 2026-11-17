@@ -41,6 +41,21 @@ for ($n=0;$n -lt 60;$n++) {
     Start-Sleep -Milliseconds 500
 }
 if ($opened.Count -eq 0) { throw 'Invoking the native toolbar did not open the bundled AI frontend' }
+# A target exists before its first rendered frame. Wait for the actual panel
+# or its first-run welcome UI before capturing the native browser window.
+$panelReady=$false
+foreach ($attempt in 1..60) {
+    $root=[Windows.Automation.AutomationElement]::FromHandle($window)
+    foreach ($name in @('AI Assistant panel','Welcome to Browser Operator')) {
+        $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,$name)
+        if ($root.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)) { $panelReady=$true;break }
+    }
+    if ($panelReady) { break }
+    Start-Sleep -Milliseconds 500
+}
+if (!$panelReady) { throw 'Native toolbar target exists but the AI panel did not render' }
+Start-Sleep -Milliseconds 500
+
 $rect = New-Object WindowCapture+Rect
 if (![WindowCapture]::GetWindowRect($window,[ref]$rect)) { throw 'Cannot measure native browser window' }
 $width=$rect.Right-$rect.Left; $height=$rect.Bottom-$rect.Top
