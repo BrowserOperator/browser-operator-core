@@ -28,7 +28,14 @@ function Invoke-NamedControl {
         if ($button) { break }
         Start-Sleep -Milliseconds 250
     }
-    if (!$button) { throw ('Native control did not become ready: '+$Name) }
+    if (!$button) {
+        try {
+            $root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) |
+                ForEach-Object { @{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;offscreen=$_.Current.IsOffscreen} } |
+                ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 (Join-Path $Artifacts 'native-controls-on-failure.json')
+        } catch {}
+        throw ('Native control did not become ready: '+$Name)
+    }
     $pattern = $null
     if ($button.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) {
         ([Windows.Automation.InvokePattern]$pattern).Invoke()
