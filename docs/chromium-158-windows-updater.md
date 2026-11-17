@@ -73,3 +73,8 @@ AX/screenshot/histogram evidence retained. Toolbar capture waits for the panel o
 welcome UI to render after target creation; target existence alone is too early
 for a useful native screenshot. These are verifier fixes; installer bytes and
 frozen Mac inputs are unchanged.
+
+Native toolbar qualification also dismisses first-run welcome via the real Skip
+control, closes the panel via Close Chat Window, and reopens it with the native
+AI Assistant toolbar button before capture. This verifies the actual user flow
+and captures the usable chat panel instead of an early welcome animation frame.
