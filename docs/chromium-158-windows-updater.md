@@ -74,7 +74,47 @@ welcome UI to render after target creation; target existence alone is too early
 for a useful native screenshot. These are verifier fixes; installer bytes and
 frozen Mac inputs are unchanged.
 
-Native toolbar qualification also dismisses first-run welcome via the real Skip
-control, closes the panel via Close Chat Window, and reopens it with the native
-AI Assistant toolbar button before capture. This verifies the actual user flow
-and captures the usable chat panel instead of an early welcome animation frame.
+Native toolbar qualification dismisses first-run welcome via the real Skip
+control when that control is detected, closes the panel via Close Chat Window,
+and reopens it with the native AI Assistant toolbar button before capture.
+The final capture shows the rendered welcome screen after reopening; it is
+evidence of the toolbar/panel lifecycle, not a completed provider conversation.
+
+
+## November 17 installed desktop result
+
+The retained unsigned x64 installer (130813440 bytes) passed qualification in
+an actual interactive standard-user RDP session on Windows Server 2022,
+OS10.0.20348, session2, administrator=false. This resolves the prior batch-logon
+COM activation failure without weakening DCOM permissions or pre-creating the
+installer's missing startup key. No Chromium rebuild was needed for verifier
+changes: native input95d6af5bd608ffbe435b9c318be49c0b716584f0 and verifier
+4ceb9cdcc17bf0b06ff8835d62b5ca861d45c43b.
+
+Installer SHA256:
+`f75f3a8fc08ffc3037f3c2191ffb4151db10baf50a24ac2355a2b951cff06199`.
+Final run `da54cbe7-9c9a-4f5b-b0b4-895d8719bdf5` completed at
+2026-11-17T11:32:09Z with desktop-summary.passed=true. Installation, installed
+updater payload hashes/registrations, native toolbar open/close/reopen, real AI
+JavaScript/accessibility/screenshot tools, six privileged-URL restrictions and
+the AI update action all passed. About displayed158.0.8127.18 (Official Build)
+(64-bit). The native GoogleUpdate.UpgradeResult histogram recorded result4
+(ALREADY_UP_TO_DATE), corroborated by the HTTPS/CUP updater log and Cloud Run's
+Windows/browser/updater-GUID noupdate responses. The enabled per-user updater
+wake task and HKCU Run startup command were read back successfully.
+
+This qualifies an internal unsigned Windows158 installation and native no-update
+check. It does not qualify Windows158-to159 payload delivery, signed public
+Windows distribution, Windows10/11 client hardware, or provider conversations.
+The final toolbar report has welcome_skipped=false; its screenshot shows the
+welcome screen, so do not claim the final run completed onboarding.
+The production catalog remains unchanged and publication stays held until owner
+merge. Frozen Mac0.7.0 R2 artifacts and inputs remain untouched.
+
+The separately approved USD1 desktop-test VM, its60GB disk and dedicated IAP
+firewall/subnet/network were deleted after evidence collection. The original
+USD20 build pilot, token, secret and dedicated identity/network were also cleaned
+up. Standalone harness and cleanup guard tests are retained in private CI PR10.
+Earlier focused Claude reviews found no definite blockers. Review of these
+latest verifier/harness changes remains pending: the local CLI session expired
+and the GitHub review action reports that the Claude App is not installed.
