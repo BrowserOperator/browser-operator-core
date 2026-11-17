@@ -20,10 +20,15 @@ for ($n=0;$n -lt 30;$n++) {
 if ($window -eq [IntPtr]::Zero) { throw 'Installed browser has no native window for toolbar qualification' }
 function Invoke-NamedControl {
     param([string]$Name='AI Assistant')
-    $root = [Windows.Automation.AutomationElement]::FromHandle($window)
     $condition = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,$Name)
-    $button = $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
-    if (!$button) { throw ('Native control is missing: '+$Name) }
+    $button=$null
+    for ($attempt=0;$attempt -lt 60;$attempt++) {
+        $root = [Windows.Automation.AutomationElement]::FromHandle($window)
+        $button = $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
+        if ($button) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if (!$button) { throw ('Native control did not become ready: '+$Name) }
     $pattern = $null
     if ($button.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) {
         ([Windows.Automation.InvokePattern]$pattern).Invoke()
