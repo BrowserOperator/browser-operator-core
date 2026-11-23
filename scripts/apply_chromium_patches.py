@@ -48,6 +48,7 @@ def combined_patch(chromium, patches):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chromium-src', required=True, type=Path)
+    parser.add_argument('--patch-series-version', help='Reviewed same-branch patch baseline; every patch is checked against the requested source')
     parser.add_argument('--apply', action='store_true', help='Apply after checking; default only checks')
     parser.add_argument('--branding-source', type=Path,
                         help='Pinned BrowserOperator/build-script checkout supplying reviewed theme assets')
@@ -57,7 +58,10 @@ def main():
                   (chromium / 'chrome/VERSION').read_text().splitlines() if '=' in line)
     version = '.'.join(fields[key] for key in ('MAJOR', 'MINOR', 'BUILD', 'PATCH'))
     root = Path(__file__).resolve().parents[1]
-    series = root / 'patches/chromium' / version
+    selected = args.patch_series_version or version
+    if not re.fullmatch(r'\d+\.\d+\.\d+\.\d+', selected) or selected.split('.')[:3] != version.split('.')[:3] or int(selected.split('.')[3]) > int(version.split('.')[3]):
+        raise RuntimeError('Patch baseline must be an earlier version of the same Chromium branch')
+    series = root / 'patches/chromium' / selected
     patches = sorted(series.glob('*.patch'))
     if not patches:
         raise SystemExit(f'No reviewed patch series for Chromium {version}: {series}')

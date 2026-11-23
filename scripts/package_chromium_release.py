@@ -192,7 +192,7 @@ def smoke_test(app, artifacts, node, updater_enabled=False, cpu=None, frontend_c
                         process.wait()
 
 
-def verify_release(source, output, app_name, version, team, settings, node, provenance=None, baseline_app=None):
+def verify_release(source, output, app_name, version, team, settings, node, provenance=None, baseline_app=None, runtime_checks=True):
     verification = output / 'verification'
     verification.mkdir(exist_ok=True)
     tests = Path(tempfile.mkdtemp(prefix='attempt-', dir=verification))
@@ -228,30 +228,32 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
             if len(updater_apps) != 1:
                 raise RuntimeError('Expected exactly one embedded updater')
             validate_mounted_app(updater_apps[0], team, tests / 'gatekeeper-updater.txt')
-        tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
-        from updater.macos_smoke_scope import UpdaterSmokeScope
-        def restore_baseline():
-            restore = Path(tempfile.mkdtemp(prefix='restore-installed-baseline-', dir=tests))
-            smoke_test(baseline_app, restore, node, updater_enabled=True, frontend_checks=False)
-        scope = UpdaterSmokeScope(settings, team, tests, baseline_app=baseline_app,
-                                 restore_baseline=restore_baseline) if updater_enabled else contextlib.nullcontext()
-        # Native Chromium correctly refuses registration on a read-only DMG.
-        # Exercise the actual installation path using this exact verified app,
-        # leaving the user's /Applications and browser profile untouched.
-        installed = tests / 'installed'
-        installed.mkdir()
-        installed_app = installed / app_name
-        run(['cp', '-cR', mounted_app, installed_app])
-        validate_mounted_app(installed_app, team, tests / 'gatekeeper-installed-app.txt')
-        with scope:
-            for cpu in tested_architectures:
-                cpu_tests = tests / cpu
-                cpu_tests.mkdir(exist_ok=True)
-                smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu,
-                           product_version=provenance.get('browser_operator_version') if provenance and updater_enabled else None)
-        # This is an owned disposable installation, not the mounted app or a
-        # user's browser. Keep failed attempts for diagnosis; retire successes.
-        shutil.rmtree(installed)
+        tested_architectures = []
+        if runtime_checks:
+            tested_architectures = ['arm64', 'x86_64'] if architecture == 'universal' else ['arm64']
+            from updater.macos_smoke_scope import UpdaterSmokeScope
+            def restore_baseline():
+                restore = Path(tempfile.mkdtemp(prefix='restore-installed-baseline-', dir=tests))
+                smoke_test(baseline_app, restore, node, updater_enabled=True, frontend_checks=False)
+            scope = UpdaterSmokeScope(settings, team, tests, baseline_app=baseline_app,
+                                     restore_baseline=restore_baseline) if updater_enabled else contextlib.nullcontext()
+            # Native Chromium correctly refuses registration on a read-only DMG.
+            # Exercise the actual installation path using this exact verified app,
+            # leaving the user's /Applications and browser profile untouched.
+            installed = tests / 'installed'
+            installed.mkdir()
+            installed_app = installed / app_name
+            run(['cp', '-cR', mounted_app, installed_app])
+            validate_mounted_app(installed_app, team, tests / 'gatekeeper-installed-app.txt')
+            with scope:
+                for cpu in tested_architectures:
+                    cpu_tests = tests / cpu
+                    cpu_tests.mkdir(exist_ok=True)
+                    smoke_test(installed_app, cpu_tests, node, updater_enabled=updater_enabled, cpu=cpu,
+                               product_version=provenance.get('browser_operator_version') if provenance and updater_enabled else None)
+            # This is an owned disposable installation, not the mounted app or a
+            # user's browser. Keep failed attempts for diagnosis; retire successes.
+            shutil.rmtree(installed)
     finally:
         run(['hdiutil', 'detach', volume])
     with dmg.open('rb') as stream:
@@ -268,7 +270,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
                 'dmg': dmg.name, 'sha256': digest, 'build_settings': settings,
                 'notarization': 'accepted and stapled', 'gatekeeper': 'accepted',
                 'mounted_app_validation': 'passed',
-                'installed_dmg_copy_functional_tests': 'passed'}
+                'installed_dmg_copy_functional_tests': 'passed' if runtime_checks else 'pending-clean-user'}
     manifest['mach_o_architectures'] = binaries
     if provenance.get('browser_operator_version'):
         manifest['browser_operator_version'] = provenance['browser_operator_version']
@@ -278,7 +280,7 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
     manifest['verification_evidence'] = str(tests.relative_to(output))
     manifest['functional_test_architectures'] = {cpu: 'passed' for cpu in tested_architectures}
     if architecture == 'universal':
-        manifest['intel_hardware_test'] = 'pending; x86_64 tested with Rosetta on Apple Silicon'
+        manifest['intel_hardware_test'] = 'pending; x86_64 tested with Rosetta on Apple Silicon' if runtime_checks else 'pending; runtime verification deferred'
     if settings['enable_updater'] == 'true':
         if provenance and provenance.get('updater_trust'):
             manifest['updater_trust'] = provenance['updater_trust']
@@ -295,8 +297,11 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         manifest['updater_composition'] = provenance['updater_composition']
     if provenance and provenance.get('universal_composition'):
         manifest['universal_composition'] = {**provenance['universal_composition'],
-            'intel_runtime_test': 'passed under Rosetta; physical Intel hardware qualification pending'}
-    (output / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+            'intel_runtime_test': 'passed under Rosetta; physical Intel hardware qualification pending' if runtime_checks else 'pending-clean-user'}
+    manifest['runtime_qualification'] = 'passed' if runtime_checks else 'pending-clean-user'
+    manifest['publication'] = 'held-until-owner-merge'
+    name = 'release-manifest.json' if runtime_checks else 'candidate-manifest.json'
+    (output / name).write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2), flush=True)
 
 
@@ -320,7 +325,11 @@ def main():
                         help='Explicit same-version installed app to preserve and restore through its native updater API')
     parser.add_argument('--verify-existing', action='store_true',
                         help='Resume final verification of an existing signed/stapled DMG without signing or uploading again')
+    parser.add_argument('--defer-runtime-verification', action='store_true',
+                        help='Sign/notarize and verify static trust only; emits a candidate manifest, never a verified release')
     args = parser.parse_args()
+    if args.defer_runtime_verification and args.installed_updater_baseline:
+        parser.error('Deferred runtime verification cannot reuse an installed baseline')
     if sys.platform != 'darwin' or sys.version_info < (3, 11):
         parser.error('macOS and Python 3.11+ are required for the Chromium signing pipeline')
     if not args.node:
@@ -363,13 +372,26 @@ def main():
         raise RuntimeError('Production frozen input must include the compiled updater trust roots')
     from chromium_macos_arch import verify_architectures
     verify_architectures(app, args.architecture)
-    identity, team = find_identity(args.identity)
+    candidate_path = output / 'candidate-manifest.json'
+    if args.verify_existing and candidate_path.is_file():
+        candidate = json.loads(candidate_path.read_text())
+        if candidate['version'] != provenance['version'] or candidate['source_frozen_manifest_sha256'] != provenance['source_frozen_manifest_sha256']:
+            raise RuntimeError('Signed candidate does not match the frozen input')
+        dmgs = list((output / 'artifacts').glob('*.dmg'))
+        if len(dmgs) != 1 or hashlib.file_digest(dmgs[0].open('rb'), 'sha256').hexdigest() != candidate['sha256']:
+            raise RuntimeError('Signed candidate DMG has changed')
+        team = candidate['team_id']
+        if not re.fullmatch(r'[A-Z0-9]{10}', team):
+            raise RuntimeError('Invalid recorded signing team')
+        identity = None  # Verification uses public Apple trust; no signing key is needed.
+    else:
+        identity, team = find_identity(args.identity)
     if args.installed_updater_baseline:
         args.installed_updater_baseline = args.installed_updater_baseline.resolve()
         baseline_version = plistlib.loads((args.installed_updater_baseline / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
         if baseline_version != plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']:
             raise RuntimeError('Baseline reuse requires exactly the same browser/updater version; use a dedicated clean user for version upgrades')
-    if args.updater_enabled:
+    if args.updater_enabled and not args.defer_runtime_verification:
         from updater.macos_smoke_scope import UpdaterSmokeScope
         UpdaterSmokeScope(settings, team, output, baseline_app=args.installed_updater_baseline).require_clean()
     packaging = build / 'Browser Operator Packaging'
@@ -379,7 +401,8 @@ def main():
     if provenance and provenance['version'] != version:
         raise RuntimeError('Frozen input version differs from its captured build metadata')
     if args.verify_existing:
-        verify_release(source, output, app.name, version, team, settings, args.node, provenance, args.installed_updater_baseline)
+        verify_release(source, output, app.name, version, team, settings, args.node, provenance, args.installed_updater_baseline,
+                       runtime_checks=not args.defer_runtime_verification)
         return
     # Read-only authentication preflight; no password or private key is logged.
     subprocess.run([
@@ -459,7 +482,8 @@ def main():
                     raise
                 print('Apple timestamp service failed transiently; retrying in 10 seconds', flush=True)
                 time.sleep(10)
-    verify_release(source, output, app.name, version, team, settings, args.node, provenance, args.installed_updater_baseline)
+    verify_release(source, output, app.name, version, team, settings, args.node, provenance, args.installed_updater_baseline,
+                   runtime_checks=not args.defer_runtime_verification)
 
 
 if __name__ == '__main__':
