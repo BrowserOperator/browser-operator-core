@@ -28,6 +28,11 @@ def require_merged_release(policy, source_trees, reader=read_api):
     comparison = reader(f'repos/{repo}/compare/{merged}...{quote(policy["required_base_branch"], safe="")}')
     if comparison.get('status') not in ('identical', 'ahead'):
         raise RuntimeError('RELEASE HELD: approved integration merge is no longer on the base branch')
+    for required in policy.get('additional_merged_prs', []):
+        extra = reader(f"repos/{required['repository']}/pulls/{required['number']}")
+        if (not extra.get('merged') or extra.get('base', {}).get('ref') != required['base_branch']
+                or extra.get('merged_by', {}).get('login') not in policy.get('allowed_mergers', [])):
+            raise RuntimeError(f"RELEASE HELD: {required['repository']}#{required['number']} must also be merged by the owner")
     return {'merged_pr': number, 'release_commit': merged, 'source_inputs_match': True}
 
 

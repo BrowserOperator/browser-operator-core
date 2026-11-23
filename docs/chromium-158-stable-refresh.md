@@ -43,7 +43,8 @@ Windows remains queued until Mac ARM64/universal qualification is complete and
 will use the same entry point once its version-aware backend is ported/tested.
 The existing Windows pilot approval is not authorization for a replacement VM.
 
-This PR stacks on the0.7.0 integration PR111. After the parent merges, retarget
-this PR to main before owner merge. The publication policy must point to this
-refresh PR and its complete source tree; old R2 candidates remain held and are
+Core PR114 stacks on the0.7.0 integration PR111; the reusable driver is
+BrowserOperator/build-script PR1. After the parent merges, retarget
+this PR to main before owner merge. The publication policy points to this
+refresh PR and its complete source tree, and also requires owner merge of driver PR1; old R2 candidates remain held and are
 not reused for the newer native version.

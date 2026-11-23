@@ -37,3 +37,19 @@ class MergeGateTests(unittest.TestCase):
     def test_another_merger_cannot_satisfy_owner_hold(self):
         with self.assertRaisesRegex(RuntimeError, 'authorized owner'):
             require_merged_release(self.policy, self.sources, lambda _: {'merged': True, 'base': {'ref': 'main'}, 'merged_by': {'login': 'someone-else'}})
+
+
+    def test_unmerged_build_driver_keeps_release_held(self):
+        self.policy['additional_merged_prs'] = [{'repository':'BrowserOperator/build-script','number':1,'base_branch':'main'}]
+        base = self.responses()
+        def read(path):
+            return {'merged':False} if '/build-script/' in path else base(path)
+        with self.assertRaisesRegex(RuntimeError,'must also be merged'):
+            require_merged_release(self.policy,self.sources,read)
+
+    def test_owner_merged_driver_allows_other_matching_gates(self):
+        self.policy['additional_merged_prs'] = [{'repository':'BrowserOperator/build-script','number':1,'base_branch':'main'}]
+        base = self.responses()
+        def read(path):
+            return {'merged':True,'base':{'ref':'main'},'merged_by':{'login':'owner'}} if '/build-script/' in path else base(path)
+        self.assertTrue(require_merged_release(self.policy,self.sources,read)['source_inputs_match'])
