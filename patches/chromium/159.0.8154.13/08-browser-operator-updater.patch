@@ -37,7 +37,7 @@ index d91204a320f42b1f9d54a5deb9377b780edfdcc6..0d7a94e93c8e8061747eb475cef2487c
      else:
          _RemoveKeystoneKeys(plist)
 diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
-index e7bfa73b4d0581e742f7e9e31192538e0df9d134..814c50cb7f01b111a402838ebde43ba3437f7a61 100644
+index e7bfa73b4d0581e742f7e9e31192538e0df9d134..1b00574728304bd7ba71a29d5c79d5ae23bf2d98 100644
 --- a/chrome/BUILD.gn
 +++ b/chrome/BUILD.gn
 @@ -532,6 +532,12 @@ if (is_win) {
@@ -47,7 +47,7 @@ index e7bfa73b4d0581e742f7e9e31192538e0df9d134..814c50cb7f01b111a402838ebde43ba3
 +      } else if (browser_operator_updater_config != "") {
 +        args += [
 +          "--keystone=1",
-+          "--keystone-base-tag=autoupdate-test-arm64",
++          "--keystone-base-tag=$mac_update_channel",
 +          "--keystone-update-url=$update_check_url",
 +        ]
        } else {
@@ -69,7 +69,7 @@ index 68437404346e344a878203b51f9df8c34f412491..91255f4650325c243af743885b03094d
      "-e",
      "BROWSER_APPID=\"$browser_appid\"",
 diff --git a/chrome/updater/branding.gni b/chrome/updater/branding.gni
-index 2b6f9e23b21e320440b34e9d7d31f14b625cccb6..4311700059b629e7fa4c46441a5dc4d33484b1be 100644
+index 2b6f9e23b21e320440b34e9d7d31f14b625cccb6..5f6be5e213c5da62274003fc727017dd365ba3b6 100644
 --- a/chrome/updater/branding.gni
 +++ b/chrome/updater/branding.gni
 @@ -4,6 +4,12 @@
@@ -85,7 +85,7 @@ index 2b6f9e23b21e320440b34e9d7d31f14b625cccb6..4311700059b629e7fa4c46441a5dc4d3
  if (is_chrome_branded) {
    import("//chrome/updater/internal/branding_google.gni")
  } else {
-@@ -108,3 +114,43 @@ if (is_chrome_branded) {
+@@ -108,3 +114,49 @@ if (is_chrome_branded) {
      legacy_google_update_appid = "{8B2B92A3-1BA2-4154-A89C-DA74C9C505E4}"
    }
  }
@@ -124,6 +124,12 @@ index 2b6f9e23b21e320440b34e9d7d31f14b625cccb6..4311700059b629e7fa4c46441a5dc4d3
 +  updater_event_logging_url = browser_operator_updater_branding.updater_event_logging_url
 +  browser_operator_cup_key = browser_operator_updater_branding.browser_operator_cup_key
 +  browser_operator_cup_key_version = browser_operator_updater_branding.browser_operator_cup_key_version
++
++  if (is_mac) {
++    assert(defined(browser_operator_updater_branding.mac_update_channel))
++    mac_update_channel = browser_operator_updater_branding.mac_update_channel
++    assert(mac_update_channel != "")
++  }
 +
 +  assert(browser_operator_cup_key != "")
 +  assert(browser_operator_cup_key_version > 0)

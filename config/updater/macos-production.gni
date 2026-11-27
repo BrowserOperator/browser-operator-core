@@ -1,4 +1,5 @@
 browser_operator_updater_branding = {
+  mac_update_channel = "stable"
   # Production macOS update identity and public trust roots. Private keys stay
   # outside Git.
   browser_name = "Browser Operator"

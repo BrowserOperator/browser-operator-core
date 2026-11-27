@@ -14,7 +14,7 @@ class DeferredReleaseTests(unittest.TestCase):
             root=Path(d);output=root/'release';(output/'artifacts').mkdir(parents=True)
             (output/'artifacts/candidate.dmg').write_bytes(b'fixture')
             volume=root/'mounted';app=volume/'Browser Operator.app';(app/'Contents').mkdir(parents=True)
-            (app/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleShortVersionString':'158.0.8127.37'}))
+            (app/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleShortVersionString':'158.0.8127.37','KSChannelID':'stable'}))
             (volume/'Applications').symlink_to('/Applications')
             helpers=app/'Contents/Frameworks/Browser Operator Framework.framework/Versions/Current/Helpers'
             (helpers/'BrowserOperatorUpdater.app').mkdir(parents=True)

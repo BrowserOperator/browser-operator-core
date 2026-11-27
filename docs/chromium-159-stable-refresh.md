@@ -13,15 +13,18 @@ two toolbar icons are retained. The earlier 159.0.8144.0 test series is not
 used: it lacks the latest AI update and branding patches and belongs to a
 different Chromium build branch.
 
-Patch conflicts retain upstream 159 additions and removals. Deleted sign-in,
-Gemini, password-change and settings message IDs stay deleted; the custom
-manual-update fallback ID is the sole intentional added message. New Chromium
+Patch conflicts retain upstream 159 additions and removals. Parsed XML checks
+preserve every active upstream message ID, including whitespace-formatted
+attributes that text matching misses. The custom manual-update fallback ID is
+the sole intentional added message. New Chromium
 product labels receive Browser Operator branding. Upstream copyright and
 ChromiumOS attribution are preserved.
 
 Production auto-update stays enabled with the existing application identities,
-endpoint, CUP key and CRX trust roots. The product version remains 0.7.0. Both
-architecture inputs must have identical source/frontend provenance before a
+endpoint, CUP key and CRX trust roots. The product version remains 0.7.0.
+Production plist metadata explicitly uses the `stable` update channel; test
+configurations retain their own architecture-specific channel. Both architecture
+inputs must have identical source/frontend provenance before a
 universal merge. Signing, Apple notarization, mounted-DMG verification and
 actual installed ARM64/x86_64 runtime checks remain required.
 

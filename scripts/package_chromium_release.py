@@ -213,8 +213,9 @@ def verify_release(source, output, app_name, version, team, settings, node, prov
         mounted_version = plistlib.loads((mounted_app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
         if mounted_version != version:
             raise RuntimeError(f'Mounted app version {mounted_version} differs from expected {version}')
-        from chromium_macos_arch import verify_bundle_version
+        from chromium_macos_arch import verify_bundle_version, verify_update_channel
         verify_bundle_version(mounted_app, version)
+        verify_update_channel(mounted_app, settings)
         if not (volume / 'Applications').is_symlink() or os.readlink(volume / 'Applications') != '/Applications':
             raise RuntimeError('DMG is missing the Applications installation shortcut')
         validate_mounted_app(mounted_app, team, tests / 'gatekeeper-app.txt')

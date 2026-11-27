@@ -12,7 +12,7 @@ import subprocess
 
 from chromium_git import git_environment
 from chromium_build_input import inventory, load, release_targets, require_current_build, source_state, updater_trust
-from chromium_macos_arch import verify_architectures, verify_bundle_version
+from chromium_macos_arch import verify_architectures, verify_bundle_version, verify_update_channel
 from package_chromium_release import shipping_args
 
 
@@ -45,6 +45,7 @@ def freeze(source, build, destination):
     fields = dict(line.split('=', 1) for line in (source / 'chrome/VERSION').read_text().splitlines())
     version = '.'.join(fields[key] for key in ('MAJOR', 'MINOR', 'BUILD', 'PATCH'))
     verify_bundle_version(build / 'Browser Operator.app', version)
+    verify_update_channel(build / 'Browser Operator.app', settings)
     binaries = verify_architectures(build / 'Browser Operator.app', cpu)
     verify_architectures(build / (product + '.app'), cpu)
     destination.mkdir(parents=True)

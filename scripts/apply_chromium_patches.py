@@ -9,8 +9,16 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 
 from chromium_git import git_environment
+
+
+def message_ids(path):
+    try:
+        return {node.attrib['name'] for node in ET.parse(path).iter('message')}
+    except (ET.ParseError, KeyError) as error:
+        raise RuntimeError(f'Invalid GRIT message XML: {path}') from error
 
 
 def combined_patch(chromium, patches):
@@ -25,6 +33,7 @@ def combined_patch(chromium, patches):
         shadow = Path(name)
         subprocess.run(['git', 'init', '--quiet', str(shadow)], check=True, env=environment)
         original = set()
+        upstream_messages = {}
         for relative in paths:
             source, target = chromium / relative, shadow / relative
             if source.is_symlink() or not source.resolve().is_relative_to(chromium.resolve()):
@@ -33,10 +42,16 @@ def combined_patch(chromium, patches):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 original.add(relative)
+                if source.suffix in ('.grd', '.grdp'):
+                    upstream_messages[relative] = message_ids(source)
         subprocess.run(['git', 'add', '--all', '--force'], cwd=shadow, check=True, env=environment)
         for patch in patches:
             subprocess.run(['git', 'apply', '--whitespace=nowarn', '--check', str(patch)], cwd=shadow, check=True, env=environment)
             subprocess.run(['git', 'apply', '--whitespace=nowarn', str(patch)], cwd=shadow, check=True, env=environment)
+        for relative, expected in upstream_messages.items():
+            missing = expected - message_ids(shadow / relative)
+            if missing:
+                raise RuntimeError(f'Patch series removes upstream messages in {relative}: {sorted(missing)}')
         added = [relative for relative in paths - original if (shadow / relative).exists()]
         if added:
             subprocess.run(['git', 'add', '--force', '--intent-to-add', '--', *added], cwd=shadow, check=True, env=environment)

@@ -108,7 +108,7 @@ index f63756bb090127af9bad3ea75c8c08f9380b6483..8dff046ce95a48ea4f1baaab8c888dce
    // expect them all to properly also check for kUserDataDir.
  #if !defined(BUILDING_CHROME_RENDERER)
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index f0c905764999d0ae8de9c611c858d46db0e8edb8..40621be432e8b7c4f23470147c9a59bbb245d580 100644
+index f0c905764999d0ae8de9c611c858d46db0e8edb8..dffa209136d9e3cf5dd37b56896fad29579cd409 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -1,12 +1,7 @@
@@ -2753,7 +2753,7 @@ index f0c905764999d0ae8de9c611c858d46db0e8edb8..40621be432e8b7c4f23470147c9a59bb
        <message name="IDS_CONTEXTUAL_TASKS_PINNING_LABEL_AI_MODE" desc="The label shown in the Customize Chrome settings menu and toolbar to pin Contextual Tasks to the toolbar.">
          Search AI Mode
        </message>
-@@ -3896,16 +3708,16 @@ If this page isn’t working as expected, try allowing optimization.
+@@ -3896,16 +3708,20 @@ If this page isn’t working as expected, try allowing optimization.
          Dismiss active search in this tab
        </message>
  
@@ -2769,13 +2769,18 @@ index f0c905764999d0ae8de9c611c858d46db0e8edb8..40621be432e8b7c4f23470147c9a59bb
 +      <message name="IDS_CONTEXTUAL_TASKS_MENU_SIGN_IN_TO_CHROME" desc="The 'Sign in to Browser Operator' option in the Contextual Tasks 3-dot overflow menu shown when the user is signed out.">
          Sign in to Browser Operator
        </message>
-     </messages>
+-    </messages>
++    
++<message name ="IDS_GLIC_INELIGIBLE_PROFILE_NOTICE" translateable="false" desc="This is the text of the glic ineligible profile notice.">
++        To use Gemini in Browser Operator, sign in with a different Google Account
++      </message>
++</messages>
    </release>
 -</grit>
 +</grit>
 \ No newline at end of file
 diff --git a/chrome/app/glic_strings.grdp b/chrome/app/glic_strings.grdp
-index 1a063aea8bc437d42f011ecab5da0efc623da071..864682b93015ab7de8c85f67b940b4a20ae08641 100644
+index 1a063aea8bc437d42f011ecab5da0efc623da071..29f374a06b9ba4ee11ea42704fe17c224ef54102 100644
 --- a/chrome/app/glic_strings.grdp
 +++ b/chrome/app/glic_strings.grdp
 @@ -1,5 +1,3 @@
@@ -2963,8 +2968,20 @@ index 1a063aea8bc437d42f011ecab5da0efc623da071..864682b93015ab7de8c85f67b940b4a2
    <message name="IDS_TAB_BOTTOM_SHEET_RESIZING_VIEW_TEXT" desc="Text shown while the web view is resizing." formatter_data="android_java">
      Gemini
    </message>
+@@ -754,4 +746,11 @@
+   <message name="IDS_SETTINGS_GEIC_ROW_SUBLABEL" desc="Sublabel of the Gemini Enterprise row button in Chrome settings leading to the Gemini Enterprise subpage.">
+     Ask Gemini anything as you browse, and get answers grounded in files and services across your organization, all with enterprise-level protections
+   </message>
++
++<message name ="IDS_GLIC_INELIGIBLE_PROFILE_NOTICE_ACTION_BUTTON" desc="This is the button label text for a button that opens the profile picker.">
++    Choose another profile
++  </message>
++<message name ="IDS_GLIC_INELIGIBLE_PROFILE_NOTICE_HEADER" desc="This is the headline on the Gemini ineligible profile notice.">
++    This account can't use Gemini
++  </message>
+ </grit-part>
 diff --git a/chrome/app/google_chrome_strings.grd b/chrome/app/google_chrome_strings.grd
-index fd7e0c51548504010c80984c07ef24e0a6e2981c..715ab616da98ae8518bdd1fbab78ee95c9e415b8 100644
+index fd7e0c51548504010c80984c07ef24e0a6e2981c..cdb90646299692db3692515f15369f64b66964be 100644
 --- a/chrome/app/google_chrome_strings.grd
 +++ b/chrome/app/google_chrome_strings.grd
 @@ -1,14 +1,7 @@
@@ -5200,15 +5217,22 @@ index fd7e0c51548504010c80984c07ef24e0a6e2981c..715ab616da98ae8518bdd1fbab78ee95
        <message name="IDS_ENTERPRISE_DEVICE_SIGNALS_DISCLAIMER_TITLE" desc="Title of an enterprise device signals collection disclaimer modal dialog. The dialog is shown on Chrome startup to managed Chrome users who have not previously acknowledged device signals collection.">
          Your work secured on Chrome
        </message>
-@@ -3963,4 +3768,4 @@ If this page isn’t working as expected, try allowing optimization.
+@@ -3961,6 +3766,10 @@ If this page isn’t working as expected, try allowing optimization.
+       <message name="IDS_CONTEXTUAL_TASKS_MENU_SIGN_IN_TO_CHROME" desc="The 'Sign in to Chrome' option in the Contextual Tasks 3-dot overflow menu shown when the user is signed out.">
+         Sign in to Chrome
        </message>
-     </messages>
+-    </messages>
++    
++<message name ="IDS_GLIC_INELIGIBLE_PROFILE_NOTICE" desc="This is the text of the Gemini ineligible profile notice.">
++        To use Gemini in Chrome, sign in with a different Google Account
++      </message>
++</messages>
    </release>
 -</grit>
 +</grit>
 \ No newline at end of file
 diff --git a/chrome/app/password_manager_ui_strings.grdp b/chrome/app/password_manager_ui_strings.grdp
-index e49648c05c5488197b74cad16ad0791704bb9997..e03797c0849730a9a070f362f02811649340400f 100644
+index e49648c05c5488197b74cad16ad0791704bb9997..ad19101a79d491612f040e03aec969e52bf44d75 100644
 --- a/chrome/app/password_manager_ui_strings.grdp
 +++ b/chrome/app/password_manager_ui_strings.grdp
 @@ -1,4 +1,3 @@
@@ -5371,11 +5395,30 @@ index e49648c05c5488197b74cad16ad0791704bb9997..e03797c0849730a9a070f362f0281164
      Take over task
    </message>
    <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_UNCHANGED" desc="Text inside a toast when password wasn't updated.">
-@@ -1206,4 +1191,4 @@
+@@ -1206,4 +1191,23 @@
    <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_TOAST_RETRY_BUTTON" desc="Button text inside a toast which is shown when user hasn't finished logging in. Clicking this button simply retires the check.">
      Retry
    </message>
 -</grit-part>
++
++<message name ="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_LEAK_DIALOG_DETAILS_WITHOUT_PRIVACY_NOTICE" desc="The first paragraph after the title. This paragraph explains what the feature offers. * “can” is important to convey that this is an optional feature. Google Password Manager has the ability to help. * “update your account” refers to the site or app the user is trying to access. For example, the user’s amazon.com password might have been found in a data breach. Google Password Manager can update the way the user gets into their amazon.com account. * “save it in [username@gmail.com]...”: This informs the user where their data gets saved. This is an identifier for their Google Account.">
++    Google Password Manager can update your account with a strong password and save it in <ph name="EMAIL">$1<ex>user@gmail.com</ex></ph>. <ph name="PASSWORD_CHANGE">$2<ex>More about this feature and relevant data sent to Google</ex></ph>
++  </message>
++<message name ="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_LEAK_DIALOG_DETAILS_WITH_PRIVACY_NOTICE" desc="The first paragraph after the title. This paragraph explains what the feature offers. * “can” is important to convey that this is an optional feature. Google Password Manager has the ability to help. * “update your account” refers to the site or app the user is trying to access. For example, the user’s amazon.com password might have been found in a data breach. Google Password Manager can update the way the user gets into their amazon.com account. * “saved for you in your account [username@gmail.com]...”: This informs the user where their data gets saved. This is an identifier for their Google Account.">
++    Google Password Manager can update your account with a strong password that's saved for you in your account <ph name="EMAIL">$1<ex>user@gmail.com</ex></ph>.
++  </message>
++<message name ="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_LEAK_DIALOG_LINK_WITHOUT_PRIVACY_NOTICE" desc="Link to a help-center article that explains the password change feature in more details.">
++    More about this feature and relevant data sent to Google
++  </message>
++<message name ="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_LEAK_DIALOG_LINK_WITH_PRIVACY_NOTICE" desc="Link to a help-center article that explains the feature in more detail. * “automated password change”: We were careful to choose “automated” and not “automatic” because we don’t want to give the user the impression that this will happen without their knowledge. There is an ‘automated’ process that the user initiates, but the process isn’t ‘automatic’ in the sense that it might be happening behind the scenes without the user’s knowledge">
++    More about automated password change
++  </message>
++<message name ="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_LEAK_DIALOG_TITLE" desc="The title of a dialog that interrupts the user as they're browsing. * “your” is an important keyword to suggest this message personally affects the user. * “public” does two things: 1) it provides distance between “Chrome” and “data breach”, because we don’t want users to associate the breach with Chrome (Chrome didn’t have a data leak, 2) and related, it might reassure the user to know that Chrome is using public information to establish these lists of compromised passwords">
++    Your password was found in a public data breach
++  </message>
++<message name ="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_PRIVACY_NOTICE" desc="The second paragraph that introduces the automated password change feature and informs the user about information that gets shared with Google to offer the feature. * “password pages and related info”: The feature analyses a site’s password page and other information in order to provide the service. This data might be seen by people who work for Google. Depending on the nature of the site’s password page, this could reveal information about the user that they might now want broadly shared. * “though your password is encrypted” is intended to reassure the user. While info about their experience may be seen by people who work for Google, their password can’t be seen by anyone.">
++    Content from password pages and related info is sent to Google and reviewed by humans. Your password is encrypted and never seen by anyone. <ph name="PASSWORD_CHANGE">$1<ex>More about automated password change</ex></ph>
++  </message>
 +</grit-part>
 \ No newline at end of file
 diff --git a/chrome/app/resources/BUILD.gn b/chrome/app/resources/BUILD.gn
@@ -6266,7 +6309,7 @@ index 70d6446ec525819fac9b5902bb6a7a31dfdb0a0f..46052df98acf199ef1d5ec64b81e79ca
    </message>
    <message name="IDS_SETTINGS_DICTATION_SHORTCUT_SUBLABEL" translateable="false" desc="Sublabel for the keyboard shortcut setting in Dictation settings page.">
 diff --git a/chrome/app/settings_strings.grdp b/chrome/app/settings_strings.grdp
-index 23e86efe1cab09225422a994bfa4811749bf9ef8..986edaacc8ccd8a94091a6df840b413905a11a63 100644
+index 23e86efe1cab09225422a994bfa4811749bf9ef8..cedb8b1cd99fc4b385c280deea250474536baf66 100644
 --- a/chrome/app/settings_strings.grdp
 +++ b/chrome/app/settings_strings.grdp
 @@ -1,11 +1,9 @@
@@ -6844,6 +6887,15 @@ index 23e86efe1cab09225422a994bfa4811749bf9ef8..986edaacc8ccd8a94091a6df840b4139
    <message name="IDS_SETTINGS_DICTATION_PREFERENCES_HEADER" translateable="false" desc="Header for the Preferences section in Dictation settings page.">
      Preferences
    </message>
+@@ -4371,4 +4361,8 @@
+   <message name="IDS_SETTINGS_DICTATION_SHORTCUT_CLEAR_LABEL" translateable="false" desc="Accessibility label for the clear keyboard shortcut button icon.">
+     Clear keyboard shortcut
+   </message>
++
++<message name = "IDS_SETTINGS_ADD_SITE_CONTEXT_MENU_LABEL" desc="Accessibility label which will be read by screen readers when focus enters the three dot menu. The user can use this menu to remove or edit sites in the block/allow list">
++      More options for <ph name="ORIGIN">$1<ex>example.com</ex></ph>
++    </message>
+ </grit-part>
 diff --git a/chrome/app/theme/chromium/BRANDING b/chrome/app/theme/chromium/BRANDING
 index f8363d5b294fe210ebfdd18374e95b54d6ff5c17..809dd5407cdebe7cf6ebdcb209fec9847bac32ce 100644
 --- a/chrome/app/theme/chromium/BRANDING
