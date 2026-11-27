@@ -13,6 +13,13 @@ two toolbar icons are retained. The earlier 159.0.8144.0 test series is not
 used: it lacks the latest AI update and branding patches and belongs to a
 different Chromium build branch.
 
+Chromium 159 also requires the `devtools_frontend_zip` GN target for its Blink
+archive/SBOM integration. The fork carries the pinned stock target and unchanged
+ZIP helper, plus locale metadata for remote files. Actual archive verification
+passed: all 2,951 expected fork resources, the AI bundle and all 80 remote
+locales are present; repeated generation produces identical bytes. This
+preserves the fork's frontend resources in the new archive.
+
 Patch conflicts retain upstream 159 additions and removals. Parsed XML checks
 preserve every active upstream message ID, including whitespace-formatted
 attributes that text matching misses. The custom manual-update fallback ID is
