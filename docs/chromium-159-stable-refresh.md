@@ -43,8 +43,9 @@ against the fork separately. Existing AI behavior and security backports must
 survive. A successful stock sync alone is not runtime security qualification.
 
 The release policy names this exact engine version and still requires owner
-merge of core PR114 and build-script PR1. PR114 remains stacked on integration
-PR111; retarget it to `main` after its parent merges. No candidate upload,
+merge of the final security PR115, parent core PR114 and build-script PR1.
+The stack is PR111 → PR114 → PR115; retarget each child to `main` after its
+parent merges. The signed candidate must match PR115's final merged tree. No candidate upload,
 public release or production Omaha catalog promotion is authorized before the
 matching owner merges. Windows follows completed Mac qualification through the
 same entry point, with a version-aware Windows backend and actual tests.

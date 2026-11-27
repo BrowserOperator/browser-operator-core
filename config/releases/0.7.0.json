@@ -2,12 +2,17 @@
   "product_version": "0.7.0",
   "chromium_version": "159.0.8154.13",
   "integration_repository": "BrowserOperator/browser-operator-core",
-  "required_merged_pr": 114,
+  "required_merged_pr": 115,
   "required_base_branch": "main",
   "allowed_mergers": [
     "tysonthomas9"
   ],
   "additional_merged_prs": [
+    {
+      "repository": "BrowserOperator/browser-operator-core",
+      "number": 114,
+      "base_branch": "main"
+    },
     {
       "repository": "BrowserOperator/build-script",
       "number": 1,

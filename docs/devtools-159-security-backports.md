@@ -38,3 +38,6 @@ before changing the inspected URL. Targeted ESLint passed.
 These results qualify the frontend changes before compiling 159. They do not
 substitute for testing the final signed 159 ARM64/universal apps, native updater
 or mounted DMGs. Release publication stays held for the matching owner merges.
+
+This is PR115, stacked on PR114. Its final source tree is the required release
+merge; parent PR114 and build-script PR1 must also be merged by the owner.
