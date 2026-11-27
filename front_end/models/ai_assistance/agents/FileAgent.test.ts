@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import * as Host from '../../../core/host/host.js';
+import * as Platform from '../../../core/platform/platform.js';
 import * as SDK from '../../../core/sdk/sdk.js';
 import {createUISourceCode, mockAidaClient} from '../../../testing/AiAssistanceHelpers.js';
 import {
@@ -35,6 +36,53 @@ describeWithMockConnection('FileAgent', () => {
       resourceMapping,
       targetManager,
       ignoreListManager,
+    });
+  });
+
+  describe('context provenance', () => {
+    it('keeps synthetic, mapped and opaque files isolated while preserving each file identity', async () => {
+      const file = await createUISourceCode();
+      assert.exists(file);
+      sinon.stub(file.project(), 'type').returns(Workspace.Workspace.projectTypes.Network);
+      const context = new FileContext(file);
+      const binding = Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance();
+      const scripts = sinon.stub(binding, 'scriptsForUISourceCode');
+      const script = sinon.createStubInstance(SDK.Script.Script);
+      script.sourceURL = file.url();
+      script.hasSourceURL = false;
+      scripts.returns([script]);
+      assert.strictEqual(context.getOrigin(), 'http://example.test');
+      script.hasSourceURL = true;
+      const opaque = context.getOrigin();
+      assert.notStrictEqual(opaque, 'http://example.test');
+      assert.strictEqual(new FileContext(file).getOrigin(), opaque);
+      script.hasSourceURL = false;
+      assert.strictEqual(context.getOrigin(), 'http://example.test');
+      scripts.returns([]);
+      assert.strictEqual(context.getOrigin(), opaque);
+      scripts.throws(new Error('missing binding'));
+      assert.strictEqual(context.getOrigin(), opaque);
+      const other = await createUISourceCode({url: Platform.DevToolsPath.urlString`data:text/javascript,other`});
+      assert.exists(other);
+      assert.notStrictEqual(new FileContext(other).getOrigin(), opaque);
+      assert.notStrictEqual(new FileContext(other).getOrigin(), 'null');
+    });
+
+    it('never trusts a source map or mismatched script origin', async () => {
+      const file = await createUISourceCode();
+      assert.exists(file);
+      sinon.stub(file.project(), 'type').returns(Workspace.Workspace.projectTypes.Network);
+      const context = new FileContext(file);
+      const script = sinon.createStubInstance(SDK.Script.Script);
+      script.sourceURL = 'https://attacker.test/script.js' as typeof script.sourceURL;
+      script.hasSourceURL = false;
+      sinon.stub(Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance(), 'scriptsForUISourceCode')
+          .returns([script]);
+      const opaque = context.getOrigin();
+      assert.notStrictEqual(opaque, 'http://example.test');
+      script.sourceURL = file.url();
+      sinon.stub(file.contentType(), 'isFromSourceMap').returns(true);
+      assert.strictEqual(context.getOrigin(), opaque);
     });
   });
 

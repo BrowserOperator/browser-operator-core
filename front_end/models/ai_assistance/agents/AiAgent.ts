@@ -178,10 +178,8 @@ export abstract class ConversationContext<T> {
     if (!agentOrigin) {
       return true;
     }
-    // Currently does not handle opaque origins because they
-    // are not available to DevTools, instead checks
-    // that serialization of the origin is the same
-    // https://html.spec.whatwg.org/#ascii-serialisation-of-an-origin.
+    // File contexts use a unique identity when provenance cannot establish a
+    // web origin. Equal serialized "null" origins must not authorize a switch.
     return this.getOrigin() === agentOrigin;
   }
 
@@ -489,19 +487,33 @@ export abstract class AiAgent<T> {
         signal?: AbortSignal,
       },
           multimodalInput?: MultimodalInput): AsyncGenerator<ResponseData, void, void> {
-    await options.selected?.refresh();
-
-    if (options.selected) {
-      // First context set on the agent determines its origin from now on.
-      if (this.#origin === undefined) {
-        this.#origin = options.selected.getOrigin();
-      }
-      if (options.selected.isOriginAllowed(this.#origin)) {
-        this.context = options.selected;
-      }
+    const selected = options.selected;
+    const selectedOrigin = selected?.getOrigin();
+    const contextAllowed = (): boolean => !selected ||
+        (selected.getOrigin() === selectedOrigin && selected.isOriginAllowed(this.#origin));
+    if (!contextAllowed()) {
+      yield this.#createErrorResponse(ErrorType.BLOCK);
+      return;
+    }
+    await selected?.refresh();
+    if (!contextAllowed()) {
+      yield this.#createErrorResponse(ErrorType.BLOCK);
+      return;
     }
 
-    const enhancedQuery = await this.enhanceQuery(initialQuery, options.selected, multimodalInput?.type);
+    if (selected) {
+      // First context set on the agent determines its origin from now on.
+      if (this.#origin === undefined) {
+        this.#origin = selectedOrigin;
+      }
+      this.context = selected;
+    }
+
+    const enhancedQuery = await this.enhanceQuery(initialQuery, selected, multimodalInput?.type);
+    if (!contextAllowed()) {
+      yield this.#createErrorResponse(ErrorType.BLOCK);
+      return;
+    }
     Host.userMetrics.freestylerQueryLength(enhancedQuery.length);
 
     let query: Host.AidaClient.Part|Host.AidaClient.Part[];
@@ -516,12 +528,20 @@ export abstract class AiAgent<T> {
       imageId: multimodalInput?.id,
     };
 
-    yield* this.handleContextDetails(options.selected);
+    if (!contextAllowed()) {
+      yield this.#createErrorResponse(ErrorType.BLOCK);
+      return;
+    }
+    yield* this.handleContextDetails(selected);
 
     for (let i = 0; i < MAX_STEPS; i++) {
       yield {
         type: ResponseType.QUERYING,
       };
+      if (!contextAllowed()) {
+        yield this.#createErrorResponse(ErrorType.BLOCK);
+        return;
+      }
 
       let rpcId: Host.AidaClient.RpcGlobalId|undefined;
       let textResponse = '';

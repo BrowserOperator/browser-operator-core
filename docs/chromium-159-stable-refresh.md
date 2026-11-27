@@ -13,6 +13,13 @@ two toolbar icons are retained. The earlier 159.0.8144.0 test series is not
 used: it lacks the latest AI update and branding patches and belongs to a
 different Chromium build branch.
 
+Chromium 159 also requires the `devtools_frontend_zip` GN target for its Blink
+archive/SBOM integration. The fork carries the pinned stock target and unchanged
+ZIP helper, plus locale metadata for remote files. Actual archive verification
+passed: all 2,951 expected fork resources, the AI bundle and all 80 remote
+locales are present; repeated generation produces identical bytes. This
+preserves the fork's frontend resources in the new archive.
+
 Patch conflicts retain upstream 159 additions and removals. Parsed XML checks
 preserve every active upstream message ID, including whitespace-formatted
 attributes that text matching misses. The custom manual-update fallback ID is
@@ -43,8 +50,9 @@ against the fork separately. Existing AI behavior and security backports must
 survive. A successful stock sync alone is not runtime security qualification.
 
 The release policy names this exact engine version and still requires owner
-merge of core PR114 and build-script PR1. PR114 remains stacked on integration
-PR111; retarget it to `main` after its parent merges. No candidate upload,
+merge of the final security PR115, parent core PR114 and build-script PR1.
+The stack is PR111 → PR114 → PR115; retarget each child to `main` after its
+parent merges. The signed candidate must match PR115's final merged tree. No candidate upload,
 public release or production Omaha catalog promotion is authorized before the
 matching owner merges. Windows follows completed Mac qualification through the
 same entry point, with a version-aware Windows backend and actual tests.

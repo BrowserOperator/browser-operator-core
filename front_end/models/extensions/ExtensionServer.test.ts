@@ -14,7 +14,7 @@ import {
   getExtensionOrigin,
 } from '../../testing/ExtensionHelpers.js';
 import {MockProtocolBackend} from '../../testing/MockScopeChain.js';
-import {addChildFrame, FRAME_URL, getMainFrame} from '../../testing/ResourceTreeHelpers.js';
+import {addChildFrame, FRAME_URL, getInitializedResourceTreeModel, getMainFrame} from '../../testing/ResourceTreeHelpers.js';
 import {encodeSourceMap} from '../../testing/SourceMapEncoder.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
@@ -484,6 +484,77 @@ const hostsPolicy = {
   runtimeAllowedHosts: [allowedUrl],
   runtimeBlockedHosts: [allowedUrl, blockedUrl],
 };
+
+describeWithDevtoolsExtension('openResource hosts policy', {
+  hostsPolicy: {runtimeAllowedHosts: [FRAME_URL], runtimeBlockedHosts: [blockedUrl]},
+}, context => {
+  expectConsoleLogs({error: ['Extension server error: Operation failed: Permission denied']});
+  const blockedResource = urlString`http://web.dev/script.js`;
+  const allowedResource = urlString`http://example.com/script.js`;
+  const permissionDenied = {
+    code: 'E_FAILED',
+    description: 'Operation failed: %s',
+    details: ['Permission denied'],
+    isError: true,
+  };
+
+  beforeEach(() => {
+    createTarget({type: SDK.Target.Type.FRAME}).setInspectedURL(FRAME_URL);
+    assert.exists(context.chrome.devtools);
+  });
+
+  async function createSourceURLScript(url: Platform.DevToolsPath.UrlString, targetUrl: Platform.DevToolsPath.UrlString) {
+    const target = createTarget({id: 'script-target' as Protocol.Target.TargetID});
+    await getInitializedResourceTreeModel(target);
+    target.setInspectedURL(targetUrl);
+    const script = sinon.createStubInstance(SDK.Script.Script, {target, contentURL: url});
+    script.hasSourceURL = true;
+    const project = new Bindings.ContentProviderBasedProject.ContentProviderBasedProject(
+        Workspace.Workspace.WorkspaceImpl.instance(), 'open-resource-test', Workspace.Workspace.projectTypes.Network,
+        '', false);
+    const source = new Workspace.UISourceCode.UISourceCode(project, url, Common.ResourceType.resourceTypes.Script);
+    sinon.stub(Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding, 'instance')
+        .returns(sinon.createStubInstance(
+            Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding, {scriptsForUISourceCode: [script]}));
+    sinon.stub(Workspace.Workspace.WorkspaceImpl.instance(), 'uiSourceCodeForURL').withArgs(url).returns(source);
+    return source;
+  }
+
+  async function openResource(url: Platform.DevToolsPath.UrlString): Promise<unknown> {
+    return await new Promise<unknown>(resolve => {
+      context.chrome.devtools!.panels.openResource(url, 0, undefined, (response?: unknown) => resolve(response));
+    });
+  }
+
+  it('denies blocked URLs before resource or network lookup', async () => {
+    sinon.stub(Workspace.Workspace.WorkspaceImpl.instance(), 'uiSourceCodeForURL').returns(null);
+    const resourceLookup = sinon.stub(SDK.ResourceTreeModel.ResourceTreeModel, 'resourceForURL');
+    const networkLookup = sinon.stub(Logs.NetworkLog.NetworkLog.instance(), 'requestForURL').returns(null);
+    const reveal = sinon.stub(Common.Revealer.RevealerRegistry.instance(), 'reveal').resolves();
+    for (const resource of [sinon.createStubInstance(SDK.Resource.Resource), null]) {
+      resourceLookup.returns(resource);
+      assert.deepEqual(await openResource(blockedResource), permissionDenied);
+    }
+    sinon.assert.notCalled(resourceLookup);
+    sinon.assert.notCalled(networkLookup);
+    sinon.assert.notCalled(reveal);
+  });
+
+  it('opens a custom-scheme sourceURL script on an allowed target', async () => {
+    const url = urlString`webpack://app/script.js`;
+    const source = await createSourceURLScript(url, FRAME_URL);
+    const reveal = sinon.stub(Common.Revealer.RevealerRegistry.instance(), 'reveal').resolves();
+    assert.deepEqual(await openResource(url), {code: 'OK', description: 'OK', details: []});
+    sinon.assert.calledOnceWithExactly(reveal, source.uiLocation(0, 0), false);
+  });
+
+  it('denies an allowed-looking sourceURL script on a blocked target', async () => {
+    await createSourceURLScript(allowedResource, blockedResource);
+    const reveal = sinon.stub(Common.Revealer.RevealerRegistry.instance(), 'reveal').resolves();
+    assert.deepEqual(await openResource(allowedResource), permissionDenied);
+    sinon.assert.notCalled(reveal);
+  });
+});
 
 function waitForFunction<T>(fn: () => T): Promise<T> {
   return new Promise<T>(r => {

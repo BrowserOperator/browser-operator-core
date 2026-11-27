@@ -384,6 +384,68 @@ describeWithEnvironment('AiAgent', () => {
       }
       return new TestContext();
     }
+
+    it('blocks a cross-origin selection before refreshing or serializing it', async () => {
+      const client = mockAidaClient([[{explanation: 'answer'}]]);
+      const agent = new AiAgentMock({aidaClient: client});
+      await Array.fromAsync(agent.run('first', {selected: getTestContext('https://a.test')}));
+      const selected = getTestContext('https://b.test');
+      const refresh = sinon.spy(selected, 'refresh');
+      const enhance = sinon.spy(agent, 'enhanceQuery');
+      const details = sinon.spy(agent, 'handleContextDetails');
+      assert.deepEqual(await Array.fromAsync(agent.run('second', {selected})), [
+        {type: ResponseType.ERROR, error: ErrorType.BLOCK},
+      ]);
+      sinon.assert.notCalled(refresh);
+      sinon.assert.notCalled(enhance);
+      sinon.assert.notCalled(details);
+      sinon.assert.calledOnce(client.doConversation as sinon.SinonStub);
+    });
+
+    it('blocks an origin change during the first context refresh', async () => {
+      const client = mockAidaClient();
+      const agent = new AiAgentMock({aidaClient: client});
+      const selected = getTestContext('https://a.test');
+      let origin = 'https://a.test';
+      sinon.stub(selected, 'getOrigin').callsFake(() => origin);
+      sinon.stub(selected, 'refresh').callsFake(async () => { origin = 'https://b.test'; });
+      const enhance = sinon.spy(agent, 'enhanceQuery');
+      assert.deepEqual(await Array.fromAsync(agent.run('question', {selected})), [
+        {type: ResponseType.ERROR, error: ErrorType.BLOCK},
+      ]);
+      sinon.assert.notCalled(enhance);
+      sinon.assert.notCalled(client.doConversation as sinon.SinonStub);
+    });
+
+    it('does not send a query if provenance changes during enhancement', async () => {
+      const client = mockAidaClient();
+      const agent = new AiAgentMock({aidaClient: client});
+      const selected = getTestContext('https://a.test');
+      let origin = 'https://a.test';
+      sinon.stub(selected, 'getOrigin').callsFake(() => origin);
+      sinon.stub(agent, 'enhanceQuery').callsFake(async () => {
+        origin = 'https://b.test';
+        return 'private file content';
+      });
+      assert.deepEqual(await Array.fromAsync(agent.run('question', {selected})), [
+        {type: ResponseType.ERROR, error: ErrorType.BLOCK},
+      ]);
+      sinon.assert.notCalled(client.doConversation as sinon.SinonStub);
+    });
+
+    it('rechecks provenance when the consumer resumes a yielded query', async () => {
+      const client = mockAidaClient();
+      const agent = new AiAgentMock({aidaClient: client});
+      const selected = getTestContext('https://a.test');
+      let origin = 'https://a.test';
+      sinon.stub(selected, 'getOrigin').callsFake(() => origin);
+      const run = agent.run('question', {selected});
+      assert.strictEqual((await run.next()).value?.type, ResponseType.USER_QUERY);
+      origin = 'https://b.test';
+      assert.deepEqual((await run.next()).value, {type: ResponseType.ERROR, error: ErrorType.BLOCK});
+      sinon.assert.notCalled(client.doConversation as sinon.SinonStub);
+    });
+
     it('checks context origins', () => {
       const tests = [
         {
