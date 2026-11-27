@@ -5,7 +5,8 @@
 import * as Host from '../../../core/host/host.js';
 import * as i18n from '../../../core/i18n/i18n.js';
 import * as Root from '../../../core/root/root.js';
-import type * as Workspace from '../../workspace/workspace.js';
+import * as Bindings from '../../bindings/bindings.js';
+import * as Workspace from '../../workspace/workspace.js';
 import {FileFormatter} from '../data_formatters/FileFormatter.js';
 
 import {
@@ -74,6 +75,10 @@ const UIStringsNotTranslate = {
 
 const lockedString = i18n.i18n.lockedString;
 
+// Opaque contexts must not share the URL API's serialized "null" origin.
+const opaqueFileOrigins = new WeakMap<Workspace.UISourceCode.UISourceCode, string>();
+let nextOpaqueFileOrigin = 0;
+
 export class FileContext extends ConversationContext<Workspace.UISourceCode.UISourceCode> {
   #file: Workspace.UISourceCode.UISourceCode;
 
@@ -83,7 +88,32 @@ export class FileContext extends ConversationContext<Workspace.UISourceCode.UISo
   }
 
   override getOrigin(): string {
-    return new URL(this.#file.url()).origin;
+    // Recompute trust on every use: a rename, new script binding or refreshed
+    // source map can change provenance while this context object stays alive.
+    try {
+      const url = new URL(this.#file.url());
+      const type = this.#file.contentType();
+      if ((url.protocol === 'https:' || url.protocol === 'http:') &&
+          this.#file.project().type() === Workspace.Workspace.projectTypes.Network && !type.isFromSourceMap()) {
+        if (!type.isScript()) {
+          return url.origin;
+        }
+        const scripts = Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance()
+                            .scriptsForUISourceCode(this.#file);
+        if (scripts.length && scripts.every(script =>
+            !script.hasSourceURL && new URL(script.sourceURL).origin === url.origin)) {
+          return url.origin;
+        }
+      }
+    } catch {
+      // Missing bindings and malformed/unverifiable URLs are opaque too.
+    }
+    let origin = opaqueFileOrigins.get(this.#file);
+    if (!origin) {
+      origin = `opaque-file:${++nextOpaqueFileOrigin}:${crypto.randomUUID()}`;
+      opaqueFileOrigins.set(this.#file, origin);
+    }
+    return origin;
   }
 
   override getItem(): Workspace.UISourceCode.UISourceCode {
