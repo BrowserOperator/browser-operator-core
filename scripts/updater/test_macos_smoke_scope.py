@@ -95,3 +95,28 @@ class ScopeTests(unittest.TestCase):
                     pass
             self.assertEqual(restore.call_count, 2)
             self.assertIn('network unavailable', (scope.evidence / 'native-updater-baseline-restored.json').read_text())
+
+
+class RetiredCurrentLinkTests(unittest.TestCase):
+    def test_owned_dangling_current_link_is_retired_before_evidence_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();evidence=root/'evidence';evidence.mkdir()
+            settings={'browser_operator_updater_config':'"//config/updater/macos-production.gni"'}
+            scope=UpdaterSmokeScope(settings,'TEAM',evidence,home=root/'home')
+            scope.controller.mkdir(parents=True)
+            (scope.controller/'Current').symlink_to('158.0.8127.37')
+            with patch.object(scope,'agents',return_value=[]):scope.__exit__(None,None,None)
+            self.assertFalse(any(p.is_symlink() for p in evidence.rglob('*')))
+            self.assertTrue((evidence/'native-updater-retired-current.json').exists())
+            self.assertTrue((evidence/'native-updater-retired-controller').is_dir())
+
+    def test_outside_dangling_link_is_preserved_and_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();evidence=root/'evidence';evidence.mkdir()
+            settings={'browser_operator_updater_config':'"//config/updater/macos-production.gni"'}
+            scope=UpdaterSmokeScope(settings,'TEAM',evidence,home=root/'home')
+            scope.controller.mkdir(parents=True)
+            (scope.controller/'Current').symlink_to(root/'outside')
+            with patch.object(scope,'agents',return_value=[]):
+                with self.assertRaisesRegex(RuntimeError,'escapes'):scope.__exit__(None,None,None)
+            self.assertTrue((scope.controller/'Current').is_symlink())

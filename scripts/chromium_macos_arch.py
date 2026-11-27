@@ -62,3 +62,11 @@ def verify_architectures(app, architecture):
     if not binaries:
         raise RuntimeError(f'No Mach-O code found in {app}')
     return binaries
+
+
+def verify_update_channel(app, settings):
+    if (settings.get('enable_updater') == 'true' and
+            settings.get('browser_operator_updater_config', '').strip('"').endswith('/macos-production.gni')):
+        info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        if info.get('KSChannelID') != 'stable':
+            raise RuntimeError('Production browser must use the stable update channel')

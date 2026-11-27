@@ -57,7 +57,7 @@ def merge(source, arm, intel, output):
                 continue
             # These generated tools execute on the ARM signing Mac and never
             # ship inside the browser. All other signing resources must match.
-            if name != 'Browser Operator Packaging' or path not in ('dmg_tool', 'hfs_tool'):
+            if name != 'Browser Operator Packaging' or path not in ('dmg_tool', 'hfs_tool', 'tag'):
                 raise RuntimeError(f'Architecture-independent packaging differs: {name}/{path}')
             for directory, expected in ((arm, 'arm64'), (intel, 'x86_64')):
                 tool = directory / name / path

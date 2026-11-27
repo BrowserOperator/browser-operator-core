@@ -143,6 +143,16 @@ class UpdaterSmokeScope:
                                stdout=log, stderr=subprocess.STDOUT)
         if current.exists() or self.agents():
             raise RuntimeError('Smoke updater did not retire cleanly; preserve its diagnostics')
+        # Chromium may remove the version directory but leave its now-dangling
+        # Current link. Retire only this test-owned in-namespace link, recording
+        # its target without following it into exported verification evidence.
+        if current.is_symlink():
+            if not current.resolve().is_relative_to(self.controller.resolve()):
+                raise RuntimeError('Retired updater link escapes its test-owned namespace')
+            target = str(current.readlink())
+            current.unlink()
+            (self.evidence / 'native-updater-retired-current.json').write_text(
+                json.dumps({'created_by_test': True, 'target': target, 'retired': True}) + '\n')
         # Chromium keeps its log after uninstall. Preserve all owned remnants in
         # the private verification evidence, leaving the next test a clean scope.
         if self.controller.exists():
