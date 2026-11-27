@@ -53,7 +53,7 @@ class UniversalMergeTests(unittest.TestCase):
             for name in ('Browser Operator Packaging', 'Updater Packaging'):
                 (directory / name).mkdir()
                 (directory / name / 'sign.py').write_text('# identical signing resources\n')
-            for name in ('dmg_tool', 'hfs_tool'):
+            for name in ('dmg_tool', 'hfs_tool', 'tag'):
                 (directory / 'Browser Operator Packaging' / name).write_bytes(binary)
             for name in ('BrowserOperatorUpdaterUtil', 'crx3_build_action', 'browser_operator_update_verify'):
                 (directory / name).write_bytes(binary)
@@ -75,7 +75,9 @@ class UniversalMergeTests(unittest.TestCase):
             output = root / 'universal'
             merge(SOURCE, arm, intel, output)
             self.assertEqual(load(output)['build_settings']['target_cpu'], '"universal"')
-            self.assertEqual(len(load(output)['universal_composition']['signing_host_tools']), 2)
+            self.assertEqual(len(load(output)['universal_composition']['signing_host_tools']), 3)
+            self.assertEqual((output / 'Browser Operator Packaging/tag').read_bytes(),
+                             (arm / 'Browser Operator Packaging/tag').read_bytes())
             for name in ('Browser Operator.app', 'BrowserOperatorUpdater.app'):
                 self.assertEqual(len(verify_architectures(output / name, 'universal')), 1)
                 self.assertTrue((output / name / 'snapshot.arm64.bin').exists())
@@ -89,6 +91,32 @@ class UniversalMergeTests(unittest.TestCase):
             arm, intel = self.inputs(root)
             (intel / 'Browser Operator.app/shared.txt').write_text('changed after freezing')
             with self.assertRaises(RuntimeError):
+                merge(SOURCE, arm, intel, root / 'universal')
+
+    def test_tag_tool_architectures_cannot_be_swapped(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            arm, intel = self.inputs(root)
+            for directory, wrong_arch in ((arm, 'x86_64'), (intel, 'arm64')):
+                (directory / 'Browser Operator Packaging/tag').write_bytes((self.root / (wrong_arch + '.o')).read_bytes())
+                manifest = directory / 'frozen-input.json'
+                metadata = json.loads(manifest.read_text())
+                metadata['input_files'] = inventory(directory)
+                manifest.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(RuntimeError, 'signing host tool architecture'):
+                merge(SOURCE, arm, intel, root / 'universal')
+
+    def test_unlisted_packaging_tool_difference_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            arm, intel = self.inputs(root)
+            for directory, arch in ((arm, 'arm64'), (intel, 'x86_64')):
+                (directory / 'Browser Operator Packaging/unlisted_tool').write_bytes((self.root / (arch + '.o')).read_bytes())
+                manifest = directory / 'frozen-input.json'
+                metadata = json.loads(manifest.read_text())
+                metadata['input_files'] = inventory(directory)
+                manifest.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(RuntimeError, 'Architecture-independent packaging differs'):
                 merge(SOURCE, arm, intel, root / 'universal')
 
     def test_stale_framework_version_is_rejected(self):
