@@ -1,5 +1,8 @@
 # Chromium158 stable refresh
 
+The owner subsequently selected [159.0.8154.13](chromium-159-stable-refresh.md).
+This document retains the previous target's preparation and preservation notes.
+
 Target158.0.8127.37, upstream commit b8c2be851f62f6a394ec57955d7f31335d7cb6d4.
 The previous158.0.8127.18 ARM64/universal R2 DMGs and frozen inputs are preserved.
 Builds use BrowserOperator/build-script's reusable entry point and the existing

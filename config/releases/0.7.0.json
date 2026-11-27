@@ -1,6 +1,6 @@
 {
   "product_version": "0.7.0",
-  "chromium_version": "158.0.8127.37",
+  "chromium_version": "159.0.8154.13",
   "integration_repository": "BrowserOperator/browser-operator-core",
   "required_merged_pr": 114,
   "required_base_branch": "main",
