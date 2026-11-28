@@ -7,6 +7,7 @@ import shlex
 import time
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 
 
@@ -65,21 +66,32 @@ class UpdaterSmokeScope:
         if not current.is_symlink() or not current.resolve().is_relative_to(self.controller.resolve()):
             raise RuntimeError('Expected an existing user updater within its own namespace')
         helper = current / (self.product + '.app')
+        if (current.resolve().parent != self.controller.resolve() or
+                helper.resolve().parent != current.resolve()):
+            raise RuntimeError('Baseline updater path escapes its version directory')
         helper_info = plistlib.loads((helper / 'Contents/Info.plist').read_bytes())
         if helper_info.get('CFBundleIdentifier') != self.appid:
             raise RuntimeError('Unexpected baseline updater identity')
+        helper_version = helper_info.get('CFBundleShortVersionString', '')
+        if (not re.fullmatch(r'\d+\.\d+\.\d+\.\d+', helper_version) or
+                any(int(part) > 0xffffffff for part in helper_version.split('.')) or
+                current.resolve().name != helper_version):
+            raise RuntimeError('Baseline updater version differs from its installed directory')
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(helper)], check=True)
         helper_details = subprocess.run(['codesign', '-dv', '--verbose=4', str(helper)], capture_output=True, text=True, check=True).stderr
         if f'TeamIdentifier={self.team}' not in helper_details:
             raise RuntimeError('Baseline updater is from another signing team')
         registration = json.loads((self.controller / 'prefs.json').read_text())['updateclientdata']['apps']['com.browseroperator.browseroperator']
         if (Path(registration['ecp']).resolve() != app or
-                registration['pv'] != info['CFBundleShortVersionString'] or
-                helper_info['CFBundleShortVersionString'] != info['CFBundleShortVersionString']):
-            raise RuntimeError('Baseline app, updater and registration must have the same version and path')
+                registration['pv'] != info['CFBundleShortVersionString']):
+            raise RuntimeError('Baseline app and browser registration must have the same version and path')
         with (helper / 'Contents/MacOS' / self.product).open('rb') as stream:
             helper_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
-        return {'application': str(app), 'version': registration['pv'], 'helper_sha256': helper_hash,
+        # Browser and updater are independent native products. An older active
+        # helper can legitimately serve this browser while a new helper awaits
+        # self-qualification. Preserve that exact helper, never force promotion.
+        return {'application': str(app), 'version': registration['pv'],
+                'helper_version': helper_version, 'helper_sha256': helper_hash,
                 'current_target': str(current.readlink()),
                 'launch_agents': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in self.agents()}}
 
