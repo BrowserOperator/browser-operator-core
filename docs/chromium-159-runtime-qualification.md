@@ -14,12 +14,18 @@ must be restored through the permanent browser's native API after each test,
 including on failure. The test never edits live preferences, forces helper
 activation or uninstalls an existing helper.
 
-For the visible native toolbar, open a blank Guest window in the verified app
-and execute `scripts/verify_chromium_toolbar.cua.js` through the Codex computer-use
-tool. Set `releaseToolbarOptions` with the verified app path, engine version and
+For the visible native toolbar, run `scripts/launch_chromium_toolbar_check.py`
+with `--release`, `--frozen-input`, `--installed-updater-baseline` and a new
+`--output` directory. It verifies and installs the exact DMG copy, opens a Guest
+window with a disposable profile and prints its app path. Then execute
+`scripts/verify_chromium_toolbar.cua.js` through the Codex computer-use tool.
+Set `releaseToolbarOptions` with that verified app path, engine version and
 product version. The script refreshes accessibility selectors after each action,
 checks open/close/reopen and opens native About from the 0.7.0 banner. Run it for
 each DMG's installed app; retain its output with the CLI verification evidence.
+Quit the owned Guest app when finished. The launcher then restores the original
+native registration and verifies the helper snapshot. Launcher success alone
+does not assert the toolbar actions passed; retain both reports.
 
 This qualifies browser runtime and a real native update check. It does not prove
 updater-service self-replacement: a staged 159 helper still requires the real
