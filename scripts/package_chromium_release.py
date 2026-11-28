@@ -391,7 +391,7 @@ def main():
         args.installed_updater_baseline = args.installed_updater_baseline.resolve()
         baseline_version = plistlib.loads((args.installed_updater_baseline / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
         if baseline_version != plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']:
-            raise RuntimeError('Baseline reuse requires exactly the same browser/updater version; use a dedicated clean user for version upgrades')
+            raise RuntimeError('Baseline reuse requires exactly the same browser version; use a dedicated clean user for browser version upgrades')
     if args.updater_enabled and not args.defer_runtime_verification:
         from updater.macos_smoke_scope import UpdaterSmokeScope
         UpdaterSmokeScope(settings, team, output, baseline_app=args.installed_updater_baseline).require_clean()
